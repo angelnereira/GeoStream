@@ -153,7 +153,7 @@ Reglas:
 | NFR-COMPAT-001 | MUST | F5 | Matriz de compatibilidad | — | pendiente |
 | NFR-COMPAT-002 | MUST | F5 | Compatibilidad de contratos | — | pendiente |
 | NFR-MAINT-001 | MUST | F0 | Versionado | docs/templates/RELEASE_TEMPLATE.md, tools (geostream-tools changelog) | cumplido |
-| NFR-MAINT-002 | MUST | F1 | Cobertura de pruebas | — | pendiente |
+| NFR-MAINT-002 | MUST | F1 | Cobertura de pruebas | crates/gs-domain/tests/property_tests.rs, llvm-cov 90.76% | cumplido |
 | NFR-OBS-001 | MUST | F2 | Observabilidad estructurada | — | pendiente |
 | NFR-OBS-002 | MUST | F2 | Cardinalidad acotada | — | pendiente |
 | NFR-COST-001 | MUST | F6 | Operación sin proveedores comerciales | — | pendiente |

@@ -389,3 +389,76 @@ impl<'de> serde::Deserialize<'de> for InstallationId {
         Self::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_id_methods_and_errors() {
+        let tenant_id = TenantId::new();
+        let u = *tenant_id.as_uuid();
+        assert_eq!(tenant_id.as_bytes().len(), 16);
+        assert_eq!(TenantId::from_uuid(u), tenant_id);
+        assert_eq!(tenant_id.into_uuid(), u);
+        assert_eq!(TenantId::default().as_bytes().len(), 16);
+
+        // IdParseError checks
+        assert_eq!(TenantId::from_str(""), Err(IdParseError::Empty));
+        assert!(matches!(
+            TenantId::from_str("wrong_018f2bb8c49e7b168661df277f329971"),
+            Err(IdParseError::InvalidPrefix { .. })
+        ));
+        assert_eq!(
+            TenantId::from_str("ten-018f2bb8c49e7b168661df277f329971"),
+            Err(IdParseError::InvalidSeparator)
+        );
+        assert_eq!(
+            TenantId::from_str("ten_too_short"),
+            Err(IdParseError::InvalidLength(9))
+        );
+        assert_eq!(
+            TenantId::from_str("ten_018f2bb8c49e7b168661df277f32997Z"),
+            Err(IdParseError::InvalidCharacters)
+        );
+
+        // ExternalSubjectId errors
+        assert_eq!(
+            ExternalSubjectId::new(""),
+            Err(ExternalSubjectIdError::Empty)
+        );
+        assert_eq!(
+            ExternalSubjectId::new("a".repeat(129)),
+            Err(ExternalSubjectIdError::TooLong(129))
+        );
+        assert_eq!(
+            ExternalSubjectId::new("user@example"),
+            Err(ExternalSubjectIdError::InvalidCharacter('@'))
+        );
+        let ext = ExternalSubjectId::new("valid-user.123:foo_bar").unwrap();
+        assert_eq!(ext.as_str(), "valid-user.123:foo_bar");
+        assert_eq!(ext.to_string(), "valid-user.123:foo_bar");
+
+        // InstallationId errors
+        assert_eq!(
+            InstallationId::from_str(""),
+            Err(InstallationIdError::Empty)
+        );
+        assert_eq!(
+            InstallationId::from_str("abc"),
+            Err(InstallationIdError::InvalidFormat)
+        );
+        assert_eq!(
+            InstallationId::from_str("550E8400-E29B-41D4-A716-446655440000"),
+            Err(InstallationIdError::NotLowercase)
+        );
+        assert!(matches!(
+            InstallationId::from_str("zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz"),
+            Err(InstallationIdError::InvalidUuid(_))
+        ));
+
+        let valid_inst = InstallationId::new();
+        assert_eq!(valid_inst.to_string().len(), 36);
+        assert_eq!(*valid_inst.as_uuid(), valid_inst.into_uuid());
+    }
+}

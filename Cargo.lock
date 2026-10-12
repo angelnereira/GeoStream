@@ -1650,6 +1650,7 @@ version = "0.0.0"
 name = "gs-domain"
 version = "0.0.0"
 dependencies = [
+ "proptest",
  "rand 0.10.3",
  "serde",
  "serde_json",

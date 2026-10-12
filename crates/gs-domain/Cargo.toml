@@ -16,3 +16,4 @@ time = { workspace = true, features = ["parsing", "formatting", "serde"] }
 uuid.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true

@@ -515,3 +515,78 @@ pub fn validate_readmission(
         Some(MemberStatusKind::Left) | None => Ok(()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_enums_display_and_parse() {
+        assert_eq!(MemberRole::Owner.to_string(), "OWNER");
+        assert_eq!(MemberRole::Member.to_string(), "MEMBER");
+        assert_eq!(MemberRole::from_str("OWNER").unwrap(), MemberRole::Owner);
+        assert_eq!(MemberRole::from_str("MEMBER").unwrap(), MemberRole::Member);
+        assert!(MemberRole::from_str("INVALID").is_err());
+
+        assert_eq!(MemberStatusKind::Active.to_string(), "ACTIVE");
+        assert_eq!(MemberStatusKind::Left.to_string(), "LEFT");
+        assert_eq!(MemberStatusKind::Revoked.to_string(), "REVOKED");
+
+        assert_eq!(Connectivity::default(), Connectivity::Unspecified);
+    }
+
+    #[test]
+    fn test_membership_lifecycle_and_error_paths() {
+        let now = OffsetDateTime::now_utc();
+        let mut member = Membership::new_member(
+            MemberId::new(),
+            SessionId::new(),
+            TenantId::new(),
+            SubjectId::new(),
+            Capabilities::read_only(),
+            JoinedVia::Invitation(InvitationId::new()),
+            now,
+        );
+
+        // start_sharing fails without publish capability
+        let dev = DeviceId::new();
+        assert_eq!(
+            member.start_sharing(member.subject_id, dev, now),
+            Err(MembershipError::MissingPublishCapability)
+        );
+
+        // start_sharing fails if caller != subject_id
+        member.capabilities = Capabilities::all();
+        let other_sub = SubjectId::new();
+        assert_eq!(
+            member.start_sharing(other_sub, dev, now),
+            Err(MembershipError::OnlySelfCanActivateSharing)
+        );
+
+        // Leave session
+        assert!(member.leave(now).is_ok());
+        assert_eq!(member.status, MemberStatusKind::Left);
+
+        // Leave or revoke on inactive returns NotActiveMember
+        assert_eq!(member.leave(now), Err(MembershipError::NotActiveMember));
+        assert_eq!(member.revoke(now), Err(MembershipError::NotActiveMember));
+        assert_eq!(
+            member.start_sharing(member.subject_id, dev, now),
+            Err(MembershipError::NotActiveMember)
+        );
+
+        // Application caller in update_capabilities
+        let mut member2 = Membership::new_member(
+            MemberId::new(),
+            SessionId::new(),
+            TenantId::new(),
+            SubjectId::new(),
+            Capabilities::read_only(),
+            JoinedVia::Creator,
+            now,
+        );
+        let res = member2.update_capabilities(true, None, None, Capabilities::all(), now);
+        assert!(res.is_ok());
+        assert_eq!(member2.capabilities, Capabilities::all());
+    }
+}

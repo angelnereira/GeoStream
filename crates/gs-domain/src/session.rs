@@ -332,3 +332,249 @@ impl Session {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_mode_and_status_display_and_parse() {
+        assert_eq!(SessionMode::OneToOne.to_string(), "ONE_TO_ONE");
+        assert_eq!(SessionMode::OneToMany.to_string(), "ONE_TO_MANY");
+        assert_eq!(SessionMode::ManyToMany.to_string(), "MANY_TO_MANY");
+
+        assert_eq!(
+            SessionMode::from_str("ONE_TO_ONE").unwrap(),
+            SessionMode::OneToOne
+        );
+        assert_eq!(
+            SessionMode::from_str("SESSION_MODE_ONE_TO_MANY").unwrap(),
+            SessionMode::OneToMany
+        );
+        assert_eq!(
+            SessionMode::from_str("MANY_TO_MANY").unwrap(),
+            SessionMode::ManyToMany
+        );
+        assert!(SessionMode::from_str("INVALID").is_err());
+
+        assert_eq!(SessionStatus::Active.to_string(), "ACTIVE");
+        assert_eq!(SessionStatus::Closed.to_string(), "CLOSED");
+        assert_eq!(SessionStatus::Expired.to_string(), "EXPIRED");
+
+        assert_eq!(
+            SessionStatus::from_str("ACTIVE").unwrap(),
+            SessionStatus::Active
+        );
+        assert_eq!(
+            SessionStatus::from_str("SESSION_STATUS_CLOSED").unwrap(),
+            SessionStatus::Closed
+        );
+        assert_eq!(
+            SessionStatus::from_str("EXPIRED").unwrap(),
+            SessionStatus::Expired
+        );
+        assert!(SessionStatus::from_str("UNKNOWN").is_err());
+
+        assert_eq!(ClosedReason::ClosedByMember.to_string(), "CLOSED_BY_MEMBER");
+        assert_eq!(
+            ClosedReason::ClosedByApplication.to_string(),
+            "CLOSED_BY_APPLICATION"
+        );
+        assert_eq!(ClosedReason::OwnerLeft.to_string(), "OWNER_LEFT");
+        assert_eq!(ClosedReason::Admin.to_string(), "ADMIN");
+    }
+
+    #[test]
+    fn test_session_creation_validations() {
+        let now = OffsetDateTime::now_utc();
+        let exp = now + time::Duration::seconds(3600);
+
+        // OneToOne with max_members != 2 fails
+        let err1 = Session::new(
+            SessionId::new(),
+            TenantId::new(),
+            SessionMode::OneToOne,
+            None,
+            Actor::Device(DeviceId::new()),
+            now,
+            exp,
+            3,
+            600,
+            60,
+            BTreeMap::new(),
+            86400,
+        );
+        assert!(matches!(err1, Err(SessionError::InvalidMaxMembers(_))));
+
+        // max_members < 2 fails
+        let err2 = Session::new(
+            SessionId::new(),
+            TenantId::new(),
+            SessionMode::OneToMany,
+            None,
+            Actor::Device(DeviceId::new()),
+            now,
+            exp,
+            1,
+            600,
+            60,
+            BTreeMap::new(),
+            86400,
+        );
+        assert!(matches!(err2, Err(SessionError::InvalidMaxMembers(_))));
+
+        // expires_at <= created_at fails
+        let err3 = Session::new(
+            SessionId::new(),
+            TenantId::new(),
+            SessionMode::OneToMany,
+            None,
+            Actor::Device(DeviceId::new()),
+            now,
+            now,
+            10,
+            600,
+            60,
+            BTreeMap::new(),
+            86400,
+        );
+        assert!(matches!(err3, Err(SessionError::InvalidExpiration(_))));
+
+        // expires_at > created_at + max_ttl fails
+        let err4 = Session::new(
+            SessionId::new(),
+            TenantId::new(),
+            SessionMode::OneToMany,
+            None,
+            Actor::Device(DeviceId::new()),
+            now,
+            now + time::Duration::seconds(90000),
+            10,
+            600,
+            60,
+            BTreeMap::new(),
+            86400,
+        );
+        assert!(matches!(err4, Err(SessionError::InvalidExpiration(_))));
+
+        // Invalid metadata key fails
+        let mut bad_meta = BTreeMap::new();
+        bad_meta.insert("Bad Key!".to_string(), "val".to_string());
+        let err5 = Session::new(
+            SessionId::new(),
+            TenantId::new(),
+            SessionMode::OneToMany,
+            None,
+            Actor::Device(DeviceId::new()),
+            now,
+            exp,
+            10,
+            600,
+            60,
+            bad_meta,
+            86400,
+        );
+        assert!(matches!(err5, Err(SessionError::InvalidMetadata(_))));
+
+        // Metadata value > 512 fails
+        let mut long_meta = BTreeMap::new();
+        long_meta.insert("key".to_string(), "x".repeat(513));
+        let err6 = Session::new(
+            SessionId::new(),
+            TenantId::new(),
+            SessionMode::OneToMany,
+            None,
+            Actor::Device(DeviceId::new()),
+            now,
+            exp,
+            10,
+            600,
+            60,
+            long_meta,
+            86400,
+        );
+        assert!(matches!(err6, Err(SessionError::InvalidMetadata(_))));
+
+        // Too many metadata entries (>32) fails
+        let mut too_many_meta = BTreeMap::new();
+        for i in 0..33 {
+            too_many_meta.insert(format!("key_{i}"), "val".to_string());
+        }
+        let err7 = Session::new(
+            SessionId::new(),
+            TenantId::new(),
+            SessionMode::OneToMany,
+            None,
+            Actor::Device(DeviceId::new()),
+            now,
+            exp,
+            10,
+            600,
+            60,
+            too_many_meta,
+            86400,
+        );
+        assert!(matches!(err7, Err(SessionError::InvalidMetadata(_))));
+    }
+
+    #[test]
+    fn test_extend_expiration_and_update_max_members() {
+        let now = OffsetDateTime::now_utc();
+        let exp = now + time::Duration::seconds(3600);
+
+        let mut session = Session::new(
+            SessionId::new(),
+            TenantId::new(),
+            SessionMode::OneToMany,
+            None,
+            Actor::Device(DeviceId::new()),
+            now,
+            exp,
+            10,
+            600,
+            60,
+            BTreeMap::new(),
+            86400,
+        )
+        .unwrap();
+
+        // Extend expiration successfully
+        let new_exp = now + time::Duration::seconds(7200);
+        assert!(session.extend_expiration(new_exp, now, 86400).is_ok());
+        assert_eq!(session.expires_at, new_exp);
+
+        // Extend expiration invalid bounds (too short <= now + 60s)
+        let too_short = now + time::Duration::seconds(30);
+        assert!(matches!(
+            session.extend_expiration(too_short, now, 86400),
+            Err(SessionError::InvalidExpiration(_))
+        ));
+
+        // Update max members successfully
+        assert!(session.update_max_members(15, 5, 50, now).is_ok());
+        assert_eq!(session.max_members, 15);
+
+        // Update max members below active members count fails
+        assert!(matches!(
+            session.update_max_members(4, 5, 50, now),
+            Err(SessionError::InvalidMaxMembers(_))
+        ));
+
+        // Update max members outside tenant cap fails
+        assert!(matches!(
+            session.update_max_members(55, 5, 50, now),
+            Err(SessionError::InvalidMaxMembers(_))
+        ));
+
+        // Inactive session cannot update
+        let _ = session.close(ClosedReason::Admin, now);
+        assert!(matches!(
+            session.extend_expiration(new_exp, now, 86400),
+            Err(SessionError::InactiveSession)
+        ));
+        assert!(matches!(
+            session.update_max_members(20, 2, 50, now),
+            Err(SessionError::InactiveSession)
+        ));
+    }
+}

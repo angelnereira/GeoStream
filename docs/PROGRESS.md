@@ -29,8 +29,8 @@
 | Fase | Estado | Cierre | Evidencia |
 |---|---|---|---|
 | F0 | completada | 2026-10-12 | CI verde (etapas 1–5), geostream version, gs-protocol roundtrip, geostream-tools (Rust puro), deploy dev, nombres verificados |
-| F1 | en curso | | |
-| F2 | pendiente | | |
+| F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
+| F2 | en curso | | |
 | F3 | pendiente | | |
 | F4 (M1) | pendiente | | |
 | F5 (M2) | pendiente | | |
@@ -54,6 +54,13 @@ Formato de cada entrada (más reciente arriba):
 - Requisitos: …
 - Evidencia: enlace a CI / informe
 ```
+
+### 2026-10-12 — T-F1-08 — Pruebas de propiedades (secuencias, capacidades) y cobertura >= 85 % de gs-domain
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: NFR-MAINT-002.
+- Evidencia: implementada suite `tests/property_tests.rs` con 8 propiedades `proptest` (modelo de referencia CAS de secuencias, invariantes de no escalada y mutación de capacidades INV-MEM-1..3, límites de coordenadas y rechazo de Null Island, normalización de códigos Crockford Base32, roundtrip de codec de IDs tipados, y expiración perezosa de sesiones INV-SES-1..3); cobertura de líneas en `gs-domain` verificada con `cargo llvm-cov` en 90.76 % (1738/1915 líneas); todos los criterios de salida de F1 cumplidos y Fase F1 formalmente cerrada.
 
 ### 2026-10-12 — T-F1-07 — Catálogo canónico de errores de dominio y mapeo a ErrorCode en gs-domain
 - Autor/agente: Angel Nereira (con agente de código).
