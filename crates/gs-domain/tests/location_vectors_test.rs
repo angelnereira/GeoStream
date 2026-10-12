@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use time::OffsetDateTime;
 
 use gs_domain::location::{
-    LocationPolicy, LocationValidationError, Position, RawLocationSample, evaluate_sample,
+    InMemorySequenceStore, LocationPolicy, LocationValidationError, Position, RawLocationSample,
+    evaluate_sample, process_sample_batch,
 };
 
 fn find_repo_root() -> PathBuf {
@@ -261,4 +262,161 @@ fn test_position_validation_standalone() {
         &relaxed_policy,
     );
     assert!(res.is_ok());
+}
+
+#[test]
+fn test_all_location_batch_cases_from_vectors() {
+    let repo_root = find_repo_root();
+    let vector_path = repo_root.join("contracts/test-vectors/location_samples.json");
+    let content = fs::read_to_string(&vector_path)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {e}", vector_path.display()));
+    let root: serde_json::Value =
+        serde_json::from_str(&content).expect("Failed to parse location_samples.json");
+
+    let server_now_str = root
+        .get("server_now")
+        .and_then(|v| v.as_str())
+        .expect("server_now missing in vectors");
+    let server_now = OffsetDateTime::parse(
+        server_now_str,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .expect("server_now invalid RFC 3339");
+
+    let default_last_sequence = root
+        .get("default_last_sequence")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(100);
+
+    let default_policy_val = root
+        .get("default_policy")
+        .expect("default_policy missing in vectors");
+    let default_policy = LocationPolicy {
+        max_horizontal_accuracy_m: default_policy_val
+            .get("max_horizontal_accuracy_m")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(50_000.0),
+        reject_null_island: default_policy_val
+            .get("reject_null_island")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        max_future_skew_ms: default_policy_val
+            .get("max_future_skew_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(5_000),
+        max_event_age_ms: default_policy_val
+            .get("max_event_age_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(120_000),
+        max_samples_per_publish: default_policy_val
+            .get("max_samples_per_publish")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(50) as u32,
+    };
+
+    let base_sample = root
+        .get("base_sample")
+        .expect("base_sample missing in vectors")
+        .clone();
+
+    let batches = root
+        .get("batches")
+        .and_then(|v| v.as_array())
+        .expect("batches array missing in vectors");
+
+    assert_eq!(
+        batches.len(),
+        9,
+        "Expected 9 batches in location_samples.json"
+    );
+
+    for batch in batches {
+        let id = batch
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let desc = batch
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let mut policy = default_policy.clone();
+        if let Some(overrides) = batch.get("policy").and_then(|p| p.as_object())
+            && let Some(v) = overrides
+                .get("max_samples_per_publish")
+                .and_then(|v| v.as_u64())
+        {
+            policy.max_samples_per_publish = v as u32;
+        }
+
+        let raw_samples: Vec<RawLocationSample> = batch
+            .get("samples")
+            .and_then(|v| v.as_array())
+            .expect("samples array missing in batch")
+            .iter()
+            .map(|s| {
+                let mut sample_json = base_sample.clone();
+                if let Some(patch) = s.get("patch").and_then(|p| p.as_object()) {
+                    apply_patch(&mut sample_json, patch);
+                }
+                RawLocationSample::from_json(&sample_json)
+            })
+            .collect();
+
+        let mut store = InMemorySequenceStore::new(Some(default_last_sequence));
+        let result = process_sample_batch(&raw_samples, &policy, server_now, &mut store);
+
+        let expect = batch.get("expect").expect("expect missing in batch");
+
+        if let Some(exp_err) = expect.get("request_error").and_then(|v| v.as_str()) {
+            assert_eq!(
+                result.request_error.as_ref().map(|e| e.to_string()),
+                Some(exp_err.to_string()),
+                "Batch {id} ({desc}) request_error mismatch"
+            );
+            assert!(
+                result.results.is_empty(),
+                "Batch {id} ({desc}) results must be empty on request_error"
+            );
+        } else {
+            assert!(
+                result.request_error.is_none(),
+                "Batch {id} ({desc}) expected no request_error, got {:?}",
+                result.request_error
+            );
+            let exp_results: Vec<String> = expect
+                .get("results")
+                .and_then(|v| v.as_array())
+                .expect("expect.results missing in batch")
+                .iter()
+                .filter_map(|r| r.as_str().map(|s| s.to_string()))
+                .collect();
+
+            let actual_results: Vec<String> = result
+                .results
+                .iter()
+                .map(|r| r.status.to_string())
+                .collect();
+
+            assert_eq!(
+                actual_results, exp_results,
+                "Batch {id} ({desc}) results status mismatch"
+            );
+        }
+
+        let exp_final_last = expect
+            .get("final_last_sequence")
+            .and_then(|v| v.as_u64())
+            .expect("expect.final_last_sequence missing in batch");
+        assert_eq!(
+            result.final_last_sequence, exp_final_last,
+            "Batch {id} ({desc}) final_last_sequence mismatch"
+        );
+
+        let exp_snapshot = expect.get("snapshot_sequence").and_then(|v| v.as_u64());
+        assert_eq!(
+            result.snapshot_sequence, exp_snapshot,
+            "Batch {id} ({desc}) snapshot_sequence mismatch"
+        );
+    }
 }

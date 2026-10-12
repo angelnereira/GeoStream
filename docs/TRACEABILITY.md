@@ -54,7 +54,7 @@ Reglas:
 | FR-SHR-005 | MUST | F3 | Auditoría de compartición | — | pendiente |
 | FR-LOC-001 | MUST | F4 | Modelo de muestra | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-002 | MUST | F4 | Validación de campos | `tests/location_vectors_test.rs` | en curso |
-| FR-LOC-003 | MUST | F4 | Orden y deduplicación | — | pendiente |
+| FR-LOC-003 | MUST | F4 | Orden y deduplicación | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-004 | MUST | F4 | Validación temporal | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-005 | MUST | F4 | Tiempo de recepción del servidor | — | pendiente |
 | FR-LOC-006 | MUST | F4 | Calidad y tipo de dato | `tests/location_vectors_test.rs` | en curso |

@@ -891,6 +891,190 @@ pub fn evaluate_sample(
     }
 }
 
+// ============================================================================
+// Sequence Ordering Model & Batch Acceptance Pipeline (FR-LOC-003, docs/09 §4)
+// ============================================================================
+
+/// Result of an atomic sequence compare-and-set operation (docs/09 §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum CasResult {
+    Accepted,
+    Duplicate,
+    Stale,
+}
+
+impl fmt::Display for CasResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Accepted => write!(f, "ACCEPTED"),
+            Self::Duplicate => write!(f, "IGNORED_DUPLICATE"),
+            Self::Stale => write!(f, "IGNORED_STALE"),
+        }
+    }
+}
+
+/// In-memory sequence store implementing the CAS ordering model for simulated and local test stores.
+#[derive(Debug, Clone, Default)]
+pub struct InMemorySequenceStore {
+    last_sequence: Option<u64>,
+}
+
+impl InMemorySequenceStore {
+    pub fn new(initial: Option<u64>) -> Self {
+        Self {
+            last_sequence: initial,
+        }
+    }
+
+    pub fn current_sequence(&self) -> Option<u64> {
+        self.last_sequence
+    }
+
+    /// Atomic compare-and-set according to docs/09 §4:
+    /// - If no previous sequence exists -> update and Accepted
+    /// - If seq > prev -> update and Accepted
+    /// - If seq == prev -> Duplicate (no update)
+    /// - If seq < prev -> Stale (no update)
+    pub fn compare_and_set(&mut self, seq: u64) -> CasResult {
+        match self.last_sequence {
+            None => {
+                self.last_sequence = Some(seq);
+                CasResult::Accepted
+            }
+            Some(prev) if seq == prev => CasResult::Duplicate,
+            Some(prev) if seq < prev => CasResult::Stale,
+            Some(_) => {
+                self.last_sequence = Some(seq);
+                CasResult::Accepted
+            }
+        }
+    }
+}
+
+/// Precondition errors that reject an entire batch before per-sample processing (docs/08 §6.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum BatchPreconditionError {
+    #[serde(rename = "VALIDATION_FAILED")]
+    ValidationFailed,
+    #[serde(rename = "PAYLOAD_TOO_LARGE")]
+    PayloadTooLarge,
+}
+
+impl fmt::Display for BatchPreconditionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ValidationFailed => write!(f, "VALIDATION_FAILED"),
+            Self::PayloadTooLarge => write!(f, "PAYLOAD_TOO_LARGE"),
+        }
+    }
+}
+
+/// Outcome of processing a batch of location samples.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BatchEvaluationResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_error: Option<BatchPreconditionError>,
+    pub results: Vec<SampleResult>,
+    pub final_last_sequence: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_sequence: Option<u64>,
+}
+
+/// Processes a batch of location samples through preconditions, pure validation,
+/// age checking, and CAS sequence ordering according to docs/09 §4.
+pub fn process_sample_batch(
+    samples: &[RawLocationSample],
+    policy: &LocationPolicy,
+    now: OffsetDateTime,
+    store: &mut InMemorySequenceStore,
+) -> BatchEvaluationResult {
+    let current_seq = store.current_sequence().unwrap_or(0);
+
+    // 1. Batch preconditions (docs/08 §6.4, docs/09 §4)
+    if samples.is_empty() {
+        return BatchEvaluationResult {
+            request_error: Some(BatchPreconditionError::ValidationFailed),
+            results: Vec::new(),
+            final_last_sequence: current_seq,
+            snapshot_sequence: None,
+        };
+    }
+
+    if samples.len() > policy.max_samples_per_publish as usize {
+        return BatchEvaluationResult {
+            request_error: Some(BatchPreconditionError::PayloadTooLarge),
+            results: Vec::new(),
+            final_last_sequence: current_seq,
+            snapshot_sequence: None,
+        };
+    }
+
+    // Check strictly increasing sequence numbers within the batch
+    for window in samples.windows(2) {
+        match (window[0].sequence, window[1].sequence) {
+            (Some(a), Some(b)) if b > a => {}
+            _ => {
+                return BatchEvaluationResult {
+                    request_error: Some(BatchPreconditionError::ValidationFailed),
+                    results: Vec::new(),
+                    final_last_sequence: current_seq,
+                    snapshot_sequence: None,
+                };
+            }
+        }
+    }
+
+    let mut results = Vec::with_capacity(samples.len());
+    let mut last_accepted = None;
+
+    for s in samples {
+        // 2. Pure validation (§3.1, rules 1–16)
+        let validated = match validate_sample(s, policy, now) {
+            Ok(v) => v,
+            Err(e) => {
+                results.push(SampleResult::rejected(
+                    s.sequence.unwrap_or(0),
+                    e.error_code,
+                    e.field,
+                ));
+                continue;
+            }
+        };
+
+        // 3. Age check (§3.2, captured_at < now - max_event_age)
+        let max_age = time::Duration::milliseconds(policy.max_event_age_ms);
+        let min_allowed = match now.checked_sub(max_age) {
+            Some(t) => t,
+            None => now,
+        };
+        if validated.captured_at < min_allowed {
+            results.push(SampleResult::ignored_stale(validated.sequence));
+            continue;
+        }
+
+        // 4. Order / CAS atomic check in sequence store
+        match store.compare_and_set(validated.sequence) {
+            CasResult::Duplicate => {
+                results.push(SampleResult::ignored_duplicate(validated.sequence));
+            }
+            CasResult::Stale => {
+                results.push(SampleResult::ignored_stale(validated.sequence));
+            }
+            CasResult::Accepted => {
+                results.push(SampleResult::accepted(validated.sequence));
+                last_accepted = Some(validated.sequence);
+            }
+        }
+    }
+
+    BatchEvaluationResult {
+        request_error: None,
+        results,
+        final_last_sequence: store.current_sequence().unwrap_or(current_seq),
+        snapshot_sequence: last_accepted,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1037,5 +1221,44 @@ mod tests {
         assert!(accepted_display.contains("<redacted>"));
         assert!(!accepted_display.contains("8.0"));
         assert!(!accepted_display.contains("-79.0"));
+    }
+
+    #[test]
+    fn test_in_memory_sequence_store_cas() {
+        let mut store = InMemorySequenceStore::default();
+        assert_eq!(store.current_sequence(), None);
+
+        // First sequence accepted
+        assert_eq!(store.compare_and_set(1), CasResult::Accepted);
+        assert_eq!(store.current_sequence(), Some(1));
+
+        // Duplicate
+        assert_eq!(store.compare_and_set(1), CasResult::Duplicate);
+        assert_eq!(store.current_sequence(), Some(1));
+
+        // Monotonic advance
+        assert_eq!(store.compare_and_set(5), CasResult::Accepted);
+        assert_eq!(store.current_sequence(), Some(5));
+
+        // Stale (seq < current)
+        assert_eq!(store.compare_and_set(4), CasResult::Stale);
+        assert_eq!(store.compare_and_set(1), CasResult::Stale);
+        assert_eq!(store.current_sequence(), Some(5));
+
+        assert_eq!(CasResult::Accepted.to_string(), "ACCEPTED");
+        assert_eq!(CasResult::Duplicate.to_string(), "IGNORED_DUPLICATE");
+        assert_eq!(CasResult::Stale.to_string(), "IGNORED_STALE");
+    }
+
+    #[test]
+    fn test_batch_precondition_error_display() {
+        assert_eq!(
+            BatchPreconditionError::ValidationFailed.to_string(),
+            "VALIDATION_FAILED"
+        );
+        assert_eq!(
+            BatchPreconditionError::PayloadTooLarge.to_string(),
+            "PAYLOAD_TOO_LARGE"
+        );
     }
 }
