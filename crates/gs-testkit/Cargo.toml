@@ -5,3 +5,11 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+
+[dependencies]
+criterion.workspace = true
+jsonschema.workspace = true
+proptest.workspace = true
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
+tokio-tungstenite.workspace = true

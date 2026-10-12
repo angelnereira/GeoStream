@@ -8,3 +8,5 @@ publish.workspace = true
 
 [dependencies]
 gs-domain.workspace = true
+geo.workspace = true
+rstar.workspace = true

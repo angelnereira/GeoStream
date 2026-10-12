@@ -142,7 +142,7 @@ Reglas:
 | NFR-SEC-003 | MUST | F2 | Secretos fuera de registros | — | pendiente |
 | NFR-SEC-004 | MUST | F3 | Aislamiento de tenant | — | pendiente |
 | NFR-SEC-005 | MUST | F10 | Fuzzing | — | pendiente |
-| NFR-SEC-006 | MUST | F0 | Auditoría de dependencias | — | pendiente |
+| NFR-SEC-006 | MUST | F0 | Auditoría de dependencias | CI (cargo deny, cargo audit) | cumplido |
 | NFR-PRIV-001 | MUST | F4 | Sin persistencia de coordenadas | — | pendiente |
 | NFR-PRIV-002 | MUST | F4 | Borrado de snapshot inmediato | — | pendiente |
 | NFR-RES-001 | MUST | F9 | Independencia de proveedores | — | pendiente |

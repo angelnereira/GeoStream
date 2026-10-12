@@ -8,3 +8,7 @@ publish.workspace = true
 
 [dependencies]
 gs-domain.workspace = true
+futures.workspace = true
+redis.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

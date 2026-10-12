@@ -9,3 +9,7 @@ publish.workspace = true
 [dependencies]
 gs-service.workspace = true
 gs-geo.workspace = true
+axum.workspace = true
+futures.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

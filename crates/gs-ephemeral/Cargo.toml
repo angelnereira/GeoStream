@@ -9,3 +9,6 @@ publish.workspace = true
 [dependencies]
 gs-domain.workspace = true
 gs-protocol.workspace = true
+redis.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
