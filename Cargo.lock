@@ -1736,8 +1736,12 @@ version = "0.0.0"
 dependencies = [
  "aes-gcm",
  "gs-domain",
+ "serde_json",
  "sqlx",
  "thiserror",
+ "time",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

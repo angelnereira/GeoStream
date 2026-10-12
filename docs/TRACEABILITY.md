@@ -123,7 +123,7 @@ Reglas:
 | FR-OPS-001 | MUST | F0 | Binario único con roles | tests/cli_test.rs | cumplido |
 | FR-OPS-002 | MUST | F2 | Salud y métricas | — | pendiente |
 | FR-OPS-003 | MUST | F1 | Configuración validada | `crates/gs-config/tests/server_config_test.rs` | cumplido |
-| FR-OPS-004 | MUST | F2 | Migraciones versionadas | — | pendiente |
+| FR-OPS-004 | MUST | F2 | Migraciones versionadas | migrations/0001_init.sql, apps/geostream (migrate), crates/gs-store/tests/constraints_test.rs | cumplido |
 | FR-OPS-005 | MUST | F6 | Imagen y compose | — | pendiente |
 | FR-OPS-006 | MUST | F12 | Runbooks y backups | — | pendiente |
 | FR-IOT-001 | COULD | F14 | Puente MQTT | — | pendiente |

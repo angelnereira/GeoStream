@@ -78,6 +78,18 @@ pub struct ServeArgs {
     /// HTTP listener address (defaults to GS_HTTP_ADDR or 0.0.0.0:8080).
     #[arg(long, env = "GS_HTTP_ADDR", default_value = "0.0.0.0:8080")]
     pub http_addr: SocketAddr,
+
+    /// Database connection URL (defaults to GS_DATABASE_URL).
+    #[arg(long, env = "GS_DATABASE_URL")]
+    pub database_url: Option<String>,
+
+    /// Auto-migrate database on startup (allowed only in dev).
+    #[arg(long, env = "GS_AUTO_MIGRATE", default_value = "false")]
+    pub auto_migrate: bool,
+
+    /// Active environment (dev, test, prod). Defaults to dev.
+    #[arg(long, env = "GS_ENV", default_value = "dev")]
+    pub env: String,
 }
 
 /// Arguments for `migrate` subcommand.
@@ -86,6 +98,10 @@ pub struct MigrateArgs {
     /// Show migration plan without applying changes.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Database connection URL (defaults to GS_DATABASE_URL).
+    #[arg(long, env = "GS_DATABASE_URL")]
+    pub database_url: Option<String>,
 }
 
 /// Arguments for `admin` subcommand.
@@ -110,11 +126,30 @@ pub async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Commands::Migrate(args) => {
-            let dry_run_suffix = if args.dry_run { " (dry-run)" } else { "" };
-            println!(
-                "migrate{} is not implemented yet (scheduled for F2, task T-F2-01)",
-                dry_run_suffix
-            );
+            let db_url = args
+                .database_url
+                .or_else(|| std::env::var("GS_DATABASE_URL").ok())
+                .context("missing database URL: provide --database-url or set GS_DATABASE_URL")?;
+
+            let pool = gs_api::migrate::connect_pool(&db_url)
+                .await
+                .context("failed to connect to database for migration")?;
+
+            if args.dry_run {
+                let status = gs_api::migrate::plan_migrations(&pool)
+                    .await
+                    .context("failed to inspect migration plan")?;
+                println!(
+                    "Migration plan (dry-run): current version: {:?}, expected version: {}, pending migrations: {}",
+                    status.current_version, status.expected_version, status.pending_count
+                );
+            } else {
+                gs_api::migrate::run_migrations(&pool)
+                    .await
+                    .context("failed to apply migrations")?;
+                let latest = gs_api::migrate::expected_schema_version();
+                println!("Successfully applied migrations up to version {latest}");
+            }
             Ok(())
         }
         Commands::Admin(_args) => {
@@ -134,6 +169,37 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .try_init();
+
+    // Verify database schema version or auto-migrate (docs/11 §4)
+    if let Some(db_url) = args
+        .database_url
+        .or_else(|| std::env::var("GS_DATABASE_URL").ok())
+    {
+        let pool = gs_api::migrate::connect_pool(&db_url)
+            .await
+            .context("failed to connect to database on server startup")?;
+
+        if args.auto_migrate {
+            if args.env != "dev" {
+                bail!(
+                    "GS_AUTO_MIGRATE=true is only allowed in GS_ENV=dev (current env: {})",
+                    args.env
+                );
+            }
+            info!("auto-migrating database schema in dev environment");
+            gs_api::migrate::run_migrations(&pool)
+                .await
+                .context("auto-migrate failed during server startup")?;
+        } else {
+            gs_api::migrate::check_schema_version(&pool).await.context(
+                "database schema version check failed on startup (run 'geostream migrate')",
+            )?;
+            info!(
+                version = gs_api::migrate::expected_schema_version(),
+                "database schema version verified"
+            );
+        }
+    }
 
     let roles = args
         .roles

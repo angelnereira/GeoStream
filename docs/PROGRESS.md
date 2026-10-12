@@ -55,6 +55,13 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 ```
 
+### 2026-10-12 — T-F2-01 — Migración inicial 0001_init.sql, subcomando geostream migrate y verificación de esquema
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-OPS-004.
+- Evidencia: implementada migración `migrations/0001_init.sql` exactamente como especifica `docs/11 §2` (12 tablas de negocio con PK UUIDv7, índices y checks normativos); migrador `MIGRATOR` y verificador `check_schema_version` en `gs-store`; subcomando `geostream migrate` con `--dry-run` e idempotencia estricta; verificación obligatoria de versión del esquema en `geostream serve` al arrancar; 11 pruebas de restricciones en `crates/gs-store/tests/constraints_test.rs` y 7 pruebas de CLI en `apps/geostream/tests/cli_test.rs` verdes contra PostgreSQL 18 real; `cargo deny check` y `geostream-tools all` verdes.
+
 ### 2026-10-12 — T-F1-08 — Pruebas de propiedades (secuencias, capacidades) y cobertura >= 85 % de gs-domain
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.
