@@ -34,23 +34,23 @@ Reglas:
 | FR-SES-003 | MUST | F3 | Actualizar sesión | — | pendiente |
 | FR-SES-004 | MUST | F3 | Cerrar sesión | — | pendiente |
 | FR-SES-005 | MUST | F3 | Expiración automática | — | pendiente |
-| FR-SES-006 | MUST | F3 | Modos de sesión | — | pendiente |
-| FR-SES-007 | MUST | F3 | Salida del propietario | — | pendiente |
+| FR-SES-006 | MUST | F3 | Modos de sesión | `tests/invariants_test.rs` | en curso |
+| FR-SES-007 | MUST | F3 | Salida del propietario | `tests/invariants_test.rs` | en curso |
 | FR-MEM-001 | MUST | F3 | Agregar miembros (aplicación) | — | pendiente |
 | FR-MEM-002 | MUST | F3 | Listar y consultar miembros | — | pendiente |
-| FR-MEM-003 | MUST | F3 | Cambiar capacidades | — | pendiente |
+| FR-MEM-003 | MUST | F3 | Cambiar capacidades | `tests/invariants_test.rs` | en curso |
 | FR-MEM-004 | MUST | F3 | Revocar miembro | — | pendiente |
 | FR-MEM-005 | MUST | F3 | Abandonar sesión | — | pendiente |
 | FR-MEM-006 | MUST | F3 | Límite de miembros | — | pendiente |
-| FR-MEM-007 | MUST | F3 | Readmisión | — | pendiente |
+| FR-MEM-007 | MUST | F3 | Readmisión | `tests/invariants_test.rs` | en curso |
 | FR-INV-001 | MUST | F3 | Crear invitación | — | pendiente |
 | FR-INV-002 | MUST | F3 | Canjear invitación | — | pendiente |
 | FR-INV-003 | MUST | F3 | Listar y revocar invitaciones | — | pendiente |
 | FR-INV-004 | COULD | F15 | Aprobación de solicitudes de unión | — | pendiente |
-| FR-SHR-001 | MUST | F3 | Apagado por defecto | — | pendiente |
-| FR-SHR-002 | MUST | F3 | Activación solo por el propio subject | — | pendiente |
+| FR-SHR-001 | MUST | F3 | Apagado por defecto | `tests/invariants_test.rs` | en curso |
+| FR-SHR-002 | MUST | F3 | Activación solo por el propio subject | `tests/invariants_test.rs` | en curso |
 | FR-SHR-003 | MUST | F3 | Detener compartición | — | pendiente |
-| FR-SHR-004 | MUST | F3 | Un único dispositivo publicador | — | pendiente |
+| FR-SHR-004 | MUST | F3 | Un único dispositivo publicador | `tests/invariants_test.rs` | en curso |
 | FR-SHR-005 | MUST | F3 | Auditoría de compartición | — | pendiente |
 | FR-LOC-001 | MUST | F4 | Modelo de muestra | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-002 | MUST | F4 | Validación de campos | `tests/location_vectors_test.rs` | en curso |

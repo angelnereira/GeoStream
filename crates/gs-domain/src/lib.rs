@@ -3,6 +3,10 @@
 
 pub mod ids;
 pub mod location;
+pub mod membership;
+pub mod session;
 
 pub use ids::*;
 pub use location::*;
+pub use membership::*;
+pub use session::*;
