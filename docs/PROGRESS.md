@@ -55,6 +55,14 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 ```
 
+### 2026-10-12 — T-F1-01 — IDs tipados con prefijo y codec en gs-domain
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-API-006 (base).
+- Evidencia: Implementados los 14 IDs de entidad (`TenantId`, `ApplicationId`, `ApiKeyId`, `SubjectId`, `DeviceId`, `SessionId`, `MemberId`, `InvitationId`, `WebhookEndpointId`, `EventId`, `GeofenceId`, `ConnectionId`, `RequestId`, `AuditId`) basados en UUIDv7, `ExternalSubjectId` e `InstallationId` (UUIDv4 canónico); 5 pruebas de integración en `crates/gs-domain/tests/ids_vector_test.rs` validando todos los vectores de `contracts/test-vectors/ids.json` (válidos e inválidos).
+- Notas: Tipos con Display, FromStr, Serialize, Deserialize y validaciones estrictas.
+
 ### 2026-10-12 — T-F0-08 — Verificación de nombres de paquetes y cierre de Fase F0
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.

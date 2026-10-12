@@ -5,6 +5,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 ## [Unreleased]
 
 ### Added
+- `gs-domain`: identificadores de entidad tipados con prefijo sobre UUIDv7 (14 tipos de entidad), `ExternalSubjectId` e `InstallationId` (UUIDv4 canónico) con codec, validación estricta y suite de pruebas parametrizada contra `contracts/test-vectors/ids.json` (FR-API-006 base, T-F1-01).
 - Verificación de disponibilidad de nombres de paquetes en crates.io y pub.dev, registro de recordatorio de ADR-0019 (licencia) y cumplimiento de criterios de salida para el cierre de Fase F0 (T-F0-08).
 - Entorno de desarrollo local en `deploy/docker-compose.dev.yml` (PostgreSQL 16 y Valkey 7.2) y plantilla de variables de entorno de referencia `deploy/.env.example` (T-F0-07).
 - Crate de herramientas del repositorio `geostream-tools` en `tools/` implementado 100 % en Rust (reemplazando scripts Python), con comandos para validar JSON de contratos, reglas de dependencias entre crates (`check_crate_deps`), catálogo de errores, claves de configuración, trazabilidad de requisitos, matriz de autenticación y enlaces Markdown (NFR-DOC-001, NFR-SEC-006, T-F0-05).

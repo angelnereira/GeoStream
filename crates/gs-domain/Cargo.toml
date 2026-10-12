@@ -7,6 +7,10 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 time.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
