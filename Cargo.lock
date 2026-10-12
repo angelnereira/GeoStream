@@ -1511,11 +1511,17 @@ name = "geostream"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "gs-api",
  "gs-stream",
  "gs-worker",
+ "reqwest",
+ "serde",
+ "serde_json",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
