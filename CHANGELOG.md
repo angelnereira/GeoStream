@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 ## [Unreleased]
 
+### Docs
+- Propuestas no normativas en `docs/proposals/`: brechas y plan de completitud (G-01..G-22) y addendum A-01 de integración de proveedores externos. No modifican requisitos, contratos ni ADR hasta que se adopten.
+
 ## [docs-0.2.0] — 2026-10-11
 
 ### Docs
