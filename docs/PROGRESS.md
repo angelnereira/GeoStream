@@ -58,7 +58,7 @@ Formato de cada entrada (más reciente arriba):
 ### 2026-10-12 — T-F0-04 — gs-protocol con build.rs y prueba de ida y vuelta
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.
-- PR: — (rama `feat/T-F0-04-gs-protocol-build`)
+- PR: #4 (fusionado en `main`)
 - Requisitos: — (verificación de contratos de stream).
 - Evidencia: local, rustc 1.99.0 — `cargo test -p gs-protocol` (1 prueba de ida y vuelta completa que valida los 24 mensajes de `stream_messages.json`: JSON → Protobuf → Binario → Protobuf → JSON idéntico). `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo deny check`, `cargo audit`, `buf lint contracts/proto` limpios.
 - Notas: `build.rs` compila contratos Protobuf con `prost-build` y `pbjson-build` usando `protoc-bin-vendored`. Tipos de timestamp mapeados a `pbjson_types::Timestamp`.
