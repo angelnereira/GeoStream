@@ -1,0 +1,95 @@
+{
+  "description": "Vectores de formato de IDs públicos (docs/05_DOMAIN_MODEL.md §2).",
+  "version": 1,
+  "valid": [
+    {
+      "value": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "SessionId"
+    },
+    {
+      "value": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "MemberId"
+    },
+    {
+      "value": "sub_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "SubjectId"
+    },
+    {
+      "value": "dev_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "DeviceId"
+    },
+    {
+      "value": "ten_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "TenantId"
+    }
+  ],
+  "invalid": [
+    {
+      "value": "ses_0192B6C0A1E47C3F9D2A7B5E8F1C0D3A",
+      "type": "SessionId",
+      "reason": "mayúsculas"
+    },
+    {
+      "value": "ses_0192b6c0-a1e4-7c3f-9d2a-7b5e8f1c0d3a",
+      "type": "SessionId",
+      "reason": "guiones"
+    },
+    {
+      "value": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3",
+      "type": "SessionId",
+      "reason": "31 hex"
+    },
+    {
+      "value": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a0",
+      "type": "SessionId",
+      "reason": "33 hex"
+    },
+    {
+      "value": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "SessionId",
+      "reason": "prefijo de otra entidad"
+    },
+    {
+      "value": "ses-0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "SessionId",
+      "reason": "separador incorrecto"
+    },
+    {
+      "value": "",
+      "type": "SessionId",
+      "reason": "vacío"
+    },
+    {
+      "value": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3g",
+      "type": "SessionId",
+      "reason": "carácter no hex"
+    }
+  ],
+  "external_subject_id": {
+    "valid": [
+      "u-48213",
+      "driver.77",
+      "tenant:alpha:user_9",
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    ],
+    "invalid": [
+      "",
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "ana@example.com",
+      "+50760000000",
+      "user 1",
+      "usuário"
+    ]
+  },
+  "installation_id": {
+    "valid": [
+      "3f1c2a7e-9b0d-4c1e-8f2a-6d5b4c3a2e10"
+    ],
+    "invalid": [
+      "3F1C2A7E-9B0D-4C1E-8F2A-6D5B4C3A2E10",
+      "3f1c2a7e9b0d4c1e8f2a6d5b4c3a2e10",
+      "3f1c2a7e-9b0d-1c1e-8f2a-6d5b4c3a2e10",
+      "3f1c2a7e-9b0d-4c1e-cf2a-6d5b4c3a2e10"
+    ]
+  }
+}

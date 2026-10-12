@@ -1,0 +1,43 @@
+{
+  "description": "Forma exacta de los claims de un token de dispositivo (docs/06_IDENTITY_AUTH.md §4.2). Valores ilustrativos.",
+  "version": 1,
+  "header": {
+    "alg": "EdDSA",
+    "typ": "JWT",
+    "kid": "gs-2026-01"
+  },
+  "claims": {
+    "iss": "https://geostream.example.com",
+    "aud": "geostream",
+    "sub": "sub_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+    "tid": "ten_0192b6c0a1e47c3f9d2a7b5e8f1c0d3b",
+    "aid": "app_0192b6c0a1e47c3f9d2a7b5e8f1c0d3c",
+    "did": "dev_0192b6c0a1e47c3f9d2a7b5e8f1c0d3d",
+    "scp": [
+      "sessions:create",
+      "invitations:redeem",
+      "stream:connect",
+      "sharing:write"
+    ],
+    "sep": 0,
+    "iat": 1768478400,
+    "nbf": 1768478400,
+    "exp": 1768479300,
+    "jti": "6f1d3c0e-2b4a-4e7f-9a1b-3c5d7e9f0a2b"
+  },
+  "required_claims": [
+    "iss",
+    "aud",
+    "sub",
+    "tid",
+    "aid",
+    "did",
+    "scp",
+    "sep",
+    "iat",
+    "nbf",
+    "exp",
+    "jti"
+  ],
+  "forbidden_extra_claims": true
+}

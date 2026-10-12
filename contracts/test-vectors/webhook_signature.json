@@ -1,0 +1,9 @@
+{
+  "description": "Vector de firma de webhooks (docs/07_REST_API.md §10.3). key = bytes UTF-8 del secreto completo; message = id + '.' + timestamp + '.' + body.",
+  "version": 1,
+  "secret": "whsec_dGVzdC1zZWNyZXQtZm9yLWdlb3N0cmVhbS12ZWN0b3J",
+  "webhook_id_header": "evt_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+  "timestamp_header": "1768478400",
+  "body": "{\"id\":\"evt_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a\",\"type\":\"webhook.test\",\"created_at\":\"2026-01-15T12:00:00.000Z\",\"tenant_id\":\"ten_0192b6c0a1e47c3f9d2a7b5e8f1c0d3b\",\"data\":{\"webhook_id\":\"whk_0192b6c0a1e47c3f9d2a7b5e8f1c0d3c\"}}",
+  "expected_signature_header": "v1=55b309a92d39df6c8ac23d950821128c5448785d3a7e454faf7ff3c77cd4da0c"
+}

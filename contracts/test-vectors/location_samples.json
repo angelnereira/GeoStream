@@ -1,0 +1,812 @@
+{
+  "description": "Vectores normativos de validación y aceptación de LocationSample. Formato en contracts/README.md §4.1.",
+  "version": 1,
+  "server_now": "2026-01-15T12:00:00.000Z",
+  "default_policy": {
+    "max_horizontal_accuracy_m": 50000.0,
+    "reject_null_island": true,
+    "max_future_skew_ms": 5000,
+    "max_event_age_ms": 120000,
+    "max_samples_per_publish": 50
+  },
+  "default_last_sequence": 100,
+  "base_sample": {
+    "sequence": 101,
+    "captured_at": "2026-01-15T11:59:59.000Z",
+    "position": {
+      "latitude": 8.9824,
+      "longitude": -79.5199,
+      "horizontal_accuracy_m": 8.5
+    },
+    "quality": {
+      "source": "GNSS",
+      "kind": "MEASURED"
+    }
+  },
+  "cases": [
+    {
+      "id": "LOC-V-001",
+      "description": "Muestra mínima válida (solo campos obligatorios)",
+      "patch": {},
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-002",
+      "description": "Muestra completa con todos los opcionales",
+      "patch": {
+        "position.altitude_m": 12.0,
+        "position.vertical_accuracy_m": 3.0,
+        "position.speed_mps": 4.2,
+        "position.speed_accuracy_mps": 0.5,
+        "position.heading_deg": 91.0,
+        "position.heading_accuracy_deg": 10.0,
+        "quality.is_mock": false,
+        "quality.motion": "AUTOMOTIVE"
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-003",
+      "description": "Bordes superiores de latitud y longitud",
+      "patch": {
+        "position.latitude": 90.0,
+        "position.longitude": 180.0
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-004",
+      "description": "Bordes inferiores de latitud y longitud",
+      "patch": {
+        "position.latitude": -90.0,
+        "position.longitude": -180.0
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-005",
+      "description": "captured_at exactamente en el límite de futuro (+5000 ms)",
+      "patch": {
+        "captured_at": "2026-01-15T12:00:05.000Z"
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-006",
+      "description": "captured_at exactamente en el límite de antigüedad (-120000 ms)",
+      "patch": {
+        "captured_at": "2026-01-15T11:58:00.000Z"
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-007",
+      "description": "Rumbo justo por debajo de 360",
+      "patch": {
+        "position.heading_deg": 359.999
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-008",
+      "description": "Velocidad y rumbo cero",
+      "patch": {
+        "position.speed_mps": 0.0,
+        "position.heading_deg": 0.0
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-009",
+      "description": "Precisión horizontal igual al máximo de la política",
+      "patch": {
+        "position.horizontal_accuracy_m": 50000.0
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-010",
+      "description": "Null island aceptada si la política no la rechaza",
+      "patch": {
+        "position.latitude": 0.0,
+        "position.longitude": 0.0
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      },
+      "policy": {
+        "reject_null_island": false
+      }
+    },
+    {
+      "id": "LOC-V-011",
+      "description": "Dato derivado correctamente etiquetado (INTERPOLATED)",
+      "patch": {
+        "quality.kind": "INTERPOLATED"
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-012",
+      "description": "Hueco de secuencia permitido",
+      "patch": {
+        "sequence": 150
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-013",
+      "description": "Fuente desconocida (source ausente)",
+      "patch": {
+        "quality.source": null
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-014",
+      "description": "Secuencia máxima permitida 2^53-1",
+      "patch": {
+        "sequence": 9007199254740991
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-V-015",
+      "description": "Primera muestra del dispositivo en la sesión",
+      "patch": {
+        "sequence": 1
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      },
+      "last_sequence": null
+    },
+    {
+      "id": "LOC-V-016",
+      "description": "Más antigua que el máximo permitido por 1 ms",
+      "patch": {
+        "captured_at": "2026-01-15T11:57:59.999Z"
+      },
+      "expect": {
+        "status": "IGNORED_STALE"
+      }
+    },
+    {
+      "id": "LOC-V-017",
+      "description": "Secuencia igual a la última aceptada",
+      "patch": {
+        "sequence": 100
+      },
+      "expect": {
+        "status": "IGNORED_DUPLICATE"
+      }
+    },
+    {
+      "id": "LOC-V-018",
+      "description": "Secuencia menor que la última aceptada",
+      "patch": {
+        "sequence": 99
+      },
+      "expect": {
+        "status": "IGNORED_STALE"
+      }
+    },
+    {
+      "id": "LOC-V-019",
+      "description": "Coordenadas cercanas a (0,0) pero no exactas",
+      "patch": {
+        "position.latitude": 0.0,
+        "position.longitude": 1e-06
+      },
+      "expect": {
+        "status": "ACCEPTED"
+      }
+    },
+    {
+      "id": "LOC-I-001",
+      "description": "Secuencia cero",
+      "patch": {
+        "sequence": 0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "sequence"
+      }
+    },
+    {
+      "id": "LOC-I-002",
+      "description": "Secuencia mayor que 2^53-1",
+      "patch": {
+        "sequence": 9007199254740992
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "sequence"
+      }
+    },
+    {
+      "id": "LOC-I-003",
+      "description": "captured_at ausente",
+      "patch": {
+        "captured_at": null
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "captured_at"
+      }
+    },
+    {
+      "id": "LOC-I-004",
+      "description": "position ausente",
+      "patch": {
+        "position": null
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position"
+      }
+    },
+    {
+      "id": "LOC-I-005",
+      "description": "Latitud > 90",
+      "patch": {
+        "position.latitude": 90.0001
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.latitude"
+      }
+    },
+    {
+      "id": "LOC-I-006",
+      "description": "Latitud < -90",
+      "patch": {
+        "position.latitude": -90.0001
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.latitude"
+      }
+    },
+    {
+      "id": "LOC-I-007",
+      "description": "Latitud NaN",
+      "patch": {
+        "position.latitude": "NaN"
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.latitude"
+      }
+    },
+    {
+      "id": "LOC-I-008",
+      "description": "Longitud > 180",
+      "patch": {
+        "position.longitude": 180.0001
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.longitude"
+      }
+    },
+    {
+      "id": "LOC-I-009",
+      "description": "Longitud -Infinity",
+      "patch": {
+        "position.longitude": "-Infinity"
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.longitude"
+      }
+    },
+    {
+      "id": "LOC-I-010",
+      "description": "Null island exacta con política por defecto",
+      "patch": {
+        "position.latitude": 0.0,
+        "position.longitude": 0.0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position"
+      }
+    },
+    {
+      "id": "LOC-I-011",
+      "description": "Precisión horizontal cero",
+      "patch": {
+        "position.horizontal_accuracy_m": 0.0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.horizontal_accuracy_m"
+      }
+    },
+    {
+      "id": "LOC-I-012",
+      "description": "Precisión horizontal negativa",
+      "patch": {
+        "position.horizontal_accuracy_m": -1.0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.horizontal_accuracy_m"
+      }
+    },
+    {
+      "id": "LOC-I-013",
+      "description": "Precisión horizontal sobre el máximo de la política",
+      "patch": {
+        "position.horizontal_accuracy_m": 50000.1
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.horizontal_accuracy_m"
+      }
+    },
+    {
+      "id": "LOC-I-014",
+      "description": "Altitud < -1000",
+      "patch": {
+        "position.altitude_m": -1000.1
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.altitude_m"
+      }
+    },
+    {
+      "id": "LOC-I-015",
+      "description": "Altitud > 50000",
+      "patch": {
+        "position.altitude_m": 50000.1
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.altitude_m"
+      }
+    },
+    {
+      "id": "LOC-I-016",
+      "description": "Precisión vertical cero",
+      "patch": {
+        "position.vertical_accuracy_m": 0.0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.vertical_accuracy_m"
+      }
+    },
+    {
+      "id": "LOC-I-017",
+      "description": "Velocidad negativa",
+      "patch": {
+        "position.speed_mps": -0.1
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.speed_mps"
+      }
+    },
+    {
+      "id": "LOC-I-018",
+      "description": "Velocidad > 300",
+      "patch": {
+        "position.speed_mps": 300.1
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.speed_mps"
+      }
+    },
+    {
+      "id": "LOC-I-019",
+      "description": "Precisión de velocidad cero",
+      "patch": {
+        "position.speed_accuracy_mps": 0.0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.speed_accuracy_mps"
+      }
+    },
+    {
+      "id": "LOC-I-020",
+      "description": "Rumbo igual a 360",
+      "patch": {
+        "position.heading_deg": 360.0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.heading_deg"
+      }
+    },
+    {
+      "id": "LOC-I-021",
+      "description": "Rumbo negativo",
+      "patch": {
+        "position.heading_deg": -0.5
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.heading_deg"
+      }
+    },
+    {
+      "id": "LOC-I-022",
+      "description": "Precisión de rumbo > 180",
+      "patch": {
+        "position.heading_accuracy_deg": 180.5
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.heading_accuracy_deg"
+      }
+    },
+    {
+      "id": "LOC-I-023",
+      "description": "quality ausente",
+      "patch": {
+        "quality": null
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "quality"
+      }
+    },
+    {
+      "id": "LOC-I-024",
+      "description": "kind ausente (UNSPECIFIED)",
+      "patch": {
+        "quality.kind": null
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "quality.kind"
+      }
+    },
+    {
+      "id": "LOC-I-025",
+      "description": "captured_at 1 ms más allá del límite de futuro",
+      "patch": {
+        "captured_at": "2026-01-15T12:00:05.001Z"
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "captured_at"
+      }
+    },
+    {
+      "id": "LOC-I-026",
+      "description": "Varios fallos: se informa el primero según el orden (latitud antes que precisión)",
+      "patch": {
+        "position.latitude": 91.0,
+        "position.horizontal_accuracy_m": 0.0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.latitude"
+      }
+    },
+    {
+      "id": "LOC-I-027",
+      "description": "Precisión de rumbo cero",
+      "patch": {
+        "position.heading_accuracy_deg": 0.0
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.heading_accuracy_deg"
+      }
+    },
+    {
+      "id": "LOC-I-028",
+      "description": "sequence ausente (equivale a 0 en proto3)",
+      "patch": {
+        "sequence": null
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "sequence"
+      }
+    },
+    {
+      "id": "LOC-I-029",
+      "description": "Precisión horizontal Infinity",
+      "patch": {
+        "position.horizontal_accuracy_m": "Infinity"
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.horizontal_accuracy_m"
+      }
+    },
+    {
+      "id": "LOC-I-030",
+      "description": "Precisión vertical > 10000",
+      "patch": {
+        "position.vertical_accuracy_m": 10000.5
+      },
+      "expect": {
+        "status": "REJECTED",
+        "error_code": "INVALID_LOCATION",
+        "field": "position.vertical_accuracy_m"
+      }
+    }
+  ],
+  "batches": [
+    {
+      "id": "LOC-B-001",
+      "description": "Lote de tres muestras válidas",
+      "samples": [
+        {
+          "patch": {
+            "sequence": 101
+          }
+        },
+        {
+          "patch": {
+            "sequence": 102
+          }
+        },
+        {
+          "patch": {
+            "sequence": 103
+          }
+        }
+      ],
+      "expect": {
+        "results": [
+          "ACCEPTED",
+          "ACCEPTED",
+          "ACCEPTED"
+        ],
+        "final_last_sequence": 103,
+        "snapshot_sequence": 103
+      }
+    },
+    {
+      "id": "LOC-B-002",
+      "description": "Secuencias repetidas dentro del lote",
+      "samples": [
+        {
+          "patch": {
+            "sequence": 101
+          }
+        },
+        {
+          "patch": {
+            "sequence": 101
+          }
+        }
+      ],
+      "expect": {
+        "request_error": "VALIDATION_FAILED",
+        "final_last_sequence": 100,
+        "snapshot_sequence": null
+      }
+    },
+    {
+      "id": "LOC-B-003",
+      "description": "Secuencias decrecientes dentro del lote",
+      "samples": [
+        {
+          "patch": {
+            "sequence": 103
+          }
+        },
+        {
+          "patch": {
+            "sequence": 102
+          }
+        }
+      ],
+      "expect": {
+        "request_error": "VALIDATION_FAILED",
+        "final_last_sequence": 100,
+        "snapshot_sequence": null
+      }
+    },
+    {
+      "id": "LOC-B-004",
+      "description": "Una inválida seguida de una válida",
+      "samples": [
+        {
+          "patch": {
+            "sequence": 101,
+            "position.latitude": 91.0
+          }
+        },
+        {
+          "patch": {
+            "sequence": 102
+          }
+        }
+      ],
+      "expect": {
+        "results": [
+          "REJECTED",
+          "ACCEPTED"
+        ],
+        "final_last_sequence": 102,
+        "snapshot_sequence": 102
+      }
+    },
+    {
+      "id": "LOC-B-005",
+      "description": "Una demasiado antigua no avanza la secuencia",
+      "samples": [
+        {
+          "patch": {
+            "sequence": 101,
+            "captured_at": "2026-01-15T11:50:00.000Z"
+          }
+        },
+        {
+          "patch": {
+            "sequence": 102
+          }
+        }
+      ],
+      "expect": {
+        "results": [
+          "IGNORED_STALE",
+          "ACCEPTED"
+        ],
+        "final_last_sequence": 102,
+        "snapshot_sequence": 102
+      }
+    },
+    {
+      "id": "LOC-B-006",
+      "description": "Una obsoleta por secuencia seguida de una válida",
+      "samples": [
+        {
+          "patch": {
+            "sequence": 99
+          }
+        },
+        {
+          "patch": {
+            "sequence": 101
+          }
+        }
+      ],
+      "expect": {
+        "results": [
+          "IGNORED_STALE",
+          "ACCEPTED"
+        ],
+        "final_last_sequence": 101,
+        "snapshot_sequence": 101
+      }
+    },
+    {
+      "id": "LOC-B-007",
+      "description": "Lote vacío",
+      "samples": [],
+      "expect": {
+        "request_error": "VALIDATION_FAILED",
+        "final_last_sequence": 100,
+        "snapshot_sequence": null
+      }
+    },
+    {
+      "id": "LOC-B-008",
+      "description": "Más muestras que max_samples_per_publish",
+      "policy": {
+        "max_samples_per_publish": 3
+      },
+      "samples": [
+        {
+          "patch": {
+            "sequence": 101
+          }
+        },
+        {
+          "patch": {
+            "sequence": 102
+          }
+        },
+        {
+          "patch": {
+            "sequence": 103
+          }
+        },
+        {
+          "patch": {
+            "sequence": 104
+          }
+        }
+      ],
+      "expect": {
+        "request_error": "PAYLOAD_TOO_LARGE",
+        "final_last_sequence": 100,
+        "snapshot_sequence": null
+      }
+    },
+    {
+      "id": "LOC-B-009",
+      "description": "Todas inválidas: no hay snapshot nuevo",
+      "samples": [
+        {
+          "patch": {
+            "sequence": 101,
+            "position.latitude": 95.0
+          }
+        },
+        {
+          "patch": {
+            "sequence": 102,
+            "quality.kind": null
+          }
+        }
+      ],
+      "expect": {
+        "results": [
+          "REJECTED",
+          "REJECTED"
+        ],
+        "final_last_sequence": 100,
+        "snapshot_sequence": null
+      }
+    }
+  ]
+}

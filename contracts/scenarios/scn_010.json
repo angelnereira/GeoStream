@@ -1,0 +1,151 @@
+{
+  "id": "SCN-010",
+  "title": "Aislamiento entre tenants",
+  "requirements": [
+    "NFR-SEC-004",
+    "FR-API-006"
+  ],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ]
+    },
+    "alice": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "bob": {
+      "kind": "device",
+      "external_subject_id": "bob",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "carol": {
+      "kind": "device",
+      "external_subject_id": "carol",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "other_backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ],
+      "tenant": "other"
+    },
+    "eve": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID",
+      "tenant": "other",
+      "note": "mismo external_subject_id en otro tenant"
+    }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "initial_members": [
+          {
+            "external_subject_id": "alice"
+          },
+          {
+            "external_subject_id": "bob"
+          },
+          {
+            "external_subject_id": "carol",
+            "capabilities": {
+              "publish": false,
+              "read": true,
+              "invite": false,
+              "manage": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 201
+      },
+      "capture": {
+        "session_id": "$.id"
+      }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members",
+      "expect": {
+        "status": 200
+      },
+      "capture": {
+        "alice_member_id": "$.data[?(@.external_subject_id=='alice')].id",
+        "bob_member_id": "$.data[?(@.external_subject_id=='bob')].id",
+        "carol_member_id": "$.data[?(@.external_subject_id=='carol')].id"
+      }
+    },
+    {
+      "actor": "other_backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}",
+      "expect": {
+        "status": 404
+      }
+    },
+    {
+      "actor": "other_backend",
+      "op": "http",
+      "method": "DELETE",
+      "path": "/v1/sessions/{{session_id}}/members/{{alice_member_id}}",
+      "expect": {
+        "status": 404
+      }
+    },
+    {
+      "actor": "eve",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}",
+      "expect": {
+        "status": 404
+      },
+      "note": "el mismo external_subject_id en otro tenant es otro subject"
+    },
+    {
+      "actor": "eve",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "eve",
+      "op": "stream.send",
+      "message": {
+        "subscribe": {
+          "session_id": "{{session_id}}"
+        }
+      },
+      "expect_reply": {
+        "error": {
+          "code": "ERROR_CODE_NOT_FOUND"
+        }
+      }
+    }
+  ]
+}

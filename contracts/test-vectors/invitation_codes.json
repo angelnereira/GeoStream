@@ -1,0 +1,60 @@
+{
+  "description": "Vectores de normalización de códigos de invitación (docs/05_DOMAIN_MODEL.md §6). normalized = null significa código inválido.",
+  "version": 1,
+  "cases": [
+    {
+      "input": "ABCD-EFGH-JKMN-PQRS",
+      "normalized": "ABCDEFGHJKMNPQRS"
+    },
+    {
+      "input": "abcd-efgh-jkmn-pqrs",
+      "normalized": "ABCDEFGHJKMNPQRS"
+    },
+    {
+      "input": "ABCD EFGH JKMN PQRS",
+      "normalized": "ABCDEFGHJKMNPQRS"
+    },
+    {
+      "input": "ABCDEFGHJKMNPQRS",
+      "normalized": "ABCDEFGHJKMNPQRS"
+    },
+    {
+      "input": "IL0O-2345-6789-ABCD",
+      "normalized": "110023456789ABCD"
+    },
+    {
+      "input": "il0o-2345-6789-abcd",
+      "normalized": "110023456789ABCD"
+    },
+    {
+      "input": "ABCD-EFGH-JKMN-PQRU",
+      "normalized": null,
+      "reason": "U no pertenece al alfabeto"
+    },
+    {
+      "input": "ABCD-EFGH-JKMN-PQR",
+      "normalized": null,
+      "reason": "15 caracteres"
+    },
+    {
+      "input": "ABCD-EFGH-JKMN-PQRST",
+      "normalized": null,
+      "reason": "17 caracteres"
+    },
+    {
+      "input": "ABCD_EFGH_JKMN_PQRS",
+      "normalized": null,
+      "reason": "separador no admitido"
+    },
+    {
+      "input": "",
+      "normalized": null,
+      "reason": "vacío"
+    }
+  ],
+  "hash": {
+    "description": "code_hash = SHA-256 hex del código normalizado (bytes ASCII).",
+    "normalized": "ABCDEFGHJKMNPQRS",
+    "sha256_hex": "f598056127fcd4387651a49b3a4235d8ce50d71f4091068df51511cfc10f388f"
+  }
+}

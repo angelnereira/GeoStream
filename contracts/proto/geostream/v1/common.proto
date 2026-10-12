@@ -1,0 +1,48 @@
+// GeoStream — tipos comunes del protocolo v1.
+// Semántica normativa: docs/09_VALIDATION_ERRORS.md §6 (catálogo de errores).
+// Reglas de evolución: docs/08_STREAM_PROTOCOL.md §11. Nunca reutilizar números ni nombres eliminados.
+syntax = "proto3";
+
+package geostream.v1;
+
+// Catálogo canónico de códigos de error, compartido por REST y stream.
+// En REST, el campo `code` de Problem Details es el nombre del valor sin el prefijo `ERROR_CODE_`
+// (por ejemplo ERROR_CODE_SESSION_FULL -> "SESSION_FULL").
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_UNAUTHENTICATED = 1;
+  ERROR_CODE_TOKEN_EXPIRED = 2;
+  ERROR_CODE_PERMISSION_DENIED = 3;
+  ERROR_CODE_INSUFFICIENT_SCOPE = 4;
+  ERROR_CODE_ACCOUNT_DISABLED = 5;
+  ERROR_CODE_NOT_FOUND = 6;
+  ERROR_CODE_CONFLICT = 7;
+  ERROR_CODE_VALIDATION_FAILED = 8;
+  ERROR_CODE_INVALID_LOCATION = 9;
+  ERROR_CODE_RATE_LIMITED = 10;
+  ERROR_CODE_PAYLOAD_TOO_LARGE = 11;
+  ERROR_CODE_SESSION_CLOSED = 12;
+  ERROR_CODE_SESSION_EXPIRED = 13;
+  ERROR_CODE_SESSION_FULL = 14;
+  ERROR_CODE_MEMBER_REVOKED = 15;
+  ERROR_CODE_NOT_SHARING = 16;
+  ERROR_CODE_NOT_PUBLISHER = 17;
+  ERROR_CODE_INVITATION_INVALID = 18;
+  ERROR_CODE_IDEMPOTENCY_KEY_REUSED = 19;
+  ERROR_CODE_PRECONDITION_FAILED = 20;
+  ERROR_CODE_PROTOCOL_VERSION_UNSUPPORTED = 21;
+  ERROR_CODE_PROTOCOL_ERROR = 22;
+  ERROR_CODE_TOO_MANY_SUBSCRIPTIONS = 23;
+  ERROR_CODE_TEMPORARILY_UNAVAILABLE = 24;
+  ERROR_CODE_INTERNAL = 25;
+}
+
+// Plataforma del dispositivo o cliente.
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_ANDROID = 1;
+  PLATFORM_IOS = 2;
+  PLATFORM_WEB = 3;
+  PLATFORM_SERVER = 4;
+  PLATFORM_OTHER = 5;
+}

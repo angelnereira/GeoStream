@@ -1,0 +1,329 @@
+{
+  "id": "SCN-005",
+  "title": "Secuencias, duplicados y sequence floor tras perder el contador",
+  "requirements": [
+    "FR-LOC-003",
+    "FR-LOC-008",
+    "FR-STR-004"
+  ],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ]
+    },
+    "alice": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "bob": {
+      "kind": "device",
+      "external_subject_id": "bob",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "carol": {
+      "kind": "device",
+      "external_subject_id": "carol",
+      "platform": "PLATFORM_ANDROID"
+    }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "initial_members": [
+          {
+            "external_subject_id": "alice"
+          },
+          {
+            "external_subject_id": "bob"
+          },
+          {
+            "external_subject_id": "carol",
+            "capabilities": {
+              "publish": false,
+              "read": true,
+              "invite": false,
+              "manage": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 201
+      },
+      "capture": {
+        "session_id": "$.id"
+      }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members",
+      "expect": {
+        "status": 200
+      },
+      "capture": {
+        "alice_member_id": "$.data[?(@.external_subject_id=='alice')].id",
+        "bob_member_id": "$.data[?(@.external_subject_id=='bob')].id",
+        "carol_member_id": "$.data[?(@.external_subject_id=='carol')].id"
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "hello": {
+        "last_sequence": "0"
+      },
+      "expect": "ready"
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": true
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": true
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "1",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "2",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "2",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "3",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "3",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "3",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "3",
+              "status": "SAMPLE_STATUS_IGNORED_DUPLICATE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.close"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "hello": {
+        "last_sequence": "0"
+      },
+      "expect": "ready",
+      "expect_hello": {
+        "sequence_floor": "3"
+      },
+      "note": "el cliente perdió su contador; el servidor informa el floor"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "2",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "2",
+              "status": "SAMPLE_STATUS_IGNORED_STALE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "4",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "4",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

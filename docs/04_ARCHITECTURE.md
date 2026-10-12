@@ -1,0 +1,353 @@
+# 04 — Documento de diseño de arquitectura (SAD)
+
+**ID:** GS-ARC-001 · **Versión:** 0.2.0
+
+## 1. Contexto del sistema (C4 nivel 1)
+
+```mermaid
+flowchart LR
+  subgraph Integrador
+    APP[App móvil/web del integrador<br/>con SDK GeoStream]
+    BE[Backend del integrador]
+  end
+  GS[(GeoStream)]
+  OPS[Operador]
+  MAP[Proveedor de mapas<br/>MapLibre tiles / Google Maps]
+  APP -- "REST (token dispositivo)<br/>WSS stream" --> GS
+  BE -- "REST (API key): tokens, sesiones, miembros<br/>WSS consumidor servidor" --> GS
+  GS -- "Webhooks firmados" --> BE
+  APP -- "Tiles / SDK de mapa<br/>(fuera de GeoStream)" --> MAP
+  OPS -- "CLI admin, métricas, logs" --> GS
+```
+
+Reglas del contexto:
+
+- El SDK **nunca** recibe una API key. El backend del integrador obtiene tokens de dispositivo y los entrega a su app (`06_IDENTITY_AUTH.md`).
+- Los proveedores de mapas están fuera de GeoStream; el servidor no los llama en v1.
+
+## 2. Contenedores (C4 nivel 2)
+
+```mermaid
+flowchart TB
+  subgraph Clientes
+    SDK[SDK Flutter]
+    SRV[Backend integrador]
+  end
+  LB[Proxy / balanceador<br/>TLS, WebSocket]
+  subgraph GeoStream["Binario geostream (roles)"]
+    API[Rol api<br/>REST control plane]
+    STR[Rol stream<br/>WebSocket]
+    WRK[Rol worker<br/>expiración, retención, webhooks]
+  end
+  PG[(PostgreSQL ≥ 16<br/>verdad durable)]
+  EPH[(Redis/Valkey ≥ 7.2<br/>efímero + bus)]
+  SDK --> LB
+  SRV --> LB
+  LB --> API
+  LB --> STR
+  API --> PG
+  API --> EPH
+  STR --> PG
+  STR --> EPH
+  WRK --> PG
+  WRK --> EPH
+  WRK -- webhooks --> SRV
+```
+
+| Contenedor | Responsabilidad | Estado |
+|---|---|---|
+| Rol `api` | Autenticación de peticiones REST, casos de uso del plano de control, emisión de tokens y tickets, auditoría, outbox | Sin estado propio |
+| Rol `stream` | Conexiones WebSocket, handshake, suscripciones, validación y aceptación de ubicaciones, fan-out, presencia, backpressure | Estado de conexión en memoria; verdad en PG/efímero |
+| Rol `worker` | Expiración de sesiones, jobs de retención, entrega de webhooks (las geocercas de F11 se evalúan en `stream`, no aquí) | Sin estado propio |
+| PostgreSQL | Tenants, aplicaciones, keys, subjects, dispositivos, sesiones, membresías, invitaciones, auditoría, idempotencia, webhooks, outbox, geocercas | Durable |
+| Redis/Valkey | Snapshots, secuencias, presencia, tickets, versiones de membresía, épocas de subject, rate limits, bus Pub/Sub | Efímero, **sin persistencia en disco** |
+
+Con `GS_STATE_BACKEND=memory` no hay Redis/Valkey: el almacén efímero y el bus viven en memoria y **solo puede ejecutarse una instancia** (desarrollo, pruebas, instalaciones pequeñas).
+
+## 3. Planos
+
+### 3.1 Plano de control (REST)
+Todo lo que cambia autorización o configuración pasa por REST: sesiones, membresías, invitaciones, compartición, tokens, revocaciones, webhooks, geocercas. Cada mutación: transacción PostgreSQL → (si afecta a sesiones) incremento de versión de membresía y evento de control al bus → outbox de webhook en la misma transacción.
+
+### 3.2 Plano de datos (stream)
+WebSocket con Protobuf (binario) o su mapeo JSON. Transporta ubicaciones (best-effort, latest-state) y eventos de control (confiables dentro de la conexión). Ver `08_STREAM_PROTOCOL.md`.
+
+### 3.3 Plano de distribución
+Bus con temas por sesión. Una sola ruta de entrega: **toda** `LocationUpdate` aceptada se publica al bus y cada instancia la entrega a sus suscriptores locales, incluida la propia instancia que la aceptó. Esto elimina rutas duplicadas y comportamientos distintos entre uno y varios nodos.
+
+### 3.4 Plano efímero
+Snapshots, secuencias, presencia, tickets y versiones con TTL. Pérdida total tolerada: se recupera sola (los clientes reconectan; las secuencias del SDK siguen creciendo; los snapshots se repueblan).
+
+### 3.5 Plano geoespacial (F11)
+Evaluación de geocercas en el rol `stream`, sobre muestras aceptadas, con índice R-tree en memoria cargado desde PostgreSQL. Su fallo nunca bloquea la distribución.
+
+### 3.6 Plano de mapas
+Solo cliente (SDK). El servidor no depende de proveedores de mapas.
+
+### 3.7 Plano de privacidad
+Transversal: compartir apagado por defecto, consentimiento del subject, capacidades por acción, snapshot efímero, borrado inmediato, redacción en logs, auditoría sin coordenadas. Ver `10_SECURITY_PRIVACY.md`.
+
+## 4. Estructura del repositorio objetivo
+
+```text
+geostream/
+├── AGENTS.md  README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md
+├── Cargo.toml                 # workspace
+├── rust-toolchain.toml        # toolchain fijada (F0)
+├── deny.toml                  # cargo-deny (F0)
+├── apps/
+│   ├── geostream/             # binario: serve | migrate | admin | version
+│   ├── gs-devclient/          # CLI de desarrollo: conectar, suscribir, publicar trayectos sintéticos
+│   └── gs-loadgen/            # generador de carga (perfiles P-S, P-M, P-L)
+├── crates/
+│   ├── gs-domain/             # tipos, IDs, validación, máquinas de estado, reglas puras. Sin I/O, sin tokio
+│   ├── gs-protocol/           # código generado (prost + pbjson), codec de tramas, conversión dominio↔wire
+│   ├── gs-config/             # carga y validación de configuración y políticas
+│   ├── gs-auth/               # API keys, JWT EdDSA, tickets, scopes, extracción de principal
+│   ├── gs-store/              # PostgreSQL (sqlx): repositorios, transacciones, outbox, auditoría, idempotencia
+│   ├── gs-ephemeral/          # trait EphemeralStore + impl memoria + impl Redis/Valkey
+│   ├── gs-bus/                # trait Bus + impl memoria + impl Redis/Valkey Pub/Sub
+│   ├── gs-service/            # casos de uso: sesiones, miembros, invitaciones, compartición, tokens, AuthzCache
+│   ├── gs-api/                # router Axum REST, middlewares, Problem Details
+│   ├── gs-stream/             # WebSocket: conexión, handshake, suscripciones, publicación, fan-out local
+│   ├── gs-worker/             # jobs: expiración, retención, entrega de webhooks
+│   ├── gs-geo/                # geocercas (F11)
+│   ├── gs-observability/      # tracing, métricas, tipos redactados
+│   └── gs-testkit/            # cliente de prueba, fixtures, runner de vectores y escenarios
+├── migrations/                # SQL secuencial (sqlx)
+├── sdks/flutter/
+│   ├── geostream/             # paquete núcleo (sin mapas)
+│   ├── geostream_maps/        # interfaces de mapas (F9)
+│   ├── geostream_maps_maplibre/
+│   ├── geostream_maps_google/
+│   └── example/               # app de ejemplo
+├── contracts/                 # proto, openapi, test-vectors, scenarios
+├── deploy/                    # Dockerfile, docker-compose.yml, ejemplos de proxy
+├── examples/                  # backend de tokens de ejemplo, receptor de webhooks
+├── tools/                     # scripts de CI (consistencia de catálogos, enlaces)
+└── docs/
+```
+
+### 4.1 Reglas de dependencia entre crates
+
+```mermaid
+flowchart BT
+  domain[gs-domain]
+  protocol[gs-protocol] --> domain
+  config[gs-config] --> domain
+  obs[gs-observability] --> domain
+  auth[gs-auth] --> domain
+  auth --> config
+  store[gs-store] --> domain
+  eph[gs-ephemeral] --> domain
+  eph --> protocol
+  bus[gs-bus] --> domain
+  service[gs-service] --> auth
+  service --> store
+  service --> eph
+  service --> bus
+  service --> protocol
+  api[gs-api] --> service
+  stream[gs-stream] --> service
+  worker[gs-worker] --> service
+  geo[gs-geo] --> domain
+  stream --> geo
+  app[apps/geostream] --> api
+  app --> stream
+  app --> worker
+```
+
+- `gs-domain` NO DEBE depender de `tokio`, `sqlx`, `axum`, `redis` ni de ningún crate interno.
+- Solo `gs-store` habla con PostgreSQL. Solo `gs-ephemeral` y `gs-bus` hablan con Redis/Valkey.
+- `gs-api` y `gs-stream` NO DEBEN acceder a `gs-store`, `gs-ephemeral` ni `gs-bus` directamente: usan `gs-service`.
+- `gs-observability` puede ser usado por cualquier crate excepto `gs-domain` (que solo define los tipos redactados).
+- Un check de CI (`tools/check_crate_deps`) verifica estas reglas con `cargo metadata`.
+
+## 5. Binario y roles
+
+```
+geostream serve   [--roles api,stream,worker] [--config path.toml]
+geostream migrate [--dry-run]
+geostream admin   <tenant|app|key|policy|signing-key> <subcomando> ...
+geostream version
+```
+
+- `serve` sin `--roles` ejecuta los tres roles en un proceso.
+- `api` y `stream` comparten el listener `GS_HTTP_ADDR` cuando corren juntos; el router monta `/v1/stream` solo si el rol `stream` está activo.
+- El rol `worker` NO DEBE ejecutarse en más de una instancia salvo que sus jobs usen bloqueo (`FOR UPDATE SKIP LOCKED`); todos los jobs DEBEN usarlo, de modo que varias instancias sean seguras.
+- `/metrics` y una copia de `/health/*` escuchan en `GS_ADMIN_ADDR`.
+
+## 6. Distribución multi-instancia
+
+### 6.1 Temas del bus
+
+| Tema | Contenido | Publica | Consume |
+|---|---|---|---|
+| `{p}:bus:loc:{session_id}` | `LocationUpdate` (Protobuf) | instancia que aceptó la muestra | instancias con suscriptores locales de la sesión |
+| `{p}:bus:ctl:{session_id}` | `ControlEvent` de sesión (membresía cambiada, compartición, estado de miembro, sesión actualizada/cerrada/expirada) | api, worker, stream | instancias con suscriptores o publicadores locales de la sesión |
+| `{p}:bus:dev:{device_id}` | `Supersede`, `DeviceDeactivated` | stream, api | instancia que tiene la conexión del dispositivo |
+| `{p}:bus:global` | `SubjectTokensRevoked`, `TenantDisabled`, `ApplicationDisabled`, `SigningKeysChanged` | api, admin | todas las instancias |
+
+`{p}` = `GS_REDIS_KEY_PREFIX`. `ControlEvent` es un mensaje interno definido en `gs-protocol` (no forma parte del contrato público, pero se serializa con Protobuf en `contracts/proto/geostream/internal/v1/` cuando se cree, en F6).
+
+Cada instancia mantiene un **conteo de referencias** por tema: se suscribe al tema de una sesión al primer suscriptor/publicador local y se desuscribe al último.
+
+### 6.2 Caché de autorización (ADR-0009)
+
+- Clave: `(session_id, subject_id)` → `MembershipView { member_id, role, capabilities, status, sharing, publisher_device_id, session_status, session_expires_at, mver, loaded_at }`. Para principales de aplicación: `(session_id, application_id)` → `{ tenant ok, session_status, scopes }`.
+- `mver`: versión de membresías de la sesión, guardada en el almacén efímero (`{p}:mver:{session_id}`) e incrementada por **toda** mutación de membresía, compartición o estado de sesión, **después** del commit en PostgreSQL.
+- Una entrada es válida si `now − loaded_at < GS_AUTHZ_CACHE_TTL_MS`. Al caducar: leer `mver`; si no cambió, renovar `loaded_at`; si cambió, recargar las membresías de la sesión desde PostgreSQL.
+- Un `ControlEvent` de la sesión invalida la entrada de inmediato (acelerador).
+- Al reconectar con el bus, la instancia **vacía toda la caché** y marca todas las suscripciones para revalidación antes de la siguiente entrega.
+- Resultado: plazo de revocación ≤ latencia del bus (normal) y ≤ TTL + 1 s (si se pierden mensajes). Ver NFR-SEC-002.
+
+### 6.3 Presencia y conexión única
+- Al completar el handshake de un dispositivo: escribir `{p}:presence:{device_id}` con `connection_id` e `instance_id` (TTL `GS_PRESENCE_TTL_S`, renovado cada `GS_PRESENCE_TTL_S/3`), y publicar `Supersede{device_id, connection_id}` en `{p}:bus:dev:{device_id}`. La instancia que tenga otra conexión del mismo dispositivo la cierra con 4409.
+- Al cerrar: borrar la clave de presencia si sigue siendo de esa conexión (script atómico compare-and-delete) y programar el evento `OFFLINE` tras `GS_STREAM_OFFLINE_GRACE_MS` si el dispositivo es publicador; al vencer, emitirlo solo si no hay presencia nueva.
+
+## 7. Flujos clave
+
+### 7.1 Obtención de token e inicio de stream
+
+```mermaid
+sequenceDiagram
+  participant App as App (SDK)
+  participant BE as Backend integrador
+  participant API as GeoStream api
+  participant STR as GeoStream stream
+  App->>BE: getToken(installation_id) [sesión del integrador]
+  BE->>API: POST /v1/tokens (API key) {external_subject_id, installation_id, ...}
+  API->>API: upsert subject + device, firmar JWT EdDSA
+  API-->>BE: {access_token, expires_at, subject_id, device_id}
+  BE-->>App: access_token
+  App->>API: POST /v1/stream/tickets (Bearer token)
+  API-->>App: {ticket, expires_at, url}
+  App->>STR: GET /v1/stream?ticket=… (Sec-WebSocket-Protocol: gs.v1.proto)
+  STR->>STR: GETDEL ticket → principal
+  STR-->>App: 101 Switching Protocols
+  App->>STR: ClientHello{last_sequence, client_time…}
+  STR-->>App: ServerHello{connection_id, server_time, sequence_floor, limits…}
+```
+
+### 7.2 Publicación y distribución
+
+```mermaid
+sequenceDiagram
+  participant P as Publicador (stream instancia A)
+  participant A as Instancia A
+  participant E as Efímero
+  participant B as Bus
+  participant C as Instancia C
+  participant S as Suscriptor
+  P->>A: PublishLocation{session_id, samples}
+  A->>A: rate limit, AuthzCache (publish, sharing, publisher), validación (09)
+  A->>E: CAS secuencia (seq > last), SET snapshot (TTL)
+  A-->>P: PublishAck{results}
+  A->>B: PUBLISH loc:{session_id} LocationUpdate
+  B-->>A: mensaje (suscriptores locales de A)
+  B-->>C: mensaje
+  C->>C: revalidar suscripción si caducó, coalescer por (sesión, miembro)
+  C-->>S: LocationUpdate
+```
+
+Orden de operaciones en la aceptación (normativo en `09` §4; resumen):
+
+1. Precondiciones del lote (`08` §6.4) y, por cada muestra en orden: validación pura (sin efectos).
+2. Por cada muestra válida y no antigua: CAS atómico de secuencia (`{p}:seq:{session}:{device}`); si se acepta, publicar su `LocationUpdate` al bus.
+3. Tras el lote: si hubo alguna aceptada y `snapshot_ttl_seconds > 0`, escribir el snapshot con la última aceptada; actualizar `{p}:devseq:{device}` con el máximo.
+4. Responder `PublishAck` (el orden entre el ack y la entrega a otros suscriptores no está garantizado).
+
+### 7.3 Revocación de un miembro
+
+```mermaid
+sequenceDiagram
+  participant BE as Backend (API key)
+  participant API as api
+  participant PG as PostgreSQL
+  participant E as Efímero
+  participant B as Bus
+  participant ST as stream (todas)
+  BE->>API: DELETE /v1/sessions/{s}/members/{m}
+  API->>PG: TX: membership.status=REVOKED, sharing=false, version++, audit, outbox(member.revoked)
+  API->>E: DEL snapshot {s}:{m}, INCR mver:{s}
+  API->>B: PUBLISH ctl:{s} MembershipChanged{m, mver}
+  API-->>BE: 204
+  B-->>ST: MembershipChanged
+  ST->>ST: invalidar caché, terminar suscripciones del subject (SubscriptionEnded MEMBER_REVOKED)
+  ST->>ST: MemberEvent REVOKED a demás suscriptores, rechazar publicaciones posteriores
+```
+
+### 7.4 Detener compartición
+Igual que 7.3 con: `sharing=false`, `publisher_device_id=NULL`, snapshot borrado **antes** de responder, `MemberStatus{sharing=false}` a suscriptores, outbox `sharing.stopped`. El miembro sigue en la sesión.
+
+### 7.5 Expiración de sesión (worker)
+Cada `GS_WORKER_EXPIRY_INTERVAL_S`: `SELECT … WHERE status='ACTIVE' AND expires_at <= now() FOR UPDATE SKIP LOCKED LIMIT 500` → `status=EXPIRED`, `sharing=false` en membresías → borrar snapshots → `INCR mver` → `ctl:{s}` `SessionExpired` → outbox `session.expired`. Toda lectura de sesión trata `expires_at <= now()` como expirada aunque el worker no haya corrido (verificación perezosa).
+
+### 7.6 Caída del almacén efímero (NFR-RES-002)
+Detección por error de conexión o latencia > `GS_REDIS_COMMAND_TIMEOUT_MS`:
+1. `ready=false` (el balanceador deja de enviar conexiones nuevas).
+2. `ServerNotice DEGRADED` a conexiones abiertas.
+3. Publicaciones → `PublishAck.request_error = TEMPORARILY_UNAVAILABLE`.
+4. Suscripciones nuevas → `StreamError TEMPORARILY_UNAVAILABLE`.
+5. Al recuperarse: vaciar caché de autorización, resuscribir temas, `ServerNotice RECOVERED`, `ready=true`.
+
+No se simula que el fan-out sigue sano.
+
+## 8. Modelo de concurrencia del stream
+
+Por conexión:
+
+- **Tarea lectora**: lee tramas, decodifica, aplica límites de tamaño y rate, despacha a la lógica de servicio. Nunca bloquea en I/O de red de salida.
+- **Tarea escritora**: único dueño del sink del WebSocket. Fuentes:
+  - `control_tx`: `mpsc` acotado (`GS_STREAM_OUTBOUND_CONTROL_QUEUE`) para respuestas y eventos de control. Lleno → cerrar con 4005.
+  - `latest`: mapa `(session_id, member_id) → LocationUpdate` protegido por mutex sin `.await` dentro + `Notify`. Insertar reemplaza (coalescencia). La escritora prioriza `control_tx` sobre `latest`.
+- **Temporizadores**: hello timeout, idle timeout, auth expiring, heartbeats de presencia.
+- Cancelación: un `CancellationToken` por conexión; al cerrarse se liberan suscripciones (refcount de temas) y presencia.
+
+Por instancia:
+
+- **Tarea del bus**: recibe mensajes, busca suscripciones locales por sesión (`DashMap<SessionId, Vec<ConnHandle>>` o equivalente) y deposita en `latest` o `control_tx`.
+- Límites globales: `GS_STREAM_MAX_CONNECTIONS`; al alcanzarlo, los upgrades reciben HTTP 503.
+
+Reglas: nada de locks mantenidos a través de `.await`; todo canal acotado; todo I/O con timeout (`19_ENGINEERING_STANDARDS.md` §3).
+
+## 9. Persistencia y semántica
+
+- Esquema, claves y TTL: `11_DATA_STORAGE.md`.
+- Ubicación: best-effort, latest-state, duplicados tolerados, antiguas descartables.
+- Control: transaccional en PostgreSQL; distribución en vivo vía bus con caché acotada como red de seguridad.
+- Orden: por (dispositivo, sesión) mediante `sequence`; no existe orden global.
+
+## 10. Topologías de despliegue
+
+| Topología | Uso | Componentes | Notas |
+|---|---|---|---|
+| **T1 — Local** | Desarrollo | `geostream serve` + PostgreSQL (`GS_STATE_BACKEND=memory`) | `docker compose up` |
+| **T2 — Nodo único** | Producción pequeña | 1 instancia + PostgreSQL (+ Redis/Valkey opcional) | Reinicio = reconexión de clientes y pérdida de snapshots |
+| **T3 — Multi-nodo** | Producción | N instancias `api,stream` + 1..N `worker` + PostgreSQL + Redis/Valkey | Balanceador con WebSocket; sin afinidad requerida |
+| **T4 — Roles separados** | Escala | Pools separados `api`, `stream`, `worker` | Solo con evidencia de cuello de botella |
+
+Kubernetes es opcional. Detalle en `16_OPERATIONS.md`.
+
+## 11. Atributos de calidad y tácticas
+
+| Atributo | Tácticas |
+|---|---|
+| Privacidad | Defaults seguros, borrado inmediato, tipos redactados, minimización de presencia |
+| Seguridad | Identidad desde credenciales, scopes + capacidades, tickets de un uso, caché acotada, aislamiento por tenant en cada consulta |
+| Rendimiento | Una ruta de fan-out, coalescencia, Protobuf, CAS en efímero, sin PG en el camino caliente de publicación (salvo recarga de caché) |
+| Disponibilidad | Instancias sin estado durable, reconexión con jitter, drenaje, degradación explícita |
+| Escalabilidad | Temas por sesión con refcount, sin afinidad, límites por conexión |
+| Mantenibilidad | Monolito modular, reglas de dependencia, contratos máquina, ADR |
+| Observabilidad | Métricas sin alta cardinalidad, logs estructurados, trazas opcionales |
+
+## 12. Índice de decisiones
+
+Ver `docs/adr/README.md`. Las decisiones que estructuran esta arquitectura: ADR-0002 (monolito modular), ADR-0004 (transporte), ADR-0006/0007 (identidad y tickets), ADR-0008 (secuencias), ADR-0009 (revocación), ADR-0010 (backends efímero/bus), ADR-0011 (PostgreSQL e IDs).
+
+## 13. Puntos de extensión posteriores a GA
+
+- Historial (F13): tabla particionada por día, escrita por `stream` de forma asíncrona solo para sesiones con historial.
+- MQTT (F14): adaptador de ingesta que reutiliza la lógica de aceptación de `gs-service`.
+- E2EE (F16): requiere que `LocationUpdate` admita una carga cifrada opaca; el servidor perdería snapshots en claro y geocercas. Se decidirá en ADR.
+- Particionado por región/tenant: solo con evidencia de cuello de botella.

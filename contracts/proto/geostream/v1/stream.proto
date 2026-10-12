@@ -1,0 +1,218 @@
+// GeoStream — protocolo de stream WebSocket v1.
+// Semántica normativa: docs/08_STREAM_PROTOCOL.md.
+// Subprotocolos: "gs.v1.proto" (tramas binarias, este esquema) y "gs.v1.json" (tramas de texto,
+// mapeo JSON canónico de proto3 de estos mismos mensajes).
+syntax = "proto3";
+
+package geostream.v1;
+
+import "geostream/v1/common.proto";
+import "geostream/v1/location.proto";
+import "geostream/v1/session.proto";
+import "google/protobuf/timestamp.proto";
+
+// Envoltorio de todo mensaje cliente -> servidor.
+message ClientMessage {
+  // Elegido por el cliente; único por conexión; 0 = sin respuesta correlacionada esperada.
+  uint64 request_id = 1;
+  oneof body {
+    ClientHello hello = 10;
+    Subscribe subscribe = 11;
+    Unsubscribe unsubscribe = 12;
+    PublishLocation publish_location = 13;
+    Heartbeat heartbeat = 14;
+    AuthRefresh auth_refresh = 15;
+  }
+}
+
+// Envoltorio de todo mensaje servidor -> cliente.
+message ServerMessage {
+  // Eco del request_id de la petición a la que responde; 0 en eventos no solicitados.
+  uint64 request_id = 1;
+  oneof body {
+    ServerHello hello = 10;
+    SubscribeAck subscribe_ack = 11;
+    UnsubscribeAck unsubscribe_ack = 12;
+    PublishAck publish_ack = 13;
+    HeartbeatAck heartbeat_ack = 14;
+    AuthRefreshAck auth_refresh_ack = 15;
+    LocationUpdate location_update = 20;
+    MemberStatus member_status = 21;
+    MemberEvent member_event = 22;
+    SessionEvent session_event = 23;
+    SubscriptionEnded subscription_ended = 24;
+    AuthExpiring auth_expiring = 25;
+    ServerNotice server_notice = 26;
+    // F11.
+    GeofenceEvent geofence_event = 27;
+    StreamError error = 30;
+  }
+}
+
+// Primer mensaje obligatorio del cliente.
+message ClientHello {
+  // Versión menor del protocolo v1 que implementa el cliente (empieza en 0).
+  uint32 protocol_minor = 1;
+  // Nombre y versión del SDK, p. ej. "geostream-flutter" / "1.2.0".
+  string sdk_name = 2;
+  string sdk_version = 3;
+  Platform platform = 4;
+  string app_version = 5;
+  // Siguiente secuencia que el cliente asignaría menos 1 (0 si nunca publicó).
+  uint64 last_sequence = 6;
+  // Reloj del dispositivo al enviar.
+  google.protobuf.Timestamp client_time = 7;
+}
+
+enum PrincipalKind {
+  PRINCIPAL_KIND_UNSPECIFIED = 0;
+  PRINCIPAL_KIND_DEVICE = 1;
+  PRINCIPAL_KIND_APPLICATION = 2;
+}
+
+// Límites efectivos para esta conexión.
+message StreamLimits {
+  uint32 max_frame_bytes = 1;
+  uint32 max_subscriptions = 2;
+  uint32 min_publish_interval_ms = 3;
+  uint32 max_samples_per_publish = 4;
+  uint32 heartbeat_interval_ms = 5;
+  uint32 idle_timeout_ms = 6;
+  // Antigüedad máxima aceptada de captured_at (GS_LOCATION_MAX_EVENT_AGE_MS).
+  uint32 max_event_age_ms = 7;
+}
+
+message ServerHello {
+  string connection_id = 1;
+  // Versión menor negociada = min(cliente, servidor).
+  uint32 protocol_minor = 2;
+  google.protobuf.Timestamp server_time = 3;
+  google.protobuf.Timestamp auth_expires_at = 4;
+  // Mayor secuencia aceptada conocida para el dispositivo (0 si ninguna o principal de aplicación).
+  uint64 sequence_floor = 5;
+  StreamLimits limits = 6;
+  PrincipalKind principal_kind = 7;
+  // Presentes según principal_kind.
+  string subject_id = 8;
+  string device_id = 9;
+  string application_id = 10;
+}
+
+message Subscribe {
+  string session_id = 1;
+  // false (por defecto) = incluir snapshot en SubscribeAck.
+  bool skip_snapshot = 2;
+}
+
+message SubscribeAck {
+  SessionInfo session = 1;
+  repeated MemberStatus members = 2;
+  repeated LocationUpdate snapshot = 3;
+}
+
+message Unsubscribe {
+  string session_id = 1;
+}
+
+message UnsubscribeAck {
+  string session_id = 1;
+}
+
+message PublishLocation {
+  string session_id = 1;
+  // 1..=max_samples_per_publish, en orden de secuencia creciente.
+  repeated LocationSample samples = 2;
+}
+
+enum SampleStatus {
+  SAMPLE_STATUS_UNSPECIFIED = 0;
+  SAMPLE_STATUS_ACCEPTED = 1;
+  // sequence igual a la última aceptada.
+  SAMPLE_STATUS_IGNORED_DUPLICATE = 2;
+  // sequence menor que la última aceptada, o captured_at más antiguo que el máximo permitido.
+  SAMPLE_STATUS_IGNORED_STALE = 3;
+  // Inválida; ver error_code y field.
+  SAMPLE_STATUS_REJECTED = 4;
+}
+
+message SampleResult {
+  uint64 sequence = 1;
+  SampleStatus status = 2;
+  // Solo si status = REJECTED.
+  ErrorCode error_code = 3;
+  // Ruta del campo inválido, p. ej. "position.latitude". Solo si status = REJECTED.
+  string field = 4;
+}
+
+message PublishAck {
+  string session_id = 1;
+  // UNSPECIFIED si el lote se procesó; en otro caso todo el lote se rechazó y results está vacío.
+  ErrorCode request_error = 2;
+  // Un resultado por muestra, en el mismo orden.
+  repeated SampleResult results = 3;
+  // > 0 cuando request_error = RATE_LIMITED o TEMPORARILY_UNAVAILABLE.
+  uint32 retry_after_ms = 4;
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp client_time = 1;
+}
+
+message HeartbeatAck {
+  // Eco de Heartbeat.client_time.
+  google.protobuf.Timestamp client_time = 1;
+  google.protobuf.Timestamp server_time = 2;
+}
+
+message AuthRefresh {
+  // Nuevo token de dispositivo del mismo device_id.
+  string access_token = 1;
+}
+
+message AuthRefreshAck {
+  google.protobuf.Timestamp auth_expires_at = 1;
+}
+
+enum SubscriptionEndReason {
+  SUBSCRIPTION_END_REASON_UNSPECIFIED = 0;
+  SUBSCRIPTION_END_REASON_MEMBER_REVOKED = 1;
+  SUBSCRIPTION_END_REASON_MEMBER_LEFT = 2;
+  SUBSCRIPTION_END_REASON_PERMISSION_CHANGED = 3;
+  SUBSCRIPTION_END_REASON_SESSION_CLOSED = 4;
+  SUBSCRIPTION_END_REASON_SESSION_EXPIRED = 5;
+}
+
+message SubscriptionEnded {
+  string session_id = 1;
+  SubscriptionEndReason reason = 2;
+}
+
+message AuthExpiring {
+  google.protobuf.Timestamp auth_expires_at = 1;
+}
+
+enum ServerNoticeKind {
+  SERVER_NOTICE_KIND_UNSPECIFIED = 0;
+  // La instancia se apaga: reconectar tras reconnect_after_ms.
+  SERVER_NOTICE_KIND_DRAINING = 1;
+  // Almacén efímero no disponible: publicaciones y suscripciones nuevas fallarán.
+  SERVER_NOTICE_KIND_DEGRADED = 2;
+  SERVER_NOTICE_KIND_RECOVERED = 3;
+}
+
+message ServerNotice {
+  ServerNoticeKind kind = 1;
+  uint32 reconnect_after_ms = 2;
+}
+
+// Error correlacionado con una petición (request_id del envoltorio) o no solicitado.
+message StreamError {
+  ErrorCode code = 1;
+  // Mensaje seguro en inglés, sin datos sensibles.
+  string message = 2;
+  uint32 retry_after_ms = 3;
+  // Ruta del campo inválido, si aplica.
+  string field = 4;
+  // Sesión afectada, si aplica.
+  string session_id = 5;
+}

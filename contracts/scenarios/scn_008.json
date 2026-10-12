@@ -1,0 +1,59 @@
+{
+  "id": "SCN-008",
+  "title": "Una conexión nueva del mismo dispositivo desplaza a la anterior",
+  "requirements": [
+    "FR-STR-007"
+  ],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ]
+    },
+    "alice": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID"
+    }
+  },
+  "steps": [
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "connection": "c1",
+      "expect": "ready"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "connection": "c2",
+      "expect": "ready"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.expect_close",
+      "connection": "c1",
+      "code": 4409,
+      "within_ms": 2000
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "connection": "c2",
+      "message": {
+        "heartbeat": {
+          "client_time": "{{now}}"
+        }
+      },
+      "expect_reply": {
+        "heartbeat_ack": {}
+      }
+    }
+  ]
+}

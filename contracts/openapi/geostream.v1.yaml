@@ -1,0 +1,1994 @@
+openapi: 3.1.0
+info:
+  title: GeoStream API
+  version: 1.0.0-draft.2
+  summary: Plano de control REST, emisión de credenciales y webhooks de GeoStream v1.
+  description: |
+    Contrato máquina normativo de la API REST v1 de GeoStream.
+
+    - Semántica: docs/07_REST_API.md. Validación: docs/09_VALIDATION_ERRORS.md. Autorización: docs/06_IDENTITY_AUTH.md.
+    - Extensiones propias:
+      - `x-gs-phase`: fase del roadmap en la que la operación debe existir.
+      - `x-gs-auth.application` / `x-gs-auth.device`: scope requerido para ese principal;
+        `none` = permitido sin scope adicional; `forbidden` = principal no permitido.
+      - `x-gs-capability`: capacidad requerida en la sesión cuando el principal es un dispositivo.
+    - Enums REST: nombre del valor Protobuf sin el prefijo del enum (SESSION_MODE_ONE_TO_ONE -> ONE_TO_ONE).
+    - Estado: borrador hasta el hito M2; desde M2 los cambios incompatibles requieren /v2.
+servers:
+  - url: https://geostream.example.com
+    description: Ejemplo. Sustituir por el host del despliegue.
+tags:
+  - name: Credentials
+    description: Tokens de dispositivo y tickets de stream.
+  - name: Sessions
+    description: Ciclo de vida de sesiones de compartición.
+  - name: Members
+    description: 'Membresías, capacidades y compartición.'
+  - name: Invitations
+    description: Invitaciones canjeables por código.
+  - name: Locations
+    description: Snapshot e ingesta HTTP de ubicaciones.
+  - name: Subjects
+    description: 'Subjects del integrador (consulta, revocación, borrado y exportación).'
+  - name: Devices
+    description: Dispositivos (instalaciones) de un subject.
+  - name: Webhooks
+    description: Endpoints de webhooks firmados.
+  - name: Geofences
+    description: Geocercas de tenant o de sesión (F11).
+  - name: Health
+    description: Liveness y readiness.
+paths:
+  /health/live:
+    get:
+      operationId: healthLive
+      tags: [Health]
+      summary: Liveness del proceso.
+      x-gs-phase: F2
+      x-gs-auth: { application: none, device: none }
+      security: []
+      responses:
+        '200':
+          description: El proceso responde.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthStatus' }
+  /health/ready:
+    get:
+      operationId: healthReady
+      tags: [Health]
+      summary: Readiness (dependencias disponibles, no drenando).
+      x-gs-phase: F2
+      x-gs-auth: { application: none, device: none }
+      security: []
+      responses:
+        '200':
+          description: Lista para recibir tráfico.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadinessStatus' }
+        '503':
+          description: No lista.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadinessStatus' }
+
+  /v1/tokens:
+    post:
+      operationId: mintToken
+      tags: [Credentials]
+      summary: Emitir un token de dispositivo para un subject.
+      description: Crea o reutiliza el subject y el dispositivo. Solo server-to-server con API key.
+      x-gs-phase: F2
+      x-gs-auth: { application: 'tokens:mint', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TokenRequest' }
+      responses:
+        '200':
+          description: Token emitido.
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/RequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/stream/tickets:
+    post:
+      operationId: createStreamTicket
+      tags: [Credentials]
+      summary: Emitir un ticket de un solo uso para abrir el stream.
+      x-gs-phase: F4
+      x-gs-auth: { application: 'stream:connect', device: 'stream:connect' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '201':
+          description: Ticket emitido.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StreamTicketResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/stream:
+    get:
+      operationId: openStream
+      tags: [Credentials]
+      summary: Upgrade a WebSocket (protocolo en docs/08_STREAM_PROTOCOL.md).
+      description: |
+        No es una operación REST: es el handshake WebSocket. Requiere `Upgrade: websocket` y
+        `Sec-WebSocket-Protocol` con `gs.v1.proto` y/o `gs.v1.json`. El ticket autentica la conexión.
+      x-gs-phase: F4
+      x-gs-auth: { application: 'stream:connect', device: 'stream:connect' }
+      security: []
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          description: Ticket `gst_…` de un solo uso. Se redacta en todos los logs.
+          schema: { $ref: '#/components/schemas/StreamTicket' }
+        - name: Sec-WebSocket-Protocol
+          in: header
+          required: true
+          schema:
+            type: string
+            examples: ['gs.v1.proto, gs.v1.json']
+      responses:
+        '101':
+          description: Switching Protocols. Continúa el protocolo de stream.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/sessions:
+    post:
+      operationId: createSession
+      tags: [Sessions]
+      summary: Crear una sesión.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'sessions:write', device: 'sessions:create' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSessionRequest' }
+      responses:
+        '201':
+          description: Sesión creada.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      operationId: listSessions
+      tags: [Sessions]
+      summary: Listar sesiones visibles para el principal.
+      description: Dispositivo = sesiones donde su subject es miembro activo. Aplicación = sesiones del tenant.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'sessions:read', device: none }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/SessionStatus' }
+        - name: external_subject_id
+          in: query
+          required: false
+          description: Solo aplicación. Sesiones donde ese subject es miembro activo.
+          schema: { $ref: '#/components/schemas/ExternalSubjectId' }
+      responses:
+        '200':
+          description: Página de sesiones.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: getSession
+      tags: [Sessions]
+      summary: Obtener una sesión.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'sessions:read', device: none }
+      x-gs-capability: active_member
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '200':
+          description: Sesión.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      operationId: updateSession
+      tags: [Sessions]
+      summary: Actualizar una sesión activa.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'sessions:write', device: none }
+      x-gs-capability: manage
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateSessionRequest' }
+      responses:
+        '200':
+          description: Sesión actualizada.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/close:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    post:
+      operationId: closeSession
+      tags: [Sessions]
+      summary: Cerrar una sesión (idempotente).
+      x-gs-phase: F3
+      x-gs-auth: { application: 'sessions:write', device: none }
+      x-gs-capability: manage
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Sesión cerrada (o ya cerrada/expirada).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/leave:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    post:
+      operationId: leaveSession
+      tags: [Members]
+      summary: El dispositivo abandona la sesión en nombre de su subject.
+      x-gs-phase: F3
+      x-gs-auth: { application: forbidden, device: none }
+      x-gs-capability: active_member
+      security:
+        - deviceToken: []
+      responses:
+        '204':
+          description: Membresía terminada.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/members:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: listMembers
+      tags: [Members]
+      summary: Listar miembros activos con su estado.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'sessions:read', device: none }
+      x-gs-capability: read_or_manage
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de miembros.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: addMember
+      tags: [Members]
+      summary: Agregar un subject como miembro (solo aplicación).
+      x-gs-phase: F3
+      x-gs-auth: { application: 'members:write', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddMemberRequest' }
+      responses:
+        '201':
+          description: Miembro agregado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/members/{member_id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+      - $ref: '#/components/parameters/MemberIdOrMePath'
+    get:
+      operationId: getMember
+      tags: [Members]
+      summary: Obtener un miembro (o `me`).
+      x-gs-phase: F3
+      x-gs-auth: { application: 'sessions:read', device: none }
+      x-gs-capability: read_or_manage_or_self
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '200':
+          description: Miembro.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      operationId: updateMember
+      tags: [Members]
+      summary: Cambiar capacidades o rol de un miembro.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'members:write', device: none }
+      x-gs-capability: manage
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMemberRequest' }
+      responses:
+        '200':
+          description: Miembro actualizado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: revokeMember
+      tags: [Members]
+      summary: Revocar un miembro.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'members:write', device: none }
+      x-gs-capability: manage
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '204':
+          description: Miembro revocado (idempotente si ya estaba revocado).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/members/{member_id}/sharing:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+      - $ref: '#/components/parameters/MemberIdOrMePath'
+    put:
+      operationId: setSharing
+      tags: [Members]
+      summary: Activar o detener la compartición de ubicación.
+      description: |
+        `sharing=true` solo para `member_id=me` desde un dispositivo con capacidad `publish`.
+        `sharing=false` para `me`, para miembros con `manage`, o por la aplicación.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'members:write', device: 'sharing:write' }
+      x-gs-capability: self_publish_or_manage
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SharingRequest' }
+      responses:
+        '200':
+          description: Estado de compartición aplicado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    post:
+      operationId: createInvitation
+      tags: [Invitations]
+      summary: Crear una invitación. El código se devuelve una sola vez.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'invitations:write', device: none }
+      x-gs-capability: invite
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateInvitationRequest' }
+      responses:
+        '201':
+          description: Invitación creada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      operationId: listInvitations
+      tags: [Invitations]
+      summary: Listar invitaciones (sin códigos).
+      x-gs-phase: F3
+      x-gs-auth: { application: 'invitations:write', device: none }
+      x-gs-capability: manage_or_invite_own
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de invitaciones.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/invitations/{invitation_id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+      - $ref: '#/components/parameters/InvitationIdPath'
+    delete:
+      operationId: revokeInvitation
+      tags: [Invitations]
+      summary: Revocar una invitación (idempotente).
+      x-gs-phase: F3
+      x-gs-auth: { application: 'invitations:write', device: none }
+      x-gs-capability: manage_or_issuer
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '204':
+          description: Invitación revocada.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/invitations/redeem:
+    post:
+      operationId: redeemInvitation
+      tags: [Invitations]
+      summary: Canjear un código de invitación.
+      x-gs-phase: F3
+      x-gs-auth: { application: forbidden, device: 'invitations:redeem' }
+      security:
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RedeemInvitationRequest' }
+      responses:
+        '201':
+          description: Membresía creada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RedeemInvitationResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/snapshot:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: getSnapshot
+      tags: [Locations]
+      summary: Últimas ubicaciones retenidas de los miembros que comparten.
+      x-gs-phase: F4
+      x-gs-auth: { application: 'locations:read', device: none }
+      x-gs-capability: read
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '200':
+          description: Snapshot (puede estar vacío).
+          headers:
+            Cache-Control:
+              schema: { type: string, const: 'no-store' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/ingest/locations:
+    post:
+      operationId: ingestLocations
+      tags: [Locations]
+      summary: Ingesta HTTP de muestras (mismas reglas que el stream).
+      x-gs-phase: F8
+      x-gs-auth: { application: forbidden, device: 'ingest:write' }
+      x-gs-capability: publish_sharing_publisher
+      security:
+        - deviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngestRequest' }
+      responses:
+        '200':
+          description: Resultado por muestra.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /v1/subjects:
+    get:
+      operationId: findSubjects
+      tags: [Subjects]
+      summary: Buscar un subject por su ID externo.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'subjects:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - name: external_subject_id
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/ExternalSubjectId' }
+      responses:
+        '200':
+          description: Lista con 0 o 1 elemento.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubjectList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/subjects/{subject_id}:
+    parameters:
+      - $ref: '#/components/parameters/SubjectIdPath'
+    get:
+      operationId: getSubject
+      tags: [Subjects]
+      summary: Obtener un subject.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'subjects:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '200':
+          description: Subject.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subject' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: eraseSubject
+      tags: [Subjects]
+      summary: Borrar un subject (derecho de supresión).
+      description: Revoca tokens, termina membresías, borra snapshots y anonimiza auditoría. Irreversible.
+      x-gs-phase: F10
+      x-gs-auth: { application: 'subjects:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '204':
+          description: Subject borrado.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/subjects/{subject_id}/export:
+    parameters:
+      - $ref: '#/components/parameters/SubjectIdPath'
+    get:
+      operationId: exportSubject
+      tags: [Subjects]
+      summary: Exportar los datos que GeoStream guarda de un subject.
+      x-gs-phase: F10
+      x-gs-auth: { application: 'subjects:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '200':
+          description: Exportación.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubjectExport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/subjects/{subject_id}/revoke-tokens:
+    parameters:
+      - $ref: '#/components/parameters/SubjectIdPath'
+    post:
+      operationId: revokeSubjectTokens
+      tags: [Subjects]
+      summary: Invalidar todos los tokens del subject (incrementa token_epoch).
+      x-gs-phase: F3
+      x-gs-auth: { application: 'subjects:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '200':
+          description: Época incrementada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subject' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/devices/{device_id}:
+    parameters:
+      - $ref: '#/components/parameters/DeviceIdPath'
+    get:
+      operationId: getDevice
+      tags: [Devices]
+      summary: Obtener un dispositivo.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'subjects:manage', device: none }
+      x-gs-capability: own_subject_device
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '200':
+          description: Dispositivo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Device' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deactivateDevice
+      tags: [Devices]
+      summary: Desactivar un dispositivo (cierre de sesión del integrador).
+      description: Invalida sus tokens, cierra sus conexiones y detiene la compartición donde sea publicador.
+      x-gs-phase: F3
+      x-gs-auth: { application: 'subjects:manage', device: none }
+      x-gs-capability: own_device
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '204':
+          description: Dispositivo desactivado (idempotente).
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/webhooks:
+    post:
+      operationId: createWebhook
+      tags: [Webhooks]
+      summary: Registrar un endpoint de webhooks. El secreto se devuelve una sola vez.
+      x-gs-phase: F8
+      x-gs-auth: { application: 'webhooks:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWebhookRequest' }
+      responses:
+        '201':
+          description: Endpoint creado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookEndpointCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      operationId: listWebhooks
+      tags: [Webhooks]
+      summary: Listar endpoints de webhooks.
+      x-gs-phase: F8
+      x-gs-auth: { application: 'webhooks:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de endpoints.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/webhooks/{webhook_id}:
+    parameters:
+      - $ref: '#/components/parameters/WebhookIdPath'
+    get:
+      operationId: getWebhook
+      tags: [Webhooks]
+      summary: Obtener un endpoint de webhooks.
+      x-gs-phase: F8
+      x-gs-auth: { application: 'webhooks:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '200':
+          description: Endpoint.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WebhookEndpoint' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deleteWebhook
+      tags: [Webhooks]
+      summary: Eliminar un endpoint de webhooks.
+      x-gs-phase: F8
+      x-gs-auth: { application: 'webhooks:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '204':
+          description: Eliminado.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/webhooks/{webhook_id}/test:
+    parameters:
+      - $ref: '#/components/parameters/WebhookIdPath'
+    post:
+      operationId: testWebhook
+      tags: [Webhooks]
+      summary: Encolar un evento `webhook.test` para el endpoint.
+      x-gs-phase: F8
+      x-gs-auth: { application: 'webhooks:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '202':
+          description: Evento de prueba encolado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_id]
+                properties:
+                  event_id: { $ref: '#/components/schemas/EventId' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/geofences:
+    post:
+      operationId: createGeofence
+      tags: [Geofences]
+      summary: Crear una geocerca de tenant o de sesión.
+      x-gs-phase: F11
+      x-gs-auth: { application: 'geofences:manage', device: none }
+      x-gs-capability: manage_session_scoped_only
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGeofenceRequest' }
+      responses:
+        '201':
+          description: Geocerca creada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Geofence' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      operationId: listGeofences
+      tags: [Geofences]
+      summary: Listar geocercas.
+      description: Aplicación = todas las del tenant (filtrable por sesión). Dispositivo = solo las de una sesión donde tiene `manage` (session_id obligatorio).
+      x-gs-phase: F11
+      x-gs-auth: { application: 'geofences:manage', device: none }
+      x-gs-capability: manage_session_scoped_only
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: session_id
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/SessionId' }
+      responses:
+        '200':
+          description: Página de geocercas.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GeofenceList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/geofences/{geofence_id}:
+    parameters:
+      - $ref: '#/components/parameters/GeofenceIdPath'
+    get:
+      operationId: getGeofence
+      tags: [Geofences]
+      summary: Obtener una geocerca.
+      x-gs-phase: F11
+      x-gs-auth: { application: 'geofences:manage', device: none }
+      x-gs-capability: manage_session_scoped_only
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '200':
+          description: Geocerca.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Geofence' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deleteGeofence
+      tags: [Geofences]
+      summary: Eliminar una geocerca.
+      x-gs-phase: F11
+      x-gs-auth: { application: 'geofences:manage', device: none }
+      x-gs-capability: manage_session_scoped_only
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '204':
+          description: Eliminada.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+webhooks:
+  sessionEvent:
+    post:
+      operationId: onSessionEvent
+      summary: session.created | session.updated | session.closed | session.expired
+      x-gs-phase: F8
+      security: []  # el receptor verifica la firma HMAC (docs/07_REST_API.md §10.3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+  memberEvent:
+    post:
+      operationId: onMemberEvent
+      summary: member.joined | member.updated | member.left | member.revoked
+      x-gs-phase: F8
+      security: []  # el receptor verifica la firma HMAC (docs/07_REST_API.md §10.3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+  sharingEvent:
+    post:
+      operationId: onSharingEvent
+      summary: sharing.started | sharing.stopped
+      x-gs-phase: F8
+      security: []  # el receptor verifica la firma HMAC (docs/07_REST_API.md §10.3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SharingWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+  geofenceEvent:
+    post:
+      operationId: onGeofenceEvent
+      summary: geofence.entered | geofence.exited
+      x-gs-phase: F11
+      security: []  # el receptor verifica la firma HMAC (docs/07_REST_API.md §10.3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GeofenceWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+  testEvent:
+    post:
+      operationId: onTestEvent
+      summary: webhook.test
+      x-gs-phase: F8
+      security: []  # el receptor verifica la firma HMAC (docs/07_REST_API.md §10.3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TestWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+
+components:
+  securitySchemes:
+    applicationKey:
+      type: http
+      scheme: bearer
+      bearerFormat: 'gsk_<32hex>.<43 base64url>'
+      description: API key de aplicación. Solo server-to-server. Nunca en apps.
+    deviceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token de dispositivo EdDSA emitido por POST /v1/tokens.
+
+  headers:
+    RequestId:
+      description: Identificador opaco de correlación (req_…).
+      schema: { type: string, pattern: '^req_[0-9a-f]{32}$' }
+    ETag:
+      description: Versión del recurso, formato "v<entero>".
+      schema: { type: string, pattern: '^"v[0-9]+"$' }
+    RetryAfter:
+      description: Segundos a esperar antes de reintentar.
+      schema: { type: integer, minimum: 1 }
+
+  parameters:
+    SessionIdPath:
+      name: session_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/SessionId' }
+    MemberIdOrMePath:
+      name: member_id
+      in: path
+      required: true
+      description: ID de miembro o el literal `me` (solo dispositivos).
+      schema:
+        type: string
+        pattern: '^(me|mem_[0-9a-f]{32})$'
+    InvitationIdPath:
+      name: invitation_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/InvitationId' }
+    SubjectIdPath:
+      name: subject_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/SubjectId' }
+    DeviceIdPath:
+      name: device_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/DeviceId' }
+    WebhookIdPath:
+      name: webhook_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/WebhookId' }
+    GeofenceIdPath:
+      name: geofence_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/GeofenceId' }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string, maxLength: 512 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 1, maxLength: 255, pattern: '^[A-Za-z0-9_\-:.]+$' }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      schema: { type: string, pattern: '^"v[0-9]+"$' }
+
+  responses:
+    BadRequest:
+      description: Petición malformada o protocolo no soportado.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Credencial ausente, inválida, expirada o revocada.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Principal, scope o capacidad insuficientes; cuenta deshabilitada.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Recurso inexistente o sin relación con el principal.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: Estado incompatible.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PreconditionFailed:
+      description: If-Match no coincide.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PayloadTooLarge:
+      description: Cuerpo o lote demasiado grande.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnprocessableEntity:
+      description: Validación fallida.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: Rate limit excedido.
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InternalError:
+      description: Error interno.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ServiceUnavailable:
+      description: Dependencia no disponible, drenaje o sobrecarga.
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    # ---------- Identificadores ----------
+    TenantId: { type: string, pattern: '^ten_[0-9a-f]{32}$' }
+    ApplicationId: { type: string, pattern: '^app_[0-9a-f]{32}$' }
+    SubjectId: { type: string, pattern: '^sub_[0-9a-f]{32}$' }
+    DeviceId: { type: string, pattern: '^dev_[0-9a-f]{32}$' }
+    SessionId: { type: string, pattern: '^ses_[0-9a-f]{32}$' }
+    MemberId: { type: string, pattern: '^mem_[0-9a-f]{32}$' }
+    InvitationId: { type: string, pattern: '^inv_[0-9a-f]{32}$' }
+    WebhookId: { type: string, pattern: '^whk_[0-9a-f]{32}$' }
+    EventId: { type: string, pattern: '^evt_[0-9a-f]{32}$' }
+    GeofenceId: { type: string, pattern: '^geo_[0-9a-f]{32}$' }
+    ExternalSubjectId:
+      type: string
+      pattern: '^[A-Za-z0-9._:\-]{1,128}$'
+      description: ID opaco del integrador. No usar correos ni teléfonos.
+    InstallationId:
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    StreamTicket: { type: string, pattern: '^gst_[A-Za-z0-9_-]{43}$' }
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339 UTC con sufijo Z, preferentemente con milisegundos.
+
+    # ---------- Errores ----------
+    ErrorCode:
+      type: string
+      enum:
+        - UNAUTHENTICATED
+        - TOKEN_EXPIRED
+        - PERMISSION_DENIED
+        - INSUFFICIENT_SCOPE
+        - ACCOUNT_DISABLED
+        - NOT_FOUND
+        - CONFLICT
+        - VALIDATION_FAILED
+        - INVALID_LOCATION
+        - RATE_LIMITED
+        - PAYLOAD_TOO_LARGE
+        - SESSION_CLOSED
+        - SESSION_EXPIRED
+        - SESSION_FULL
+        - MEMBER_REVOKED
+        - NOT_SHARING
+        - NOT_PUBLISHER
+        - INVITATION_INVALID
+        - IDEMPOTENCY_KEY_REUSED
+        - PRECONDITION_FAILED
+        - PROTOCOL_VERSION_UNSUPPORTED
+        - PROTOCOL_ERROR
+        - TOO_MANY_SUBSCRIPTIONS
+        - TEMPORARILY_UNAVAILABLE
+        - INTERNAL
+    FieldError:
+      type: object
+      additionalProperties: false
+      required: [field, reason]
+      properties:
+        field: { type: string, maxLength: 200 }
+        reason:
+          type: string
+          enum: [required, invalid_format, out_of_range, not_finite, too_long, too_short, too_many, not_allowed, unknown_field, invalid_enum, conflict]
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details.
+      required: [type, title, status, code, request_id]
+      properties:
+        type: { type: string, description: 'URI del tipo: https://geostream.dev/problems/<code-en-minusculas>' }
+        title: { type: string, maxLength: 200 }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        code: { $ref: '#/components/schemas/ErrorCode' }
+        detail: { type: string, maxLength: 200 }
+        request_id: { type: string, pattern: '^req_[0-9a-f]{32}$' }
+        errors:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/FieldError' }
+
+    # ---------- Salud ----------
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, const: ok }
+    ReadinessStatus:
+      type: object
+      required: [status, checks]
+      properties:
+        status: { type: string, enum: [ready, not_ready] }
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [ok, failing, draining, not_configured]
+
+    # ---------- Credenciales ----------
+    Platform:
+      type: string
+      enum: [ANDROID, IOS, WEB, SERVER, OTHER]
+    DeviceScope:
+      type: string
+      enum: ['sessions:create', 'invitations:redeem', 'stream:connect', 'sharing:write', 'ingest:write']
+    TokenRequest:
+      type: object
+      additionalProperties: false
+      required: [external_subject_id, installation_id, platform]
+      properties:
+        external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
+        installation_id: { $ref: '#/components/schemas/InstallationId' }
+        platform: { $ref: '#/components/schemas/Platform' }
+        app_version: { type: string, maxLength: 32 }
+        sdk_version: { type: string, maxLength: 32 }
+        scopes:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/DeviceScope' }
+        ttl_seconds: { type: integer, minimum: 60, maximum: 86400, description: 'Rango efectivo: GS_TOKEN_MIN_TTL_S..GS_TOKEN_MAX_TTL_S.' }
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_at, subject_id, device_id, scopes]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, const: Bearer }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        subject_id: { $ref: '#/components/schemas/SubjectId' }
+        device_id: { $ref: '#/components/schemas/DeviceId' }
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/DeviceScope' }
+    StreamTicketResponse:
+      type: object
+      required: [ticket, expires_at, stream_url]
+      properties:
+        ticket: { $ref: '#/components/schemas/StreamTicket' }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        stream_url: { type: string, format: uri, description: 'wss://<host>/v1/stream (sin query).' }
+
+    # ---------- Sesiones ----------
+    SessionMode:
+      type: string
+      enum: [ONE_TO_ONE, ONE_TO_MANY, MANY_TO_MANY]
+    SessionStatus:
+      type: string
+      enum: [ACTIVE, CLOSED, EXPIRED]
+    ClosedReason:
+      type: string
+      enum: [CLOSED_BY_MEMBER, CLOSED_BY_APPLICATION, OWNER_LEFT, ADMIN]
+    Metadata:
+      type: object
+      maxProperties: 32
+      propertyNames: { pattern: '^[a-z0-9_.-]{1,64}$' }
+      additionalProperties: { type: string, maxLength: 512 }
+      description: Datos opacos del integrador. No incluir datos personales.
+    Capabilities:
+      type: object
+      additionalProperties: false
+      required: [publish, read, invite, manage]
+      properties:
+        publish: { type: boolean }
+        read: { type: boolean }
+        invite: { type: boolean }
+        manage: { type: boolean }
+    Actor:
+      type: object
+      required: [type, id]
+      properties:
+        type: { type: string, enum: [DEVICE, APPLICATION] }
+        id: { type: string, description: 'dev_… o app_…' }
+    Session:
+      type: object
+      required: [id, mode, status, created_by, expires_at, max_members, snapshot_ttl_seconds, stale_after_seconds, metadata, active_member_count, created_at, updated_at, version]
+      properties:
+        id: { $ref: '#/components/schemas/SessionId' }
+        mode: { $ref: '#/components/schemas/SessionMode' }
+        status: { $ref: '#/components/schemas/SessionStatus' }
+        owner_member_id:
+          oneOf:
+            - { $ref: '#/components/schemas/MemberId' }
+            - { type: 'null' }
+        created_by: { $ref: '#/components/schemas/Actor' }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        max_members: { type: integer, minimum: 2 }
+        snapshot_ttl_seconds: { type: integer, minimum: 0 }
+        stale_after_seconds: { type: integer, minimum: 5, maximum: 3600 }
+        metadata: { $ref: '#/components/schemas/Metadata' }
+        active_member_count: { type: integer, minimum: 0 }
+        closed_reason:
+          oneOf:
+            - { $ref: '#/components/schemas/ClosedReason' }
+            - { type: 'null' }
+        closed_at:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+        version: { type: integer, minimum: 1 }
+    InitialMember:
+      type: object
+      additionalProperties: false
+      required: [external_subject_id]
+      properties:
+        external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
+        capabilities: { $ref: '#/components/schemas/Capabilities' }
+    CreateSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: { $ref: '#/components/schemas/SessionMode' }
+        expires_in_seconds: { type: integer, minimum: 60 }
+        max_members: { type: integer, minimum: 2 }
+        snapshot_ttl_seconds: { type: integer, minimum: 0 }
+        stale_after_seconds: { type: integer, minimum: 5, maximum: 3600 }
+        metadata: { $ref: '#/components/schemas/Metadata' }
+        owner_external_subject_id:
+          $ref: '#/components/schemas/ExternalSubjectId'
+          description: Solo aplicación. Ese subject queda como propietario.
+        initial_members:
+          type: array
+          maxItems: 100
+          description: Solo aplicación.
+          items: { $ref: '#/components/schemas/InitialMember' }
+    UpdateSessionRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        max_members: { type: integer, minimum: 2 }
+        snapshot_ttl_seconds: { type: integer, minimum: 0 }
+        stale_after_seconds: { type: integer, minimum: 5, maximum: 3600 }
+        metadata:
+          oneOf:
+            - { $ref: '#/components/schemas/Metadata' }
+            - { type: 'null' }
+    SessionList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Session' }
+        next_cursor: { type: ['string', 'null'] }
+
+    # ---------- Miembros ----------
+    MemberRole:
+      type: string
+      enum: [OWNER, MEMBER]
+    MemberStatusValue:
+      type: string
+      enum: [ACTIVE, LEFT, REVOKED]
+    Connectivity:
+      type: string
+      enum: [UNSPECIFIED, ONLINE, OFFLINE]
+    Member:
+      type: object
+      required: [id, session_id, subject_id, external_subject_id, role, capabilities, status, sharing, connectivity, joined_at, joined_via, version]
+      properties:
+        id: { $ref: '#/components/schemas/MemberId' }
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        subject_id: { $ref: '#/components/schemas/SubjectId' }
+        external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
+        role: { $ref: '#/components/schemas/MemberRole' }
+        capabilities: { $ref: '#/components/schemas/Capabilities' }
+        status: { $ref: '#/components/schemas/MemberStatusValue' }
+        sharing: { type: boolean }
+        connectivity: { $ref: '#/components/schemas/Connectivity' }
+        last_location_at:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+        joined_at: { $ref: '#/components/schemas/Timestamp' }
+        ended_at:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+        joined_via: { type: string, enum: [CREATOR, DIRECT_ADD, INVITATION] }
+        version: { type: integer, minimum: 1 }
+    MemberList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Member' }
+        next_cursor: { type: ['string', 'null'] }
+    AddMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [external_subject_id]
+      properties:
+        external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
+        role: { $ref: '#/components/schemas/MemberRole' }
+        capabilities: { $ref: '#/components/schemas/Capabilities' }
+    UpdateMemberRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        capabilities: { $ref: '#/components/schemas/Capabilities' }
+        role:
+          $ref: '#/components/schemas/MemberRole'
+          description: Solo aplicación. OWNER transfiere la propiedad.
+    SharingRequest:
+      type: object
+      additionalProperties: false
+      required: [sharing]
+      properties:
+        sharing: { type: boolean }
+
+    # ---------- Invitaciones ----------
+    Invitation:
+      type: object
+      required: [id, session_id, grants, max_uses, uses, expires_at, status, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/InvitationId' }
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        grants: { $ref: '#/components/schemas/Capabilities' }
+        max_uses: { type: integer, minimum: 1 }
+        uses: { type: integer, minimum: 0 }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        status: { type: string, enum: [ACTIVE, EXHAUSTED, EXPIRED, REVOKED] }
+        created_by: { $ref: '#/components/schemas/Actor' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        revoked_at:
+          oneOf:
+            - { $ref: '#/components/schemas/Timestamp' }
+            - { type: 'null' }
+    InvitationCreated:
+      allOf:
+        - $ref: '#/components/schemas/Invitation'
+        - type: object
+          required: [code]
+          properties:
+            code:
+              type: string
+              pattern: '^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$'
+              description: Se muestra solo en esta respuesta.
+    CreateInvitationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        grants: { $ref: '#/components/schemas/Capabilities' }
+        max_uses: { type: integer, minimum: 1 }
+        expires_in_seconds: { type: integer, minimum: 60 }
+    InvitationList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Invitation' }
+        next_cursor: { type: ['string', 'null'] }
+    RedeemInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 32 }
+    RedeemInvitationResponse:
+      type: object
+      required: [session, member]
+      properties:
+        session: { $ref: '#/components/schemas/Session' }
+        member: { $ref: '#/components/schemas/Member' }
+
+    # ---------- Ubicación ----------
+    Position:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude, horizontal_accuracy_m]
+      properties:
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        horizontal_accuracy_m: { type: number, exclusiveMinimum: 0 }
+        altitude_m: { type: number, minimum: -1000, maximum: 50000 }
+        vertical_accuracy_m: { type: number, exclusiveMinimum: 0, maximum: 10000 }
+        speed_mps: { type: number, minimum: 0, maximum: 300 }
+        speed_accuracy_mps: { type: number, exclusiveMinimum: 0, maximum: 300 }
+        heading_deg: { type: number, minimum: 0, exclusiveMaximum: 360 }
+        heading_accuracy_deg: { type: number, exclusiveMinimum: 0, maximum: 180 }
+    LocationQuality:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        source: { type: string, enum: [UNSPECIFIED, GNSS, NETWORK, FUSED, MANUAL, EXTERNAL_DEVICE], default: UNSPECIFIED }
+        kind: { type: string, enum: [MEASURED, FILTERED, INTERPOLATED, PREDICTED, MAP_MATCHED] }
+        is_mock: { type: boolean }
+        motion: { type: string, enum: [UNSPECIFIED, STATIONARY, WALKING, RUNNING, CYCLING, AUTOMOTIVE], default: UNSPECIFIED }
+    LocationSample:
+      type: object
+      additionalProperties: false
+      required: [sequence, captured_at, position, quality]
+      properties:
+        sequence: { type: integer, minimum: 1, maximum: 9007199254740991 }
+        captured_at: { $ref: '#/components/schemas/Timestamp' }
+        position: { $ref: '#/components/schemas/Position' }
+        quality: { $ref: '#/components/schemas/LocationQuality' }
+    SnapshotItem:
+      type: object
+      required: [member_id, external_subject_id, sample, received_at, age_ms]
+      properties:
+        member_id: { $ref: '#/components/schemas/MemberId' }
+        external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
+        sample: { $ref: '#/components/schemas/LocationSample' }
+        received_at: { $ref: '#/components/schemas/Timestamp' }
+        age_ms: { type: integer, minimum: 0, description: 'generated_at - captured_at en milisegundos.' }
+    SessionSnapshot:
+      type: object
+      required: [session_id, generated_at, items]
+      properties:
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        generated_at: { $ref: '#/components/schemas/Timestamp' }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SnapshotItem' }
+    SampleStatus:
+      type: string
+      enum: [ACCEPTED, IGNORED_DUPLICATE, IGNORED_STALE, REJECTED]
+    SampleResult:
+      type: object
+      required: [sequence, status]
+      properties:
+        sequence: { type: integer, minimum: 0 }
+        status: { $ref: '#/components/schemas/SampleStatus' }
+        error_code:
+          oneOf:
+            - { $ref: '#/components/schemas/ErrorCode' }
+            - { type: 'null' }
+        field: { type: ['string', 'null'] }
+    IngestRequest:
+      type: object
+      additionalProperties: false
+      required: [session_id, samples]
+      properties:
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        samples:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: '#/components/schemas/LocationSample' }
+    IngestResponse:
+      type: object
+      required: [session_id, results]
+      properties:
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/SampleResult' }
+
+    # ---------- Subjects y dispositivos ----------
+    Subject:
+      type: object
+      required: [id, external_subject_id, status, token_epoch, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/SubjectId' }
+        external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
+        status: { type: string, enum: [ACTIVE, ERASED] }
+        token_epoch: { type: integer, minimum: 0 }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    SubjectList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          maxItems: 1
+          items: { $ref: '#/components/schemas/Subject' }
+        next_cursor: { type: 'null' }
+    Device:
+      type: object
+      required: [id, subject_id, application_id, platform, status, created_at, last_seen_at]
+      properties:
+        id: { $ref: '#/components/schemas/DeviceId' }
+        subject_id: { $ref: '#/components/schemas/SubjectId' }
+        application_id: { $ref: '#/components/schemas/ApplicationId' }
+        platform: { $ref: '#/components/schemas/Platform' }
+        app_version: { type: ['string', 'null'] }
+        sdk_version: { type: ['string', 'null'] }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        last_seen_at: { $ref: '#/components/schemas/Timestamp' }
+    SubjectExport:
+      type: object
+      required: [subject, devices, memberships, audit_events, generated_at]
+      description: No contiene coordenadas (GeoStream no las conserva salvo historial opt-in, F13).
+      properties:
+        subject: { $ref: '#/components/schemas/Subject' }
+        devices:
+          type: array
+          items: { $ref: '#/components/schemas/Device' }
+        memberships:
+          type: array
+          items: { $ref: '#/components/schemas/Member' }
+        audit_events:
+          type: array
+          items:
+            type: object
+            required: [id, at, action]
+            properties:
+              id: { type: string }
+              at: { $ref: '#/components/schemas/Timestamp' }
+              action: { type: string }
+              target_type: { type: string }
+              target_id: { type: string }
+        generated_at: { $ref: '#/components/schemas/Timestamp' }
+
+    # ---------- Webhooks ----------
+    WebhookEventType:
+      type: string
+      enum:
+        - session.created
+        - session.updated
+        - session.closed
+        - session.expired
+        - member.joined
+        - member.updated
+        - member.left
+        - member.revoked
+        - sharing.started
+        - sharing.stopped
+        - geofence.entered
+        - geofence.exited
+        - webhook.test
+    WebhookEndpoint:
+      type: object
+      required: [id, url, event_types, status, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/WebhookId' }
+        url: { type: string, format: uri, maxLength: 2048 }
+        event_types:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/WebhookEventType' }
+        description: { type: ['string', 'null'], maxLength: 200 }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        consecutive_failures: { type: integer, minimum: 0 }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    WebhookEndpointCreated:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEndpoint'
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              pattern: '^whsec_[A-Za-z0-9_-]{43}$'
+              description: Secreto HMAC. Se muestra solo en esta respuesta.
+    CreateWebhookRequest:
+      type: object
+      additionalProperties: false
+      required: [url, event_types]
+      properties:
+        url: { type: string, format: uri, maxLength: 2048 }
+        event_types:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/WebhookEventType' }
+        description: { type: string, maxLength: 200 }
+    WebhookList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/WebhookEndpoint' }
+        next_cursor: { type: ['string', 'null'] }
+    WebhookEnvelopeBase:
+      type: object
+      required: [id, type, created_at, tenant_id, data]
+      properties:
+        id: { $ref: '#/components/schemas/EventId' }
+        type: { $ref: '#/components/schemas/WebhookEventType' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        tenant_id: { $ref: '#/components/schemas/TenantId' }
+    SessionWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type: { enum: [session.created, session.updated, session.closed, session.expired] }
+            data:
+              type: object
+              required: [session]
+              properties:
+                session: { $ref: '#/components/schemas/Session' }
+    MemberWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type: { enum: [member.joined, member.updated, member.left, member.revoked] }
+            data:
+              type: object
+              required: [member]
+              properties:
+                member: { $ref: '#/components/schemas/Member' }
+    SharingWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type: { enum: [sharing.started, sharing.stopped] }
+            data:
+              type: object
+              required: [session_id, member_id, external_subject_id, sharing, changed_at]
+              properties:
+                session_id: { $ref: '#/components/schemas/SessionId' }
+                member_id: { $ref: '#/components/schemas/MemberId' }
+                external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
+                sharing: { type: boolean }
+                changed_at: { $ref: '#/components/schemas/Timestamp' }
+    GeofenceWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type: { enum: [geofence.entered, geofence.exited] }
+            data:
+              type: object
+              required: [geofence_id, session_id, member_id, external_subject_id, transition, occurred_at]
+              properties:
+                geofence_id: { $ref: '#/components/schemas/GeofenceId' }
+                session_id: { $ref: '#/components/schemas/SessionId' }
+                member_id: { $ref: '#/components/schemas/MemberId' }
+                external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
+                transition: { type: string, enum: [ENTERED, EXITED] }
+                occurred_at: { $ref: '#/components/schemas/Timestamp' }
+    TestWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type: { const: webhook.test }
+            data:
+              type: object
+              required: [webhook_id]
+              properties:
+                webhook_id: { $ref: '#/components/schemas/WebhookId' }
+
+    # ---------- Geocercas (F11) ----------
+    LatLng:
+      type: object
+      additionalProperties: false
+      required: [latitude, longitude]
+      properties:
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+    CircleShape:
+      type: object
+      additionalProperties: false
+      required: [type, center, radius_m]
+      properties:
+        type: { const: circle }
+        center: { $ref: '#/components/schemas/LatLng' }
+        radius_m: { type: number, minimum: 25, maximum: 50000 }
+    PolygonShape:
+      type: object
+      additionalProperties: false
+      required: [type, ring]
+      properties:
+        type: { const: polygon }
+        ring:
+          type: array
+          minItems: 4
+          maxItems: 101
+          description: Anillo exterior cerrado (primer punto = último), sin autointersecciones.
+          items: { $ref: '#/components/schemas/LatLng' }
+    GeofenceShape:
+      oneOf:
+        - $ref: '#/components/schemas/CircleShape'
+        - $ref: '#/components/schemas/PolygonShape'
+      discriminator:
+        propertyName: type
+        mapping:
+          circle: '#/components/schemas/CircleShape'
+          polygon: '#/components/schemas/PolygonShape'
+    Geofence:
+      type: object
+      required: [id, name, shape, metadata, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/GeofenceId' }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        session_id:
+          oneOf:
+            - { $ref: '#/components/schemas/SessionId' }
+            - { type: 'null' }
+        shape: { $ref: '#/components/schemas/GeofenceShape' }
+        metadata: { $ref: '#/components/schemas/Metadata' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    CreateGeofenceRequest:
+      type: object
+      additionalProperties: false
+      required: [name, shape]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        shape: { $ref: '#/components/schemas/GeofenceShape' }
+        metadata: { $ref: '#/components/schemas/Metadata' }
+    GeofenceList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Geofence' }
+        next_cursor: { type: ['string', 'null'] }

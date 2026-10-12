@@ -1,0 +1,426 @@
+{
+  "description": "Mensajes de stream completos y válidos en JSON canónico proto3 (subprotocolo gs.v1.json), en forma canónica: sin campos con valor por defecto, de modo que JSON -> binario -> JSON es idéntico. Base de las pruebas de ida y vuelta (T-F0-04), del codec del SDK y del simulador de transporte. Verificado con `buf convert`.",
+  "version": 1,
+  "messages": [
+    {
+      "id": "MSG-C-001",
+      "type": "ClientMessage",
+      "description": "ClientHello",
+      "json": {
+        "hello": {
+          "sdkName": "geostream-flutter",
+          "sdkVersion": "0.1.0",
+          "platform": "PLATFORM_ANDROID",
+          "appVersion": "3.4.1",
+          "lastSequence": "41",
+          "clientTime": "2026-10-11T21:04:00Z"
+        }
+      }
+    },
+    {
+      "id": "MSG-C-002",
+      "type": "ClientMessage",
+      "description": "Subscribe",
+      "json": {
+        "requestId": "1",
+        "subscribe": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a"
+        }
+      }
+    },
+    {
+      "id": "MSG-C-003",
+      "type": "ClientMessage",
+      "description": "Subscribe sin snapshot",
+      "json": {
+        "requestId": "2",
+        "subscribe": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "skipSnapshot": true
+        }
+      }
+    },
+    {
+      "id": "MSG-C-004",
+      "type": "ClientMessage",
+      "description": "Unsubscribe",
+      "json": {
+        "requestId": "3",
+        "unsubscribe": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a"
+        }
+      }
+    },
+    {
+      "id": "MSG-C-005",
+      "type": "ClientMessage",
+      "description": "PublishLocation",
+      "json": {
+        "requestId": "4",
+        "publishLocation": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "samples": [
+            {
+              "sequence": "42",
+              "capturedAt": "2026-10-11T21:04:05.123Z",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontalAccuracyM": 8.5,
+                "speedMps": 4.2,
+                "headingDeg": 91
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "MSG-C-006",
+      "type": "ClientMessage",
+      "description": "Heartbeat",
+      "json": {
+        "heartbeat": {
+          "clientTime": "2026-10-11T21:04:20Z"
+        }
+      }
+    },
+    {
+      "id": "MSG-C-007",
+      "type": "ClientMessage",
+      "description": "AuthRefresh",
+      "json": {
+        "requestId": "5",
+        "authRefresh": {
+          "accessToken": "eyJhbGciOiJFZERTQSJ9.e30.c2ln"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-001",
+      "type": "ServerMessage",
+      "description": "ServerHello",
+      "json": {
+        "hello": {
+          "connectionId": "con_0192b6c0a1e47c3f9d2a7b5e8f1c0d3d",
+          "serverTime": "2026-10-11T21:04:00.210Z",
+          "authExpiresAt": "2026-10-11T21:19:00Z",
+          "sequenceFloor": "41",
+          "limits": {
+            "maxFrameBytes": 16384,
+            "maxSubscriptions": 20,
+            "minPublishIntervalMs": 1000,
+            "maxSamplesPerPublish": 1,
+            "heartbeatIntervalMs": 20000,
+            "idleTimeoutMs": 60000,
+            "maxEventAgeMs": 120000
+          },
+          "principalKind": "PRINCIPAL_KIND_DEVICE",
+          "subjectId": "sub_0192b6c0a1e47c3f9d2a7b5e8f1c0d3e",
+          "deviceId": "dev_0192b6c0a1e47c3f9d2a7b5e8f1c0d3f"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-002",
+      "type": "ServerMessage",
+      "description": "SubscribeAck con snapshot",
+      "json": {
+        "requestId": "1",
+        "subscribeAck": {
+          "session": {
+            "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+            "mode": "SESSION_MODE_MANY_TO_MANY",
+            "status": "SESSION_STATUS_ACTIVE",
+            "expiresAt": "2026-10-11T23:00:00Z",
+            "maxMembers": 50,
+            "staleAfterSeconds": 60,
+            "snapshotTtlSeconds": 600
+          },
+          "members": [
+            {
+              "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+              "memberId": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3b",
+              "externalSubjectId": "alice",
+              "role": "MEMBER_ROLE_OWNER",
+              "capabilities": {
+                "publish": true,
+                "read": true,
+                "invite": true,
+                "manage": true
+              },
+              "sharing": true,
+              "connectivity": "CONNECTIVITY_ONLINE",
+              "lastLocationAt": "2026-10-11T21:04:05.123Z"
+            },
+            {
+              "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+              "memberId": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3c",
+              "externalSubjectId": "bob",
+              "role": "MEMBER_ROLE_MEMBER",
+              "capabilities": {
+                "publish": true,
+                "read": true
+              }
+            }
+          ],
+          "snapshot": [
+            {
+              "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+              "memberId": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3b",
+              "sample": {
+                "sequence": "42",
+                "capturedAt": "2026-10-11T21:04:05.123Z",
+                "position": {
+                  "latitude": 8.9824,
+                  "longitude": -79.5199,
+                  "horizontalAccuracyM": 8.5,
+                  "speedMps": 4.2,
+                  "headingDeg": 91
+                },
+                "quality": {
+                  "source": "LOCATION_SOURCE_GNSS",
+                  "kind": "LOCATION_KIND_MEASURED"
+                }
+              },
+              "receivedAt": "2026-10-11T21:04:05.301Z",
+              "delivery": "DELIVERY_KIND_SNAPSHOT"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "MSG-S-003",
+      "type": "ServerMessage",
+      "description": "UnsubscribeAck",
+      "json": {
+        "requestId": "3",
+        "unsubscribeAck": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-004",
+      "type": "ServerMessage",
+      "description": "PublishAck aceptado",
+      "json": {
+        "requestId": "4",
+        "publishAck": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "results": [
+            {
+              "sequence": "42",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "MSG-S-005",
+      "type": "ServerMessage",
+      "description": "PublishAck con muestra rechazada",
+      "json": {
+        "requestId": "4",
+        "publishAck": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "results": [
+            {
+              "sequence": "42",
+              "status": "SAMPLE_STATUS_REJECTED",
+              "errorCode": "ERROR_CODE_INVALID_LOCATION",
+              "field": "position.latitude"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "MSG-S-006",
+      "type": "ServerMessage",
+      "description": "PublishAck lote rechazado por rate limit",
+      "json": {
+        "requestId": "4",
+        "publishAck": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "requestError": "ERROR_CODE_RATE_LIMITED",
+          "retryAfterMs": 800
+        }
+      }
+    },
+    {
+      "id": "MSG-S-007",
+      "type": "ServerMessage",
+      "description": "HeartbeatAck",
+      "json": {
+        "heartbeatAck": {
+          "clientTime": "2026-10-11T21:04:20Z",
+          "serverTime": "2026-10-11T21:04:20.105Z"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-008",
+      "type": "ServerMessage",
+      "description": "AuthRefreshAck",
+      "json": {
+        "requestId": "5",
+        "authRefreshAck": {
+          "authExpiresAt": "2026-10-11T21:34:00Z"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-009",
+      "type": "ServerMessage",
+      "description": "LocationUpdate",
+      "json": {
+        "locationUpdate": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "memberId": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3b",
+          "sample": {
+            "sequence": "42",
+            "capturedAt": "2026-10-11T21:04:05.123Z",
+            "position": {
+              "latitude": 8.9824,
+              "longitude": -79.5199,
+              "horizontalAccuracyM": 8.5,
+              "speedMps": 4.2,
+              "headingDeg": 91
+            },
+            "quality": {
+              "source": "LOCATION_SOURCE_GNSS",
+              "kind": "LOCATION_KIND_MEASURED"
+            }
+          },
+          "receivedAt": "2026-10-11T21:04:05.301Z",
+          "delivery": "DELIVERY_KIND_LIVE"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-010",
+      "type": "ServerMessage",
+      "description": "MemberStatus deja de compartir",
+      "json": {
+        "memberStatus": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "memberId": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3b",
+          "externalSubjectId": "alice",
+          "role": "MEMBER_ROLE_OWNER",
+          "capabilities": {
+            "publish": true,
+            "read": true,
+            "invite": true,
+            "manage": true
+          }
+        }
+      }
+    },
+    {
+      "id": "MSG-S-011",
+      "type": "ServerMessage",
+      "description": "MemberEvent revocado",
+      "json": {
+        "memberEvent": {
+          "kind": "MEMBER_EVENT_KIND_REVOKED",
+          "member": {
+            "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+            "memberId": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3c",
+            "externalSubjectId": "bob",
+            "role": "MEMBER_ROLE_MEMBER",
+            "capabilities": {
+              "publish": true,
+              "read": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "MSG-S-012",
+      "type": "ServerMessage",
+      "description": "SessionEvent cerrada",
+      "json": {
+        "sessionEvent": {
+          "kind": "SESSION_EVENT_KIND_CLOSED",
+          "session": {
+            "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+            "mode": "SESSION_MODE_MANY_TO_MANY",
+            "status": "SESSION_STATUS_CLOSED",
+            "expiresAt": "2026-10-11T23:00:00Z",
+            "maxMembers": 50,
+            "staleAfterSeconds": 60,
+            "snapshotTtlSeconds": 600
+          }
+        }
+      }
+    },
+    {
+      "id": "MSG-S-013",
+      "type": "ServerMessage",
+      "description": "SubscriptionEnded",
+      "json": {
+        "subscriptionEnded": {
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "reason": "SUBSCRIPTION_END_REASON_MEMBER_REVOKED"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-014",
+      "type": "ServerMessage",
+      "description": "AuthExpiring",
+      "json": {
+        "authExpiring": {
+          "authExpiresAt": "2026-10-11T21:19:00Z"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-015",
+      "type": "ServerMessage",
+      "description": "ServerNotice drenaje",
+      "json": {
+        "serverNotice": {
+          "kind": "SERVER_NOTICE_KIND_DRAINING",
+          "reconnectAfterMs": 2300
+        }
+      }
+    },
+    {
+      "id": "MSG-S-016",
+      "type": "ServerMessage",
+      "description": "StreamError",
+      "json": {
+        "requestId": "1",
+        "error": {
+          "code": "ERROR_CODE_NOT_FOUND",
+          "message": "session not found",
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a"
+        }
+      }
+    },
+    {
+      "id": "MSG-S-017",
+      "type": "ServerMessage",
+      "description": "GeofenceEvent (F11)",
+      "json": {
+        "geofenceEvent": {
+          "geofenceId": "geo_0192b6c0a1e47c3f9d2a7b5e8f1c0d40",
+          "sessionId": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+          "memberId": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3b",
+          "transition": "GEOFENCE_TRANSITION_ENTERED",
+          "occurredAt": "2026-10-11T21:04:05.123Z",
+          "sequence": "42"
+        }
+      }
+    }
+  ]
+}

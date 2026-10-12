@@ -1,0 +1,11 @@
+# Configuración de lint para el contrato OpenAPI.
+# Uso: npx @redocly/cli lint contracts/openapi/geostream.v1.yaml --config contracts/openapi/redocly.yaml
+extends:
+  - recommended
+rules:
+  info-license: off                # licencia pendiente de decisión (ADR-0019)
+  no-server-example.com: off       # el servidor del contrato es un marcador
+  operation-4xx-response: error
+  operation-operationId-unique: error
+  no-unused-components: warn
+  security-defined: error

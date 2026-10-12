@@ -1,0 +1,170 @@
+{
+  "id": "SCN-007",
+  "title": "Invitaciones: un solo uso y readmisión de revocados",
+  "requirements": [
+    "FR-INV-001",
+    "FR-INV-002",
+    "FR-MEM-007"
+  ],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ]
+    },
+    "alice": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "bob": {
+      "kind": "device",
+      "external_subject_id": "bob",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "dave": {
+      "kind": "device",
+      "external_subject_id": "dave",
+      "platform": "PLATFORM_ANDROID"
+    }
+  },
+  "steps": [
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600
+      },
+      "expect": {
+        "status": 201
+      },
+      "capture": {
+        "session_id": "$.id"
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions/{{session_id}}/invitations",
+      "body": {
+        "max_uses": 1
+      },
+      "expect": {
+        "status": 201
+      },
+      "capture": {
+        "code1": "$.code"
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/invitations/redeem",
+      "body": {
+        "code": "{{code1}}"
+      },
+      "expect": {
+        "status": 201,
+        "json": {
+          "member": {
+            "sharing": false
+          }
+        }
+      },
+      "capture": {
+        "bob_member_id": "$.member.id"
+      }
+    },
+    {
+      "actor": "dave",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/invitations/redeem",
+      "body": {
+        "code": "{{code1}}"
+      },
+      "expect": {
+        "status": 404,
+        "json": {
+          "code": "INVITATION_INVALID"
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions/{{session_id}}/invitations",
+      "body": {
+        "max_uses": 10
+      },
+      "expect": {
+        "status": 201
+      },
+      "capture": {
+        "code2": "$.code"
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "DELETE",
+      "path": "/v1/sessions/{{session_id}}/members/{{bob_member_id}}",
+      "expect": {
+        "status": 204
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/invitations/redeem",
+      "body": {
+        "code": "{{code2}}"
+      },
+      "expect": {
+        "status": 404,
+        "json": {
+          "code": "INVITATION_INVALID"
+        }
+      },
+      "note": "un revocado no vuelve por invitación"
+    },
+    {
+      "actor": "dave",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/invitations/redeem",
+      "body": {
+        "code": "{{code2}}"
+      },
+      "expect": {
+        "status": 201
+      }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions/{{session_id}}/members",
+      "body": {
+        "external_subject_id": "bob"
+      },
+      "expect": {
+        "status": 201
+      },
+      "note": "readmisión por alta directa"
+    }
+  ]
+}

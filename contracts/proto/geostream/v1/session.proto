@@ -1,0 +1,91 @@
+// GeoStream — sesión y miembros en el protocolo de stream v1.
+// Reglas de dominio: docs/05_DOMAIN_MODEL.md.
+syntax = "proto3";
+
+package geostream.v1;
+
+import "google/protobuf/timestamp.proto";
+
+enum SessionMode {
+  SESSION_MODE_UNSPECIFIED = 0;
+  SESSION_MODE_ONE_TO_ONE = 1;
+  SESSION_MODE_ONE_TO_MANY = 2;
+  SESSION_MODE_MANY_TO_MANY = 3;
+}
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_ACTIVE = 1;
+  SESSION_STATUS_CLOSED = 2;
+  SESSION_STATUS_EXPIRED = 3;
+}
+
+enum MemberRole {
+  MEMBER_ROLE_UNSPECIFIED = 0;
+  MEMBER_ROLE_OWNER = 1;
+  MEMBER_ROLE_MEMBER = 2;
+}
+
+// Conectividad del dispositivo publicador. UNSPECIFIED = desconocida o no expuesta
+// (siempre UNSPECIFIED para miembros que no comparten).
+enum Connectivity {
+  CONNECTIVITY_UNSPECIFIED = 0;
+  CONNECTIVITY_ONLINE = 1;
+  CONNECTIVITY_OFFLINE = 2;
+}
+
+message Capabilities {
+  bool publish = 1;
+  bool read = 2;
+  bool invite = 3;
+  bool manage = 4;
+}
+
+message SessionInfo {
+  string session_id = 1;
+  SessionMode mode = 2;
+  SessionStatus status = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  uint32 max_members = 5;
+  uint32 stale_after_seconds = 6;
+  uint32 snapshot_ttl_seconds = 7;
+}
+
+message MemberStatus {
+  string session_id = 1;
+  string member_id = 2;
+  // ID del integrador para el subject (opaco por política).
+  string external_subject_id = 3;
+  MemberRole role = 4;
+  Capabilities capabilities = 5;
+  bool sharing = 6;
+  Connectivity connectivity = 7;
+  // captured_at del snapshot vigente; ausente si no comparte o no hay snapshot.
+  optional google.protobuf.Timestamp last_location_at = 8;
+}
+
+enum MemberEventKind {
+  MEMBER_EVENT_KIND_UNSPECIFIED = 0;
+  MEMBER_EVENT_KIND_JOINED = 1;
+  MEMBER_EVENT_KIND_LEFT = 2;
+  MEMBER_EVENT_KIND_REVOKED = 3;
+  // Cambio de capacidades o de rol.
+  MEMBER_EVENT_KIND_UPDATED = 4;
+}
+
+message MemberEvent {
+  MemberEventKind kind = 1;
+  MemberStatus member = 2;
+}
+
+enum SessionEventKind {
+  SESSION_EVENT_KIND_UNSPECIFIED = 0;
+  SESSION_EVENT_KIND_UPDATED = 1;
+  SESSION_EVENT_KIND_CLOSED = 2;
+  SESSION_EVENT_KIND_EXPIRED = 3;
+}
+
+message SessionEvent {
+  SessionEventKind kind = 1;
+  SessionInfo session = 2;
+}

@@ -1,0 +1,363 @@
+{
+  "id": "SCN-001",
+  "title": "Dos dispositivos comparten y un tercero autorizado recibe ambos",
+  "requirements": [
+    "FR-SES-001",
+    "FR-SHR-001",
+    "FR-SHR-002",
+    "FR-STR-002",
+    "FR-STR-003",
+    "FR-STR-004",
+    "FR-PRS-001"
+  ],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ]
+    },
+    "alice": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "bob": {
+      "kind": "device",
+      "external_subject_id": "bob",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "carol": {
+      "kind": "device",
+      "external_subject_id": "carol",
+      "platform": "PLATFORM_ANDROID"
+    }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "initial_members": [
+          {
+            "external_subject_id": "alice"
+          },
+          {
+            "external_subject_id": "bob"
+          },
+          {
+            "external_subject_id": "carol",
+            "capabilities": {
+              "publish": false,
+              "read": true,
+              "invite": false,
+              "manage": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 201
+      },
+      "capture": {
+        "session_id": "$.id"
+      }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members",
+      "expect": {
+        "status": 200
+      },
+      "capture": {
+        "alice_member_id": "$.data[?(@.external_subject_id=='alice')].id",
+        "bob_member_id": "$.data[?(@.external_subject_id=='bob')].id",
+        "carol_member_id": "$.data[?(@.external_subject_id=='carol')].id"
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members/me",
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": false
+        }
+      },
+      "note": "FR-SHR-001: compartir apagado por defecto"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "bob",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "carol",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "carol",
+      "op": "stream.send",
+      "message": {
+        "subscribe": {
+          "session_id": "{{session_id}}"
+        }
+      },
+      "expect_reply": {
+        "subscribe_ack": {}
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": true
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": true
+        }
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": true
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": true
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "member_status",
+      "match": {
+        "member_id": "{{alice_member_id}}",
+        "sharing": true
+      },
+      "within_ms": 2000
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "1",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.99,
+                "longitude": -79.52,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "1",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "location_update",
+      "match": {
+        "member_id": "{{alice_member_id}}",
+        "sample": {
+          "sequence": "1"
+        }
+      },
+      "within_ms": 1000
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "location_update",
+      "match": {
+        "member_id": "{{bob_member_id}}",
+        "sample": {
+          "sequence": "1"
+        }
+      },
+      "within_ms": 1000
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": false
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": false
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "member_status",
+      "match": {
+        "member_id": "{{alice_member_id}}",
+        "sharing": false
+      },
+      "within_ms": 2000
+    },
+    {
+      "actor": "bob",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "2",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.991,
+                "longitude": -79.521,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "2",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "location_update",
+      "match": {
+        "member_id": "{{bob_member_id}}",
+        "sample": {
+          "sequence": "2"
+        }
+      },
+      "within_ms": 1000
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "2",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "request_error": "ERROR_CODE_NOT_SHARING"
+        }
+      },
+      "note": "cada miembro controla su propia compartición"
+    }
+  ]
+}

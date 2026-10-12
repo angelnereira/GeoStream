@@ -1,0 +1,28 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+**/ios/Pods/
+**/ios/.symlinks/
+**/android/.gradle/
+**/android/local.properties
+*.iml
+
+# Entorno y secretos (nunca versionar)
+.env
+.env.*
+!deploy/.env.example
+*.key.pem
+secrets/
+
+# Herramientas
+node_modules/
+coverage/
+*.profraw
+.idea/
+.vscode/
+.DS_Store

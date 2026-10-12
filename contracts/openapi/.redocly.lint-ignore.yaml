@@ -1,0 +1,7 @@
+# Excepciones justificadas al lint de Redocly.
+geostream.v1.yaml:
+  operation-4xx-response:
+    - '#/paths/~1health~1live/get/responses'   # health no devuelve 4xx
+    - '#/paths/~1health~1ready/get/responses'
+  operation-2xx-response:
+    - '#/paths/~1v1~1stream/get/responses'     # handshake WebSocket: 101

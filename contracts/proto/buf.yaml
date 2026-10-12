@@ -1,0 +1,13 @@
+# Configuración de Buf para los contratos Protobuf de GeoStream.
+# Comandos (desde contracts/proto):
+#   buf lint
+#   buf breaking --against '../../.git#branch=main,subdir=contracts/proto'   (obligatorio desde M2)
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

@@ -1,0 +1,324 @@
+{
+  "id": "SCN-002",
+  "title": "Revocación en vivo de un miembro",
+  "requirements": [
+    "FR-MEM-004",
+    "FR-STR-008",
+    "NFR-SEC-002",
+    "FR-PRV-001"
+  ],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ]
+    },
+    "alice": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "bob": {
+      "kind": "device",
+      "external_subject_id": "bob",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "carol": {
+      "kind": "device",
+      "external_subject_id": "carol",
+      "platform": "PLATFORM_ANDROID"
+    }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "initial_members": [
+          {
+            "external_subject_id": "alice"
+          },
+          {
+            "external_subject_id": "bob"
+          },
+          {
+            "external_subject_id": "carol",
+            "capabilities": {
+              "publish": false,
+              "read": true,
+              "invite": false,
+              "manage": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 201
+      },
+      "capture": {
+        "session_id": "$.id"
+      }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members",
+      "expect": {
+        "status": 200
+      },
+      "capture": {
+        "alice_member_id": "$.data[?(@.external_subject_id=='alice')].id",
+        "bob_member_id": "$.data[?(@.external_subject_id=='bob')].id",
+        "carol_member_id": "$.data[?(@.external_subject_id=='carol')].id"
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "bob",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "carol",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "bob",
+      "op": "stream.send",
+      "message": {
+        "subscribe": {
+          "session_id": "{{session_id}}"
+        }
+      },
+      "expect_reply": {
+        "subscribe_ack": {}
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.send",
+      "message": {
+        "subscribe": {
+          "session_id": "{{session_id}}"
+        }
+      },
+      "expect_reply": {
+        "subscribe_ack": {}
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": true
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": true
+        }
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": true
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": true
+        }
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "1",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "location_update",
+      "match": {
+        "member_id": "{{bob_member_id}}",
+        "sample": {
+          "sequence": "1"
+        }
+      },
+      "within_ms": 1000
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "DELETE",
+      "path": "/v1/sessions/{{session_id}}/members/{{bob_member_id}}",
+      "expect": {
+        "status": 204
+      },
+      "mark": "revoked_at"
+    },
+    {
+      "actor": "bob",
+      "op": "stream.expect",
+      "message": "subscription_ended",
+      "match": {
+        "session_id": "{{session_id}}",
+        "reason": "SUBSCRIPTION_END_REASON_MEMBER_REVOKED"
+      },
+      "within_ms": 2000,
+      "measure_from": "revoked_at",
+      "metric": "revocation_propagation_ms"
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "member_event",
+      "match": {
+        "kind": "MEMBER_EVENT_KIND_REVOKED",
+        "member": {
+          "member_id": "{{bob_member_id}}"
+        }
+      },
+      "within_ms": 2000
+    },
+    {
+      "op": "assert.ephemeral",
+      "what": "snapshot",
+      "session": "{{session_id}}",
+      "member": "{{bob_member_id}}",
+      "exists": false
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "1",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "location_update",
+      "match": {
+        "member_id": "{{alice_member_id}}",
+        "sample": {
+          "sequence": "1"
+        }
+      },
+      "within_ms": 1000
+    },
+    {
+      "actor": "bob",
+      "op": "stream.expect_none",
+      "message": "location_update",
+      "for_ms": 1000
+    },
+    {
+      "actor": "bob",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "2",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "request_error": "ERROR_CODE_MEMBER_REVOKED"
+        }
+      }
+    }
+  ]
+}

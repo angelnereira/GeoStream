@@ -1,0 +1,126 @@
+// GeoStream — modelo de ubicación v1.
+// Validación normativa de cada campo: docs/09_VALIDATION_ERRORS.md §3.
+syntax = "proto3";
+
+package geostream.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Posición en WGS 84. Unidades: grados, metros, metros/segundo.
+// Un campo `optional` ausente significa "desconocido", nunca cero.
+message Position {
+  // Obligatorio. [-90, 90], finito.
+  double latitude = 1;
+  // Obligatorio. [-180, 180], finito.
+  double longitude = 2;
+  // Obligatorio. (0, max_horizontal_accuracy_m]. Radio de confianza en metros.
+  double horizontal_accuracy_m = 3;
+  // [-1000, 50000].
+  optional double altitude_m = 4;
+  // (0, 10000].
+  optional double vertical_accuracy_m = 5;
+  // [0, 300].
+  optional double speed_mps = 6;
+  // (0, 300].
+  optional double speed_accuracy_mps = 7;
+  // [0, 360).
+  optional double heading_deg = 8;
+  // (0, 180].
+  optional double heading_accuracy_deg = 9;
+}
+
+// Origen de la medición.
+enum LocationSource {
+  // Desconocido. Aceptado.
+  LOCATION_SOURCE_UNSPECIFIED = 0;
+  LOCATION_SOURCE_GNSS = 1;
+  LOCATION_SOURCE_NETWORK = 2;
+  LOCATION_SOURCE_FUSED = 3;
+  LOCATION_SOURCE_MANUAL = 4;
+  LOCATION_SOURCE_EXTERNAL_DEVICE = 5;
+}
+
+// Naturaleza del dato. Los datos derivados nunca se marcan como MEASURED.
+enum LocationKind {
+  // Inválido: una muestra con kind UNSPECIFIED se rechaza.
+  LOCATION_KIND_UNSPECIFIED = 0;
+  LOCATION_KIND_MEASURED = 1;
+  LOCATION_KIND_FILTERED = 2;
+  LOCATION_KIND_INTERPOLATED = 3;
+  LOCATION_KIND_PREDICTED = 4;
+  LOCATION_KIND_MAP_MATCHED = 5;
+}
+
+// Actividad de movimiento estimada por la plataforma, si está disponible.
+enum MotionActivity {
+  // Desconocida. Aceptada.
+  MOTION_ACTIVITY_UNSPECIFIED = 0;
+  MOTION_ACTIVITY_STATIONARY = 1;
+  MOTION_ACTIVITY_WALKING = 2;
+  MOTION_ACTIVITY_RUNNING = 3;
+  MOTION_ACTIVITY_CYCLING = 4;
+  MOTION_ACTIVITY_AUTOMOTIVE = 5;
+}
+
+// Metadatos de calidad. Obligatorio en cada muestra.
+message LocationQuality {
+  LocationSource source = 1;
+  // Obligatorio (distinto de UNSPECIFIED).
+  LocationKind kind = 2;
+  // Presente solo si la plataforma lo expone.
+  optional bool is_mock = 3;
+  MotionActivity motion = 4;
+}
+
+// Una muestra publicada por un dispositivo.
+message LocationSample {
+  // Obligatorio. [1, 2^53 - 1]. Monotónico por instalación de dispositivo (ADR-0008).
+  uint64 sequence = 1;
+  // Obligatorio. Instante de captura en el dominio de tiempo del servidor (corregido por el SDK).
+  google.protobuf.Timestamp captured_at = 2;
+  // Obligatorio.
+  Position position = 3;
+  // Obligatorio.
+  LocationQuality quality = 4;
+}
+
+// Tipo de entrega de una LocationUpdate.
+enum DeliveryKind {
+  DELIVERY_KIND_UNSPECIFIED = 0;
+  // Muestra aceptada en vivo.
+  DELIVERY_KIND_LIVE = 1;
+  // Último estado retenido, enviado en SubscribeAck.
+  DELIVERY_KIND_SNAPSHOT = 2;
+  // Reservado para reenvíos de historial (F13).
+  DELIVERY_KIND_REPLAY = 3;
+}
+
+// Ubicación distribuida por el servidor a suscriptores autorizados.
+message LocationUpdate {
+  string session_id = 1;
+  // Miembro al que pertenece la ubicación (mem_...).
+  string member_id = 2;
+  LocationSample sample = 3;
+  // Asignado por el servidor al aceptar la muestra.
+  google.protobuf.Timestamp received_at = 4;
+  DeliveryKind delivery = 5;
+}
+
+// Transición de geocerca (F11).
+enum GeofenceTransition {
+  GEOFENCE_TRANSITION_UNSPECIFIED = 0;
+  GEOFENCE_TRANSITION_ENTERED = 1;
+  GEOFENCE_TRANSITION_EXITED = 2;
+}
+
+// Evento de geocerca (F11). No contiene coordenadas.
+message GeofenceEvent {
+  string geofence_id = 1;
+  string session_id = 2;
+  string member_id = 3;
+  GeofenceTransition transition = 4;
+  // captured_at de la muestra que confirmó la transición.
+  google.protobuf.Timestamp occurred_at = 5;
+  // sequence de la muestra que confirmó la transición.
+  uint64 sequence = 6;
+}

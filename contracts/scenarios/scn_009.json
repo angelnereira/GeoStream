@@ -1,0 +1,90 @@
+{
+  "id": "SCN-009",
+  "title": "Expiración del token en la conexión y renovación",
+  "requirements": [
+    "FR-AUTH-007"
+  ],
+  "slow": true,
+  "config": {
+    "GS_TOKEN_MIN_TTL_S": 60,
+    "GS_STREAM_AUTH_EXPIRING_LEAD_S": 55
+  },
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ]
+    },
+    "alice": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID",
+      "token_ttl_seconds": 60
+    },
+    "bob": {
+      "kind": "device",
+      "external_subject_id": "bob",
+      "platform": "PLATFORM_ANDROID",
+      "token_ttl_seconds": 60
+    }
+  },
+  "steps": [
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "bob",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.expect",
+      "message": "auth_expiring",
+      "within_ms": 10000
+    },
+    {
+      "actor": "alice",
+      "op": "token.refresh",
+      "note": "el runner emite un token nuevo para el mismo dispositivo"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "auth_refresh": {
+          "access_token": "{{alice.token}}"
+        }
+      },
+      "expect_reply": {
+        "auth_refresh_ack": {}
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "stream.expect_close",
+      "code": 4401,
+      "within_ms": 65000
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "heartbeat": {
+          "client_time": "{{now}}"
+        }
+      },
+      "expect_reply": {
+        "heartbeat_ack": {}
+      }
+    }
+  ]
+}

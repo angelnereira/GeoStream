@@ -1,0 +1,262 @@
+{
+  "id": "SCN-003",
+  "title": "Detener compartición borra el snapshot y no afecta a los demás",
+  "requirements": [
+    "FR-SHR-003",
+    "NFR-PRIV-002",
+    "FR-INT-002",
+    "FR-PRS-004"
+  ],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint",
+        "sessions:read",
+        "sessions:write",
+        "members:write",
+        "invitations:write",
+        "subjects:manage"
+      ]
+    },
+    "alice": {
+      "kind": "device",
+      "external_subject_id": "alice",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "bob": {
+      "kind": "device",
+      "external_subject_id": "bob",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "carol": {
+      "kind": "device",
+      "external_subject_id": "carol",
+      "platform": "PLATFORM_ANDROID"
+    }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "initial_members": [
+          {
+            "external_subject_id": "alice"
+          },
+          {
+            "external_subject_id": "bob"
+          },
+          {
+            "external_subject_id": "carol",
+            "capabilities": {
+              "publish": false,
+              "read": true,
+              "invite": false,
+              "manage": false
+            }
+          }
+        ]
+      },
+      "expect": {
+        "status": 201
+      },
+      "capture": {
+        "session_id": "$.id"
+      }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members",
+      "expect": {
+        "status": 200
+      },
+      "capture": {
+        "alice_member_id": "$.data[?(@.external_subject_id=='alice')].id",
+        "bob_member_id": "$.data[?(@.external_subject_id=='bob')].id",
+        "carol_member_id": "$.data[?(@.external_subject_id=='carol')].id"
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "bob",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "carol",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": true
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": true
+        }
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": true
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": true
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "1",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "bob",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": {
+                "latitude": 8.9824,
+                "longitude": -79.5199,
+                "horizontal_accuracy_m": 8.5
+              },
+              "quality": {
+                "source": "LOCATION_SOURCE_GNSS",
+                "kind": "LOCATION_KIND_MEASURED"
+              }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "results": [
+            {
+              "sequence": "1",
+              "status": "SAMPLE_STATUS_ACCEPTED"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/snapshot",
+      "expect": {
+        "status": 200,
+        "json_count": {
+          "$.items": 2
+        }
+      }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": {
+        "sharing": false
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": false
+        }
+      }
+    },
+    {
+      "op": "assert.ephemeral",
+      "what": "snapshot",
+      "session": "{{session_id}}",
+      "member": "{{alice_member_id}}",
+      "exists": false,
+      "note": "inmediatamente después de la respuesta 200"
+    },
+    {
+      "actor": "carol",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/snapshot",
+      "expect": {
+        "status": 200,
+        "json_count": {
+          "$.items": 1
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members/{{alice_member_id}}",
+      "expect": {
+        "status": 200,
+        "json": {
+          "sharing": false,
+          "connectivity": "UNSPECIFIED",
+          "last_location_at": null
+        }
+      },
+      "note": "FR-PRS-004"
+    }
+  ]
+}
