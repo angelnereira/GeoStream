@@ -120,7 +120,7 @@ Reglas:
 | FR-HIS-002 | COULD | F13 | Cola offline acumulada | — | pendiente |
 | FR-HIS-003 | COULD | F13 | Consulta de historial | — | pendiente |
 | FR-HIS-004 | COULD | F13 | Calidad de trayectoria y map-matching | — | pendiente |
-| FR-OPS-001 | MUST | F0 | Binario único con roles | — | en curso |
+| FR-OPS-001 | MUST | F0 | Binario único con roles | tests/cli_test.rs | cumplido |
 | FR-OPS-002 | MUST | F2 | Salud y métricas | — | pendiente |
 | FR-OPS-003 | MUST | F1 | Configuración validada | — | pendiente |
 | FR-OPS-004 | MUST | F2 | Migraciones versionadas | — | pendiente |
