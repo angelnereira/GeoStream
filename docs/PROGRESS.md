@@ -54,6 +54,14 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 ```
 
+### 2026-10-12 — T-F0-07 — docker-compose.dev.yml y .env.example
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: — (infraestructura de desarrollo local).
+- Evidencia: `deploy/docker-compose.dev.yml` validado con `docker compose config` (PostgreSQL 16 + Valkey 7.2 con healthchecks); `deploy/.env.example` con variables de entorno según `17_CONFIGURATION.md`.
+- Notas: Entorno listo para desarrollo local y pruebas de integración.
+
 ### 2026-10-12 — T-F0-06 — Proceso de release y changelog
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.
