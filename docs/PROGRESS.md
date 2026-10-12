@@ -6,10 +6,11 @@
 
 | Campo | Valor |
 |---|---|
-| Fase activa | **F0 — Bootstrap del repositorio y CI** (en curso) |
-| Último hito alcanzado | — |
+| Fase activa | **F1 — Núcleo de dominio** (en curso) |
+| Último hito alcanzado | Cierre de Fase F0 (Bootstrap del repositorio y CI) — 2026-10-12 |
 | Paquete documental | v0.2.0 (2026-10-11) |
 | Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes |
+| Disponibilidad de nombres | crates.io (`geostream`, `gs-protocol`, `geostream-sdk`, `geostream-server`) y pub.dev (`geostream`, `geostream_flutter`): todos disponibles (verificado 2026-10-12) |
 
 ## Tareas en curso
 
@@ -27,8 +28,8 @@
 
 | Fase | Estado | Cierre | Evidencia |
 |---|---|---|---|
-| F0 | en curso | | |
-| F1 | pendiente | | |
+| F0 | completada | 2026-10-12 | CI verde (etapas 1–5), geostream version, gs-protocol roundtrip, tools/ checks, deploy dev, nombres verificados |
+| F1 | en curso | | |
 | F2 | pendiente | | |
 | F3 | pendiente | | |
 | F4 (M1) | pendiente | | |
@@ -53,6 +54,14 @@ Formato de cada entrada (más reciente arriba):
 - Requisitos: …
 - Evidencia: enlace a CI / informe
 ```
+
+### 2026-10-12 — T-F0-08 — Verificación de nombres de paquetes y cierre de Fase F0
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: — (preparación de publicación y cierre de bootstrap).
+- Evidencia: Consultas a APIs de crates.io (`geostream`, `gs-protocol`, `geostream-sdk`, `geostream-server`) y pub.dev (`geostream`, `geostream_flutter`) confirmando 100% de disponibilidad; recordatorio de ADR-0019 (licencia) registrado; criterios de salida de Fase F0 satisfechos en su totalidad.
+- Notas: Se da por cerrada la fase F0 y se activa formalmente la fase F1 (Núcleo de dominio).
 
 ### 2026-10-12 — T-F0-07 — docker-compose.dev.yml y .env.example
 - Autor/agente: Angel Nereira (con agente de código).
