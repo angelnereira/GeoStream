@@ -13,6 +13,7 @@ CHECKS = [
     ("check_requirements.py", "Requirement IDs and Traceability (03, TRACEABILITY)"),
     ("check_auth_matrix.py", "Auth Matrix Consistency (06 §8.2 vs OpenAPI)"),
     ("check_markdown_links.py", "Markdown Relative Links"),
+    ("check_changelog.py", "Changelog Format (19 §8)"),
 ]
 
 def main() -> int:
