@@ -11,6 +11,10 @@ gs-domain.workspace = true
 aes-gcm.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+time.workspace = true
+uuid = { workspace = true, features = ["serde"] }
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

@@ -10,7 +10,7 @@ Reglas:
 
 | Requisito | Prioridad | Fase | Título | Pruebas | Estado |
 |---|---|---|---|---|---|
-| FR-AUTH-001 | MUST | F2 | API keys de aplicación | — | pendiente |
+| FR-AUTH-001 | MUST | F2 | API keys de aplicación | `crates/gs-store/tests/repos_test.rs` | en curso |
 | FR-AUTH-002 | MUST | F2 | Emisión de tokens de dispositivo | — | pendiente |
 | FR-AUTH-003 | MUST | F2 | Verificación de tokens | — | pendiente |
 | FR-AUTH-004 | MUST | F2 | Rotación de claves de firma | — | pendiente |
@@ -115,7 +115,7 @@ Reglas:
 | FR-PRV-002 | MUST | F10 | Borrado y exportación de subject | — | pendiente |
 | FR-PRV-003 | MUST | F10 | Jobs de retención | — | pendiente |
 | FR-PRV-004 | MUST | F4 | Redacción de coordenadas | — | pendiente |
-| FR-PRV-005 | MUST | F3 | Auditoría | — | pendiente |
+| FR-PRV-005 | MUST | F3 | Auditoría | `crates/gs-store/tests/repos_test.rs` | en curso |
 | FR-HIS-001 | COULD | F13 | Historial opt-in | — | pendiente |
 | FR-HIS-002 | COULD | F13 | Cola offline acumulada | — | pendiente |
 | FR-HIS-003 | COULD | F13 | Consulta de historial | — | pendiente |

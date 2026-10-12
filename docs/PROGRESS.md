@@ -9,7 +9,7 @@
 | Fase activa | **F1 — Núcleo de dominio** (en curso) |
 | Último hito alcanzado | Cierre de Fase F0 (Bootstrap del repositorio y CI) — 2026-10-12 |
 | Paquete documental | v0.2.0 (2026-10-11) |
-| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes |
+| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11) — no bloquea T-F2-02; pendiente de amendar `05` §11 |
 | Disponibilidad de nombres | crates.io (`geostream`, `gs-protocol`, `geostream-sdk`, `geostream-server`) y pub.dev (`geostream`, `geostream_flutter`): todos disponibles (verificado 2026-10-12) |
 
 ## Tareas en curso
@@ -22,7 +22,7 @@
 
 | ID | Tarea | Resumen | Abierta |
 |---|---|---|---|
-| — | | | |
+| DR-20261012-02 | T-F2-02 | `05` §11 solo admite pruebas de invariantes en `gs-domain` o `gs-service`; las cuatro invariantes de persistencia (`INV-TEN-1`, `INV-SUB-1`, `INV-DEV-1`, `INV-DEV-2`) las hace cumplir el esquema y se prueban en `gs-store`. Pendiente de amendar `05` §11 | 2026-10-12 |
 
 ## Fases
 
@@ -54,6 +54,14 @@ Formato de cada entrada (más reciente arriba):
 - Requisitos: …
 - Evidencia: enlace a CI / informe
 ```
+
+### 2026-10-12 — T-F2-02 — Repositorios de tenants, aplicaciones, API keys, subjects, dispositivos y auditoría en `gs-store`
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-AUTH-001 (persistencia).
+- Evidencia: implementados en `crates/gs-store` los modelos de entidad (`Tenant`, `Application`, `ApiKey`, `Subject`, `Device`, `AuditEvent` con sus enums de estado y `Debug` redactado del hash secreto) y seis repositorios PostgreSQL (`TenantRepository`, `ApplicationRepository`, `ApiKeyRepository`, `SubjectRepository`, `DeviceRepository`, `AuditRepository`) con filtro obligatorio por `tenant_id` en toda consulta y mutación (INV-TEN-1); upsert atómico de subject por `(tenant_id, external_subject_id)` activo (INV-SUB-1), incremento de `token_epoch` para revocación global, borrado lógico `ERASED` con anonimización del identificador externo; upsert de dispositivo por `(application_id, installation_id, subject_id)` (INV-DEV-1) y aplicación de `max_devices_per_subject` desactivando el más antiguo por `last_seen_at` (INV-DEV-2); ciclo de vida de API keys (crear, consultar, listar por aplicación, revocar terminal, `last_used_at`) y repositorio de auditoría con consulta por tenant y por subject. Suite `crates/gs-store/tests/repos_test.rs` con 6 pruebas de integración contra PostgreSQL 18 real (nombres con el ID de invariante y `// covers:`); `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (100 pruebas, 0 fallos), `cargo deny check` y `cargo audit` (559 dependencias, sin vulnerabilidades) y `geostream-tools all` verdes.
+- Notas: `upsert_device` usa `UpsertDeviceParams` para respetar `clippy::too_many_arguments` (decisión interna de `19` §7, sin cambio de comportamiento observable). Abierta DR-20261012-02 sobre la ubicación normativa de las pruebas de las cuatro invariantes de persistencia (`05` §11).
 
 ### 2026-10-12 — T-F2-01 — Migración inicial 0001_init.sql, subcomando geostream migrate y verificación de esquema
 - Autor/agente: Angel Nereira (con agente de código).

@@ -20,4 +20,7 @@ pub enum StoreError {
 
     #[error("entity not found: {entity} id={id}")]
     NotFound { entity: &'static str, id: String },
+
+    #[error("data mapping error: {0}")]
+    DataMapping(String),
 }
