@@ -1,0 +1,55 @@
+# cargo-deny configuration (NFR-SEC-006).
+# Policy source: docs/19_ENGINEERING_STANDARDS.md §6.1. Changing the allowed licenses
+# or ignoring an advisory requires an ADR or a documented exception.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+ignore = []
+
+[licenses]
+version = 2
+# MPL-2.0 is allowed only as an unmodified dependency.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+
+# Excepciones por paquete para dependencias transitivas permisivas aprobadas (ADR-0020, DR-20261012-01).
+[[licenses.exceptions]]
+allow = ["BSL-1.0"]
+name = "xxhash-rust"
+
+[[licenses.exceptions]]
+allow = ["CDLA-Permissive-2.0"]
+name = "webpki-root-certs"
+
+[[licenses.exceptions]]
+allow = ["CDLA-Permissive-2.0"]
+name = "webpki-roots"
+
+[[licenses.exceptions]]
+allow = ["MIT-0"]
+name = "borrow-or-share"
+
+[licenses.private]
+# Workspace crates are unpublished and unlicensed until ADR-0019 is decided.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

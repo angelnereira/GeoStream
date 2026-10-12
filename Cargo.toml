@@ -23,3 +23,59 @@ gs-store = { path = "crates/gs-store" }
 gs-stream = { path = "crates/gs-stream" }
 gs-testkit = { path = "crates/gs-testkit" }
 gs-worker = { path = "crates/gs-worker" }
+
+# Approved third-party dependencies (docs/19_ENGINEERING_STANDARDS.md §6.2).
+# Adding a crate that is not on that list requires an ADR.
+aes-gcm = "0.11.1"
+anyhow = "1.0.104"
+axum = { version = "0.8.9", features = ["ws"] }
+base64 = "0.23.1"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+criterion = "0.8.2"
+dashmap = "6.2.1"
+ed25519-dalek = "3.0.0"
+figment = { version = "0.10.19", features = ["toml", "env"] }
+futures = "0.3.34"
+geo = "0.33.1"
+getrandom = "0.4.3"
+hmac = "0.13.0"
+http = "1.5.0"
+ipnet = "2.12.2"
+jsonschema = "0.58.6"
+jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"] }
+metrics = "0.24.6"
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+opentelemetry = "0.33.1"
+opentelemetry-otlp = "0.33.1"
+pbjson = "0.9.0"
+pbjson-build = "0.9.0"
+pbjson-types = "0.9.0"
+proptest = "1.12.0"
+prost = "0.14.4"
+prost-build = "0.14.4"
+prost-types = "0.14.4"
+protoc-bin-vendored = "3.3.0"
+rand = "0.10.3"
+redis = { version = "1.7.1", features = ["tokio-comp", "connection-manager", "script"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+rstar = "0.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.0"
+sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid", "time", "json", "migrate", "macros"] }
+subtle = "2.6.1"
+testcontainers = "0.27.0"
+testcontainers-modules = { version = "0.15.0", features = ["postgres", "valkey"] }
+thiserror = "2.0.21"
+time = "0.3.55"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
+tokio-tungstenite = "0.30.0"
+tokio-util = "0.7.20"
+toml = "1.1.8"
+tower = "0.5.3"
+tower-http = "0.7.1"
+tracing = "0.1.44"
+tracing-opentelemetry = "0.34.0"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
+uuid = { version = "1.28.0", features = ["v4", "v7"] }
+zeroize = "1.9.1"

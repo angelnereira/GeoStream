@@ -8,3 +8,8 @@ publish.workspace = true
 
 [dependencies]
 gs-domain.workspace = true
+figment.workspace = true
+ipnet.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true

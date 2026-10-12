@@ -10,3 +10,6 @@ publish.workspace = true
 gs-api.workspace = true
 gs-stream.workspace = true
 gs-worker.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true

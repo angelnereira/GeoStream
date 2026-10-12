@@ -6,6 +6,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 ### Added
 - Workspace Cargo con la estructura de `docs/04_ARCHITECTURE.md` §4: 14 crates y 3 apps vacíos con `#![forbid(unsafe_code)]`, dependencias internas según §4.1, toolchain fijada en 1.99.0 y edición 2024 (T-F0-01).
+- Dependencias Rust de la lista aprobada fijadas en `Cargo.lock`, `deny.toml` con la política de licencias de `docs/19_ENGINEERING_STANDARDS.md` §6.1, excepciones de licencias permisivas transitivas (ADR-0020) y workflow de CI con `cargo deny` y `cargo audit` (T-F0-02).
 
 ### Docs
 - Propuestas no normativas en `docs/proposals/`: brechas y plan de completitud (G-01..G-22) y addendum A-01 de integración de proveedores externos. No modifican requisitos, contratos ni ADR hasta que se adopten.

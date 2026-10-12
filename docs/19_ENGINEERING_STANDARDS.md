@@ -60,7 +60,7 @@ Ver `11` §2 y §4. Toda consulta filtra por `tenant_id`. Nada de `SELECT *` en 
 ### 6.1 Reglas
 - Solo dependencias de la lista aprobada. Añadir una requiere ADR con: necesidad, alternativas, licencia, mantenimiento (actividad, mantenedores), seguridad (advisories), tamaño y estrategia de salida.
 - Versiones exactas fijadas por `Cargo.lock` / `pubspec.lock` (versionados). Actualizaciones en PRs dedicados.
-- Licencias permitidas (verificadas por `cargo deny`): MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0; MPL-2.0 permitida como dependencia sin modificar. Cualquier otra → ADR.
+- Licencias permitidas (verificadas por `cargo deny`): MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0; MPL-2.0 permitida como dependencia sin modificar. Cualquier otra → ADR (excepciones aprobadas en ADR-0020 para dependencias transitivas fijadas: `xxhash-rust` BSL-1.0, `webpki-root-certs` y `webpki-roots` CDLA-Permissive-2.0, `borrow-or-share` MIT-0).
 - **No inventar APIs**: antes de usar una función de un crate o paquete, consultar su documentación **en la versión fijada** (docs.rs / pub.dev / código fuente) y compilar un ejemplo mínimo si hay dudas.
 
 ### 6.2 Lista aprobada — Rust

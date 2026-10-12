@@ -25,5 +25,6 @@ Los ADR marcados **Aceptado (baseline v0.2.0)** forman parte del diseño inicial
 | [ADR-0017](ADR-0017-observability-redaction.md) | Observabilidad con tracing y Prometheus; redacción por tipos | Aceptado (baseline v0.2.0) |
 | [ADR-0018](ADR-0018-errors-problem-details.md) | Errores REST con Problem Details y catálogo compartido con el stream | Aceptado (baseline v0.2.0) |
 | [ADR-0019](ADR-0019-license.md) | Licencia del proyecto | Propuesto — requiere decisión del propietario |
+| [ADR-0020](ADR-0020-transitive-permissive-licenses.md) | Excepciones de licencias permisivas para dependencias transitivas | Aceptado |
 
 Nota: ADR-0014 sustituye el requisito FR-033 de la propuesta 0.1.0 (cola offline acumulada obligatoria).
