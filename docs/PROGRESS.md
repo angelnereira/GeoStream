@@ -52,8 +52,15 @@ Formato de cada entrada (más reciente arriba):
 - PR:
 - Requisitos: …
 - Evidencia: enlace a CI / informe
-- Notas: desviaciones, decisiones tomadas dentro del margen de 20 §7
 ```
+
+### 2026-10-12 — T-F0-05 — CI etapas 1, 2, 3 y 5 y checks de consistencia en tools/
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: NFR-DOC-001, NFR-SEC-006.
+- Evidencia: Etapas 1, 2, 3, 4 y 5 de CI pasando localmente; `tools/run_all_checks.py` verde con 7 verificadores de consistencia documental y de dependencias (`check_json_validity.py`, `check_crate_deps.py`, `check_error_catalog.py`, `check_config_keys.py`, `check_requirements.py`, `check_auth_matrix.py`, `check_markdown_links.py`).
+- Notas: Se amplió `.github/workflows/ci.yml` cubriendo todas las etapas aplicables.
 
 ### 2026-10-12 — T-F0-04 — gs-protocol con build.rs y prueba de ida y vuelta
 - Autor/agente: Angel Nereira (con agente de código).

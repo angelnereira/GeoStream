@@ -4,7 +4,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 ## [Unreleased]
 
-### Added
+- Etapas 1, 2, 3, 4 y 5 de CI en `.github/workflows/ci.yml` y suite de consistencia documental en `tools/` (validez JSON, reglas de dependencia de crates, catálogo de errores, claves de configuración, trazabilidad de requisitos, matriz de autenticación y enlaces Markdown) (NFR-DOC-001, NFR-SEC-006, T-F0-05).
 - Workspace Cargo con la estructura de `docs/04_ARCHITECTURE.md` §4: 14 crates y 3 apps vacíos con `#![forbid(unsafe_code)]`, dependencias internas según §4.1, toolchain fijada en 1.99.0 y edición 2024 (T-F0-01).
 - `gs-protocol`: compilación de contratos Protobuf en `build.rs` con `prost-build`, `pbjson-build` y `protoc-bin-vendored`, tipos `v1` con serialización JSON canónica y prueba de ida y vuelta completa JSON → binario → JSON sobre los 24 mensajes de `contracts/test-vectors/stream_messages.json` (T-F0-04).
 - Binario `geostream` con subcomandos `version` (versión y commit), `serve` con listener Axum y endpoint `/health/live`, y stubs para `migrate` y `admin` (FR-OPS-001, T-F0-03).

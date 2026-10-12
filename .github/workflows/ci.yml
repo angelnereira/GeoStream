@@ -1,5 +1,6 @@
-# CI de GeoStream. Las etapas se describen en docs/18_TESTING_STRATEGY.md §10.1.
-# Por ahora solo existe la etapa 5 (seguridad, T-F0-02); T-F0-05 añade las etapas 1, 2 y 3.
+# CI de GeoStream.
+# Las etapas se describen en docs/18_TESTING_STRATEGY.md §10.1.
+
 name: ci
 
 on:
@@ -11,17 +12,79 @@ permissions:
   contents: read
 
 jobs:
-  security:
-    name: Seguridad (cargo deny, cargo audit)
+  stage1-fmt-lint:
+    name: "Etapa 1: Formato y Lint (cargo fmt, clippy)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Versiones fijadas (docs/19_ENGINEERING_STANDARDS.md §6.4).
+      - name: Instalar Rust toolchain
+        run: rustup show
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  stage2-contracts:
+    name: "Etapa 2: Contratos (buf lint, redocly, JSON)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar Buf CLI
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.73.0"
+      - name: buf lint
+        run: buf lint contracts/proto
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Redocly lint OpenAPI
+        run: npx --yes @redocly/cli@2.62.1 lint contracts/openapi/geostream.v1.yaml --config contracts/openapi/redocly.yaml
+      - name: Validar JSON de contratos
+        run: python3 tools/check_json_validity.py
+
+  stage3-doc-consistency:
+    name: "Etapa 3: Consistencia Documental (tools/)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar Rust toolchain (para cargo metadata)
+        run: rustup show
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ejecutar checks de consistencia documental
+        run: python3 tools/run_all_checks.py
+
+  stage4-tests:
+    name: "Etapa 4: Pruebas automatizadas"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar Rust toolchain
+        run: rustup show
+      - name: Ejecutar pruebas
+        run: cargo test --workspace --all-features
+
+  stage5-security:
+    name: "Etapa 5: Seguridad (cargo deny, cargo audit)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-deny
+            ~/.cargo/bin/cargo-audit
+          key: ${{ runner.os }}-cargo-tools-deny-0.20.2-audit-0.22.2
       - name: Instalar cargo-deny y cargo-audit
         run: |
-          cargo install --locked cargo-deny@0.20.2
-          cargo install --locked cargo-audit@0.22.2
-      - name: cargo deny
+          which cargo-deny || cargo install --locked cargo-deny@0.20.2
+          which cargo-audit || cargo install --locked cargo-audit@0.22.2
+      - name: cargo deny check
         run: cargo deny check
       - name: cargo audit
         run: cargo audit

@@ -158,4 +158,4 @@ Reglas:
 | NFR-OBS-002 | MUST | F2 | Cardinalidad acotada | — | pendiente |
 | NFR-COST-001 | MUST | F6 | Operación sin proveedores comerciales | — | pendiente |
 | NFR-DX-001 | MUST | F8 | Quickstart en menos de 30 minutos | — | pendiente |
-| NFR-DOC-001 | MUST | F0 | Documentación completa | — | pendiente |
+| NFR-DOC-001 | MUST | F0 | Documentación completa | CI (tools/run_all_checks.py) | cumplido |
