@@ -43,8 +43,8 @@ Reglas:
 | FR-MEM-005 | MUST | F3 | Abandonar sesión | — | pendiente |
 | FR-MEM-006 | MUST | F3 | Límite de miembros | — | pendiente |
 | FR-MEM-007 | MUST | F3 | Readmisión | `tests/invariants_test.rs` | en curso |
-| FR-INV-001 | MUST | F3 | Crear invitación | — | pendiente |
-| FR-INV-002 | MUST | F3 | Canjear invitación | — | pendiente |
+| FR-INV-001 | MUST | F3 | Crear invitación | `tests/invitation_vectors_test.rs` | en curso |
+| FR-INV-002 | MUST | F3 | Canjear invitación | `tests/invitation_vectors_test.rs` | en curso |
 | FR-INV-003 | MUST | F3 | Listar y revocar invitaciones | — | pendiente |
 | FR-INV-004 | COULD | F15 | Aprobación de solicitudes de unión | — | pendiente |
 | FR-SHR-001 | MUST | F3 | Apagado por defecto | `tests/invariants_test.rs` | en curso |

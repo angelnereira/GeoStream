@@ -55,6 +55,13 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 ```
 
+### 2026-10-12 — T-F1-05 — Generación y normalización de códigos de invitación en gs-domain
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-INV-001 (base).
+- Evidencia: suite `tests/invitation_vectors_test.rs` con 100 % de vectores `contracts/test-vectors/invitation_codes.json` validados; generación verificada con longitud y formato estándar `XXXX-XXXX-XXXX-XXXX`; hash SHA-256; `cargo test -p gs-domain` (38 tests) verde; `cargo deny check` y `geostream-tools -- all` verdes.
+
 ### 2026-10-12 — T-F1-04 — Sesión, membresía, capacidades, compartición y reglas INV-* en gs-domain
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.
