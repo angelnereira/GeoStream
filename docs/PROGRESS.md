@@ -56,6 +56,14 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 ```
 
+### 2026-10-12 — T-F2-05 — `gs-ephemeral` y `gs-bus`: traits e implementación en memoria con suite parametrizada
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: — (base para FR-STR-009, FR-PRS-003, NFR-RES-002).
+- Evidencia: `gs-ephemeral` define el rasgo `EphemeralStore` con las operaciones del keyspace de `docs/11` §3 (snapshot con TTL y borrado inmediato, CAS de secuencia según `docs/09` §4, `set_if_greater`, presencia con liberación condicional por `connection_id`, versión de membresías, tickets de un uso y contadores de rate limit) y la implementación en memoria `InMemoryEphemeralStore` con expiración diferida y estado `is_ready` para la degradación de `docs/04` §7.6; `gs-bus` define el rasgo `Bus` (suscripción, baja, publicación, recepción, conteo de suscripciones por tema y salud de conexión) y la implementación en memoria `InMemoryBus` sobre canales `broadcast` con refcount por tema. La suite de pruebas vive en `tests/common/` de cada crate y se ejecuta contra la implementación en memoria, de modo que la implementación Redis/Valkey de T-F6-01 reutilice exactamente los mismos casos (ADR-0010). Pruebas verdes: 2 en `gs-ephemeral` y 3 en `gs-bus`; `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (148 pruebas, 0 fallos), `cargo deny check`, `cargo audit` y `geostream-tools all` verdes.
+- Notas: ninguna dependencia nueva fuera de la lista aprobada (`dashmap`, `time` y `tokio` ya figuraban). La semántica de `GS_STATE_BACKEND=memory` (una sola instancia) queda documentada en el código y probada (dos instancias no comparten estado).
+
 ### 2026-10-12 — T-F2-04 — `gs-auth`: API keys (formato, hash, tiempo constante), JWT EdDSA, rotación y scopes
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.

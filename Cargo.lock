@@ -1643,6 +1643,7 @@ dependencies = [
 name = "gs-bus"
 version = "0.0.0"
 dependencies = [
+ "dashmap",
  "futures",
  "gs-domain",
  "redis",
@@ -1689,10 +1690,12 @@ dependencies = [
 name = "gs-ephemeral"
 version = "0.0.0"
 dependencies = [
+ "dashmap",
  "gs-domain",
  "gs-protocol",
  "redis",
  "thiserror",
+ "time",
  "tokio",
 ]
 

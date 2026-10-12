@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 gs-domain.workspace = true
 gs-protocol.workspace = true
+dashmap.workspace = true
+time = { workspace = true, features = ["formatting"] }
 redis.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
