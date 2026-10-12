@@ -55,6 +55,13 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 ```
 
+### 2026-10-12 — T-F1-06 — Carga y validación de configuración y políticas de tenant en gs-config
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-OPS-003, FR-ADM-002.
+- Evidencia: implementados `ServerConfig`, `TenantPolicy`, `SecretString`, `DataEncryptionKey`, cargador y validador por entorno (`dev`, `test`, `prod`), restricciones y rechazo de secretos de ejemplo en producción; 16 pruebas automatizadas (`tests/server_config_test.rs` y `tests/policy_test.rs`); `cargo test -p gs-config` verde; `cargo deny check` y `geostream-tools -- all` verdes.
+
 ### 2026-10-12 — T-F1-05 — Generación y normalización de códigos de invitación en gs-domain
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.

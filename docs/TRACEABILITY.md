@@ -20,7 +20,7 @@ Reglas:
 | FR-AUTH-008 | MUST | F2 | Scopes | — | pendiente |
 | FR-AUTH-009 | COULD | F15 | Tokens firmados por el integrador | — | pendiente |
 | FR-ADM-001 | MUST | F2 | CLI de administración | — | pendiente |
-| FR-ADM-002 | MUST | F2 | Políticas por tenant | — | pendiente |
+| FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs` | en curso |
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | — | pendiente |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | pendiente |
 | FR-API-001 | MUST | F3 | Errores Problem Details | — | pendiente |
@@ -122,7 +122,7 @@ Reglas:
 | FR-HIS-004 | COULD | F13 | Calidad de trayectoria y map-matching | — | pendiente |
 | FR-OPS-001 | MUST | F0 | Binario único con roles | tests/cli_test.rs | cumplido |
 | FR-OPS-002 | MUST | F2 | Salud y métricas | — | pendiente |
-| FR-OPS-003 | MUST | F1 | Configuración validada | — | pendiente |
+| FR-OPS-003 | MUST | F1 | Configuración validada | `crates/gs-config/tests/server_config_test.rs` | cumplido |
 | FR-OPS-004 | MUST | F2 | Migraciones versionadas | — | pendiente |
 | FR-OPS-005 | MUST | F6 | Imagen y compose | — | pendiente |
 | FR-OPS-006 | MUST | F12 | Runbooks y backups | — | pendiente |
