@@ -952,21 +952,16 @@ impl InMemorySequenceStore {
 }
 
 /// Precondition errors that reject an entire batch before per-sample processing (docs/08 §6.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, thiserror::Error,
+)]
 pub enum BatchPreconditionError {
+    #[error("VALIDATION_FAILED")]
     #[serde(rename = "VALIDATION_FAILED")]
     ValidationFailed,
+    #[error("PAYLOAD_TOO_LARGE")]
     #[serde(rename = "PAYLOAD_TOO_LARGE")]
     PayloadTooLarge,
-}
-
-impl fmt::Display for BatchPreconditionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ValidationFailed => write!(f, "VALIDATION_FAILED"),
-            Self::PayloadTooLarge => write!(f, "PAYLOAD_TOO_LARGE"),
-        }
-    }
 }
 
 /// Outcome of processing a batch of location samples.

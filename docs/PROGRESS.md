@@ -55,6 +55,13 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 ```
 
+### 2026-10-12 — T-F1-07 — Catálogo canónico de errores de dominio y mapeo a ErrorCode en gs-domain
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-API-001 (base).
+- Evidencia: implementado catálogo de los 25 códigos de error `ErrorCode` (`docs/09 §6`, `common.proto`), mapeo HTTP, reintentos, mensaje seguro estándar, rasgo `AsErrorCode`, enum unificado `DomainError` y suite de pruebas `tests/error_mapping_test.rs`; `cargo test -p gs-domain` (43 tests) verde; `cargo deny check` y `geostream-tools -- all` verdes.
+
 ### 2026-10-12 — T-F1-06 — Carga y validación de configuración y políticas de tenant en gs-config
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.

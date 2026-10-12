@@ -23,7 +23,7 @@ Reglas:
 | FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs` | en curso |
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | — | pendiente |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | pendiente |
-| FR-API-001 | MUST | F3 | Errores Problem Details | — | pendiente |
+| FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs` | en curso |
 | FR-API-002 | MUST | F3 | Idempotencia | — | pendiente |
 | FR-API-003 | MUST | F3 | Paginación por cursor | — | pendiente |
 | FR-API-004 | MUST | F3 | Rate limit REST | — | pendiente |

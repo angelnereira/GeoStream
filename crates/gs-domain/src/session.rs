@@ -112,6 +112,14 @@ pub enum Actor {
 pub enum SessionError {
     #[error("session is not active")]
     InactiveSession,
+    #[error("session is closed")]
+    SessionClosed,
+    #[error("session has expired")]
+    SessionExpired,
+    #[error("session is full (reached max_members)")]
+    SessionFull,
+    #[error("cannot reduce member limit below active members count")]
+    MaxMembersLessThanActive,
     #[error("invalid member limit: {0}")]
     InvalidMaxMembers(String),
     #[error("invalid expiration: {0}")]

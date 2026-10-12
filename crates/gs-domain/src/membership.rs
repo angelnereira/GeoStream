@@ -208,6 +208,14 @@ pub enum MembershipError {
     AlreadyActiveMember,
     #[error("revoked member cannot rejoin via invitation (FR-MEM-007)")]
     RevokedMemberCannotRedeemInvitation,
+    #[error("session is full (reached max_members) (INV-MEM-7)")]
+    SessionFull,
+    #[error("publishing attempted without active sharing")]
+    NotSharing,
+    #[error("another device of the subject is already the active publisher")]
+    NotPublisher,
+    #[error("member was revoked from this session")]
+    MemberRevoked,
 }
 
 /// Session membership entity (docs/05 §5).
