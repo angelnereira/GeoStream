@@ -28,7 +28,7 @@
 
 | Fase | Estado | Cierre | Evidencia |
 |---|---|---|---|
-| F0 | completada | 2026-10-12 | CI verde (etapas 1–5), geostream version, gs-protocol roundtrip, tools/ checks, deploy dev, nombres verificados |
+| F0 | completada | 2026-10-12 | CI verde (etapas 1–5), geostream version, gs-protocol roundtrip, geostream-tools (Rust puro), deploy dev, nombres verificados |
 | F1 | en curso | | |
 | F2 | pendiente | | |
 | F3 | pendiente | | |

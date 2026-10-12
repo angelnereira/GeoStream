@@ -42,21 +42,17 @@ jobs:
       - name: Redocly lint OpenAPI
         run: npx --yes @redocly/cli@2.62.1 lint contracts/openapi/geostream.v1.yaml --config contracts/openapi/redocly.yaml
       - name: Validar JSON de contratos
-        run: python3 tools/check_json_validity.py
+        run: cargo run -p geostream-tools -- json
 
   stage3-doc-consistency:
-    name: "Etapa 3: Consistencia Documental (tools/)"
+    name: "Etapa 3: Consistencia Documental (geostream-tools)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Instalar Rust toolchain (para cargo metadata)
+      - name: Instalar Rust toolchain
         run: rustup show
-      - name: Configurar Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Ejecutar checks de consistencia documental
-        run: python3 tools/run_all_checks.py
+      - name: Ejecutar checks de consistencia documental en Rust
+        run: cargo run -p geostream-tools -- all
 
   stage4-tests:
     name: "Etapa 4: Pruebas automatizadas"
