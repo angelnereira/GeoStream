@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["apps/*", "crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace.dependencies]
+gs-api = { path = "crates/gs-api" }
+gs-auth = { path = "crates/gs-auth" }
+gs-bus = { path = "crates/gs-bus" }
+gs-config = { path = "crates/gs-config" }
+gs-domain = { path = "crates/gs-domain" }
+gs-ephemeral = { path = "crates/gs-ephemeral" }
+gs-geo = { path = "crates/gs-geo" }
+gs-observability = { path = "crates/gs-observability" }
+gs-protocol = { path = "crates/gs-protocol" }
+gs-service = { path = "crates/gs-service" }
+gs-store = { path = "crates/gs-store" }
+gs-stream = { path = "crates/gs-stream" }
+gs-testkit = { path = "crates/gs-testkit" }
+gs-worker = { path = "crates/gs-worker" }

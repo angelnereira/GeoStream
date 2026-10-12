@@ -1,0 +1,10 @@
+[package]
+name = "gs-geo"
+description = "Geofencing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gs-domain.workspace = true

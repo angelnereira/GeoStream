@@ -1,0 +1,12 @@
+[package]
+name = "geostream"
+description = "GeoStream server binary: serve, migrate, admin and version."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gs-api.workspace = true
+gs-stream.workspace = true
+gs-worker.workspace = true

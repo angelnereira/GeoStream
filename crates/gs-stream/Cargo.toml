@@ -1,0 +1,11 @@
+[package]
+name = "gs-stream"
+description = "WebSocket connections, handshake, subscriptions, publishing and local fan-out."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gs-service.workspace = true
+gs-geo.workspace = true

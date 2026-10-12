@@ -59,7 +59,7 @@ Se completa en T-F5-01 y se mantiene en cada release (NFR-COMPAT-001).
 
 | Componente | Versión soportada |
 |---|---|
-| Rust (toolchain fijada) | por definir en T-F0-01 |
+| Rust (toolchain fijada) | 1.99.0 (`rust-toolchain.toml`), edición 2024 |
 | PostgreSQL | ≥ 16 |
 | Redis / Valkey | ≥ 7.2 |
 | Flutter / Dart | por definir en T-F5-01 |
