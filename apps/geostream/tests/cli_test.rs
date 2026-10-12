@@ -53,25 +53,6 @@ fn test_migrate_command() {
 }
 
 #[test]
-fn test_admin_stub() {
-    // covers: FR-OPS-001
-    let output = Command::new(BIN)
-        .args(["admin", "tenant", "list"])
-        .output()
-        .expect("failed to execute geostream admin");
-    let combined = format!(
-        "{} {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        combined.to_lowercase().contains("not implemented")
-            || combined.to_lowercase().contains("no implementado"),
-        "expected not implemented message in: {combined}"
-    );
-}
-
-#[test]
 fn test_serve_roles_validation() {
     // covers: FR-OPS-001
     let output = Command::new(BIN)

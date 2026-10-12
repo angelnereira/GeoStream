@@ -79,6 +79,30 @@ impl ApplicationRepository {
         rows.into_iter().map(Self::map_row).collect()
     }
 
+    /// Resolves an application by identifier without a tenant filter.
+    ///
+    /// Used by `geostream admin app …` and `geostream admin key …` to derive the owning
+    /// tenant from the referenced entity (docs/16 §3). Mutations performed afterwards are
+    /// still scoped to the resolved tenant (INV-TEN-1).
+    pub async fn find_by_id(
+        pool: &PgPool,
+        app_id: ApplicationId,
+    ) -> Result<Option<Application>, StoreError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, tenant_id, name, status, allowed_device_scopes, allowed_origins, created_at, updated_at
+            FROM applications
+            WHERE id = $1;
+            "#,
+        )
+        .bind(app_id.into_uuid())
+        .fetch_optional(pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        row.map(Self::map_row).transpose()
+    }
+
     /// Updates application status (ACTIVE / DISABLED).
     pub async fn update_status(
         pool: &PgPool,

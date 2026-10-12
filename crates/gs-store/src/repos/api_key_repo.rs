@@ -65,12 +65,11 @@ impl ApiKeyRepository {
         row.map(Self::map_row).transpose()
     }
 
-    /// Looks up an API key by identifier for authentication purposes.
-    /// Used by the auth middleware when validating `Authorization: Bearer gsk_<key_id>.<secret>`.
-    pub async fn find_by_id_for_auth(
-        pool: &PgPool,
-        key_id: ApiKeyId,
-    ) -> Result<Option<ApiKey>, StoreError> {
+    /// Looks up an api key by identifier for authentication and operator resolution.
+    /// Used by the auth middleware when validating `Authorization: Bearer gsk_<key_id>.<secret>`
+    /// and by `geostream admin key …` to derive the owning tenant (docs/16 §3).
+    /// Mutations performed afterwards remain scoped to that tenant (INV-TEN-1).
+    pub async fn find_by_id(pool: &PgPool, key_id: ApiKeyId) -> Result<Option<ApiKey>, StoreError> {
         let row = sqlx::query(
             r#"
             SELECT id, tenant_id, application_id, secret_sha256, scopes, label,

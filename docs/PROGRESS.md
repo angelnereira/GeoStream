@@ -9,7 +9,7 @@
 | Fase activa | **F1 — Núcleo de dominio** (en curso) |
 | Último hito alcanzado | Cierre de Fase F0 (Bootstrap del repositorio y CI) — 2026-10-12 |
 | Paquete documental | v0.2.0 (2026-10-11) |
-| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11) — no bloquea T-F2-02; pendiente de amendar `05` §11 |
+| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11). DR-20261012-03 (resolución de tenant en `geostream admin`, `16` §3 vs `05` §3 INV-TEN-1) — implementado con la lectura de operador, pendiente de confirmación del propietario |
 | Disponibilidad de nombres | crates.io (`geostream`, `gs-protocol`, `geostream-sdk`, `geostream-server`) y pub.dev (`geostream`, `geostream_flutter`): todos disponibles (verificado 2026-10-12) |
 
 ## Tareas en curso
@@ -23,6 +23,7 @@
 | ID | Tarea | Resumen | Abierta |
 |---|---|---|---|
 | DR-20261012-02 | T-F2-02 | `05` §11 solo admite pruebas de invariantes en `gs-domain` o `gs-service`; las cuatro invariantes de persistencia (`INV-TEN-1`, `INV-SUB-1`, `INV-DEV-1`, `INV-DEV-2`) las hace cumplir el esquema y se prueban en `gs-store`. Pendiente de amendar `05` §11 | 2026-10-12 |
+| DR-20261012-03 | T-F2-03 | `16` §3 documenta `app disable --app`, `key create/list --app` y `key revoke --key` sin `--tenant`, mientras INV-TEN-1 exige filtrar por `tenant_id`. Implementado con resolución de tenant desde la entidad (operador) y mutaciones acotadas al tenant resuelto; pendiente de confirmación | 2026-10-12 |
 
 ## Fases
 
@@ -54,6 +55,14 @@ Formato de cada entrada (más reciente arriba):
 - Requisitos: …
 - Evidencia: enlace a CI / informe
 ```
+
+### 2026-10-12 — T-F2-03 — CLI `geostream admin` (tenant, app, key, policy, signing-key)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-ADM-001, FR-ADM-002.
+- Evidencia: implementado el CLI completo de `docs/16_OPERATIONS.md` §3 en `apps/geostream/src/admin.rs` y los casos de uso en `crates/gs-service/src/admin.rs`: `tenant create|list|disable|enable`, `app create|list|disable|enable`, `key create|list|revoke`, `policy get|set` y `signing-key generate`; `session close` queda diferido a T-F3-03 con mensaje explícito. `key create` genera el secreto de 256 bits (`gs_auth::api_key`), almacena solo su SHA-256 e imprime el credencial `gsk_…` una sola vez; `key list` nunca muestra secretos. `policy set` valida contra `gs-config` (`gs_auth` reexporta `TenantPolicy`), rechaza claves desconocidas, tipos incorrectos y valores fuera de rango con mensaje explícito, y guarda únicamente los overrides para que las claves ausentes tomen el default (FR-ADM-002). Todas las mutaciones quedan auditadas con `actor_kind=OPERATOR` y las acciones de `docs/10` §8.3. `gs-auth` añade catálogos de scopes (aplicación `06` §3.4 y dispositivo `06` §6), generación y hash de secretos y generación de pares Ed25519 PKCS#8/SPKI en PEM con fichero privado en modo `0600`. Pruebas: `crates/gs-auth/tests/{api_key,scopes,signing_key}_test.rs` (16), `crates/gs-service/tests/admin_test.rs` (9) y `apps/geostream/tests/admin_test.rs` (8) verdes contra PostgreSQL 18 real; `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (131 pruebas, 0 fallos), `cargo deny check`, `cargo audit` y `geostream-tools all` verdes.
+- Notas: `upsert` de entidades por el operador (`app disable/key …` sin `--tenant`) sigue las firmas de `16` §3 derivando el tenant de la entidad; las escrituras filtran por el tenant resuelto. DR-20261012-03 abierta para confirmar esa lectura. La publicación en el bus de `TenantDisabled`/`ApplicationDisabled`/`ApiKeyRevoked` queda diferida a T-F2-05 (un proceso CLI con `GS_STATE_BACKEND=memory` no tiene a quién notificar).
 
 ### 2026-10-12 — T-F2-02 — Repositorios de tenants, aplicaciones, API keys, subjects, dispositivos y auditoría en `gs-store`
 - Autor/agente: Angel Nereira (con agente de código).

@@ -1,6 +1,8 @@
 //! GeoStream server binary: serve, migrate, admin and version.
 #![forbid(unsafe_code)]
 
+pub mod admin;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -10,6 +12,8 @@ use axum::{Json, Router, routing::get};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::json;
 use tracing::info;
+
+use crate::admin::{AdminArgs, run_admin};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_COMMIT: &str = env!("GEOSTREAM_GIT_COMMIT");
@@ -104,14 +108,6 @@ pub struct MigrateArgs {
     pub database_url: Option<String>,
 }
 
-/// Arguments for `admin` subcommand.
-#[derive(Debug, Args)]
-pub struct AdminArgs {
-    /// Subcommand arguments passed to admin.
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    pub args: Vec<String>,
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -152,10 +148,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Commands::Admin(_args) => {
-            println!("admin is not implemented yet (scheduled for F2, task T-F2-03)");
-            Ok(())
-        }
+        Commands::Admin(args) => run_admin(args).await,
         Commands::Serve(args) => run_serve(args).await,
     }
 }

@@ -9,11 +9,25 @@ publish.workspace = true
 [dependencies]
 gs-auth.workspace = true
 gs-store.workspace = true
+gs-domain.workspace = true
 gs-ephemeral.workspace = true
 gs-bus.workspace = true
 gs-protocol.workspace = true
 dashmap.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+time = { workspace = true, features = ["formatting"] }
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+# Test-only: the admin use-case suite verifies audit records and that the api key secret is
+# never persisted in plaintext. `crates/check_crate_deps` only inspects normal dependencies,
+# and no production path in this crate reaches PostgreSQL directly (docs/04 §4.1).
+[dev-dependencies]
+sqlx = { workspace = true, features = ["runtime-tokio", "postgres", "uuid", "time", "json", "migrate"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+time = { workspace = true, features = ["formatting"] }
+serde_json.workspace = true

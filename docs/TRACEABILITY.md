@@ -19,8 +19,8 @@ Reglas:
 | FR-AUTH-007 | MUST | F4 | Renovación de autenticación dentro de la conexión | — | pendiente |
 | FR-AUTH-008 | MUST | F2 | Scopes | — | pendiente |
 | FR-AUTH-009 | COULD | F15 | Tokens firmados por el integrador | — | pendiente |
-| FR-ADM-001 | MUST | F2 | CLI de administración | — | pendiente |
-| FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs` | en curso |
+| FR-ADM-001 | MUST | F2 | CLI de administración | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs` | en curso |
+| FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | en curso |
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | — | pendiente |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | pendiente |
 | FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs` | en curso |

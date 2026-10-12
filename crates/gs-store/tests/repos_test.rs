@@ -260,7 +260,7 @@ async fn test_fr_auth_001_api_key_lifecycle_and_tenant_isolation() {
         1
     );
 
-    let auth = ApiKeyRepository::find_by_id_for_auth(&pool, key.id)
+    let auth = ApiKeyRepository::find_by_id(&pool, key.id)
         .await
         .unwrap()
         .unwrap();
