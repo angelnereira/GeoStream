@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 ## [Unreleased]
 
+### Added
+- Workspace Cargo con la estructura de `docs/04_ARCHITECTURE.md` §4: 14 crates y 3 apps vacíos con `#![forbid(unsafe_code)]`, dependencias internas según §4.1, toolchain fijada en 1.99.0 y edición 2024 (T-F0-01).
+
 ### Docs
 - Propuestas no normativas en `docs/proposals/`: brechas y plan de completitud (G-01..G-22) y addendum A-01 de integración de proveedores externos. No modifican requisitos, contratos ni ADR hasta que se adopten.
 

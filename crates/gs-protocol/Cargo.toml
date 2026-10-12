@@ -1,0 +1,10 @@
+[package]
+name = "gs-protocol"
+description = "Generated protocol code, frame codec and domain-to-wire conversion."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gs-domain.workspace = true

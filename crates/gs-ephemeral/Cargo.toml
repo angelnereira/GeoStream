@@ -1,0 +1,11 @@
+[package]
+name = "gs-ephemeral"
+description = "Ephemeral store trait with in-memory and Redis/Valkey implementations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gs-domain.workspace = true
+gs-protocol.workspace = true

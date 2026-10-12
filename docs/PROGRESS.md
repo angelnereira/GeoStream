@@ -6,7 +6,7 @@
 
 | Campo | Valor |
 |---|---|
-| Fase activa | **F0 — Bootstrap del repositorio y CI** (no iniciada) |
+| Fase activa | **F0 — Bootstrap del repositorio y CI** (en curso) |
 | Último hito alcanzado | — |
 | Paquete documental | v0.2.0 (2026-10-11) |
 | Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes |
@@ -27,7 +27,7 @@
 
 | Fase | Estado | Cierre | Evidencia |
 |---|---|---|---|
-| F0 | pendiente | | |
+| F0 | en curso | | |
 | F1 | pendiente | | |
 | F2 | pendiente | | |
 | F3 | pendiente | | |
@@ -54,6 +54,14 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 - Notas: desviaciones, decisiones tomadas dentro del margen de 20 §7
 ```
+
+### 2026-10-12 — T-F0-01 — Workspace Cargo y toolchain
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: parcial — entregable completo y verificado en local; CI aún no existe (T-F0-05), pendiente de PR.
+- PR: — (rama `chore/T-F0-01-cargo-workspace`)
+- Requisitos: FR-OPS-001 (base; los subcomandos llegan en T-F0-03).
+- Evidencia: local, rustc 1.99.0 — `cargo fmt --all --check` sin cambios; `cargo clippy --workspace --all-targets --all-features -- -D warnings` sin avisos; `cargo test --workspace` 0 pruebas, 0 fallos; `cargo metadata` lista 17 paquetes con las dependencias de `04` §4.1.
+- Notas: `gs-testkit`, `gs-devclient` y `gs-loadgen` sin dependencias internas (`04` §4.1 no las define). `.editorconfig` y `.gitignore` revisados sin cambios. Versión de paquetes `0.0.0` y `publish = false` hasta ADR-0019.
 
 ### 2026-10-11 — Paquete documental v0.2.0
 - Autor: diseño inicial.

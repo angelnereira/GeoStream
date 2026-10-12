@@ -1,0 +1,14 @@
+[package]
+name = "gs-service"
+description = "Use cases: sessions, members, invitations, sharing, tokens and the authorization cache."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gs-auth.workspace = true
+gs-store.workspace = true
+gs-ephemeral.workspace = true
+gs-bus.workspace = true
+gs-protocol.workspace = true

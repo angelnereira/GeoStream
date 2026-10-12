@@ -1,0 +1,10 @@
+[package]
+name = "gs-bus"
+description = "Bus trait with in-memory and Redis/Valkey Pub/Sub implementations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gs-domain.workspace = true
