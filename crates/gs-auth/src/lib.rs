@@ -2,12 +2,17 @@
 #![forbid(unsafe_code)]
 
 pub mod api_key;
+pub mod jwt;
 pub mod scopes;
 pub mod signing_key;
 
 pub use api_key::{
-    CREDENTIAL_PREFIX, KEY_ID_HEX_LEN, SECRET_BYTES, SECRET_LEN, format_credential,
-    generate_secret, hash_secret,
+    ApiKeyError, CREDENTIAL_PREFIX, KEY_ID_HEX_LEN, SECRET_BYTES, SECRET_LEN, format_credential,
+    generate_secret, hash_secret, parse_credential, verify_credential,
+};
+pub use jwt::{
+    DeviceTokenClaims, IssuedDeviceToken, JwtError, SigningKeySet, TOKEN_AUDIENCE,
+    issue_device_token, verify_device_token,
 };
 pub use scopes::{
     APPLICATION_SCOPES, DEFAULT_API_KEY_SCOPES, DEFAULT_DEVICE_TOKEN_SCOPES, DEVICE_SCOPES,

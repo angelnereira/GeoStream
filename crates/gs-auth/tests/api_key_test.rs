@@ -3,8 +3,8 @@
 
 use base64::Engine;
 use gs_auth::api_key::{
-    CREDENTIAL_PREFIX, KEY_ID_HEX_LEN, SECRET_BYTES, SECRET_LEN, format_credential,
-    generate_secret, hash_secret,
+    ApiKeyError, CREDENTIAL_PREFIX, KEY_ID_HEX_LEN, SECRET_BYTES, SECRET_LEN, format_credential,
+    generate_secret, hash_secret, parse_credential, verify_credential,
 };
 use gs_domain::ids::ApiKeyId;
 use sha2::{Digest, Sha256};
@@ -82,5 +82,57 @@ fn test_credential_matches_the_gsk_format() {
         id_part
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    );
+}
+
+#[test]
+fn test_parse_credential_rejects_malformed_shapes() {
+    // covers: FR-AUTH-001, docs/06 §3.1
+    for invalid in [
+        "",
+        "gsk_",
+        "gsk_abcd.onlywenvelope",
+        "key_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a.secrettosecrettosecrettosecrettosecret1234",
+        "gsk_0192B6C0A1E47C3F9D2A7B5E8F1C0D3A.secrettosecrettosecrettosecrettosecret1234",
+        "gsk_short.secrettosecrettosecrettosecrettosecret1234",
+        "gsk_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a.short",
+    ] {
+        assert_eq!(
+            parse_credential(invalid),
+            Err(ApiKeyError::InvalidCredential),
+            "credential must be rejected: {invalid}"
+        );
+    }
+}
+
+#[test]
+fn test_parse_credential_recovers_the_key_id_and_secret() {
+    // covers: FR-AUTH-001, docs/06 §3.1
+    let key_id = ApiKeyId::new();
+    let secret = generate_secret();
+    let credential = format_credential(key_id, &secret);
+
+    let (parsed_id, parsed_secret) =
+        parse_credential(&credential).expect("credential must be accepted");
+    assert_eq!(parsed_id, key_id);
+    assert_eq!(parsed_secret, secret);
+}
+
+#[test]
+fn test_verify_credential_uses_constant_time_comparison() {
+    // covers: FR-AUTH-001, docs/06 §3.2
+    let key_id = ApiKeyId::new();
+    let secret = generate_secret();
+    let credential = format_credential(key_id, &secret);
+    let stored = hash_secret(&secret);
+
+    assert_eq!(verify_credential(&credential, &stored), Ok(key_id));
+    assert_eq!(
+        verify_credential(&credential, &hash_secret(&format!("{secret}x"))),
+        Err(ApiKeyError::SecretMismatch)
+    );
+    assert_eq!(
+        verify_credential("not-a-credential", &stored),
+        Err(ApiKeyError::InvalidCredential)
     );
 }

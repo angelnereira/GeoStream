@@ -12,9 +12,15 @@ gs-config.workspace = true
 base64.workspace = true
 ed25519-dalek = { workspace = true, features = ["pem"] }
 getrandom.workspace = true
+serde = { workspace = true, features = ["derive"] }
 jsonwebtoken.workspace = true
 rand.workspace = true
+time = { workspace = true, features = ["formatting"] }
+uuid.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

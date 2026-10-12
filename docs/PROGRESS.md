@@ -56,6 +56,14 @@ Formato de cada entrada (más reciente arriba):
 - Evidencia: enlace a CI / informe
 ```
 
+### 2026-10-12 — T-F2-04 — `gs-auth`: API keys (formato, hash, tiempo constante), JWT EdDSA, rotación y scopes
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-AUTH-001, FR-AUTH-003, FR-AUTH-004, FR-AUTH-008.
+- Evidencia: `gs-auth` implementa el formato y verificación del credencial de API key (`gsk_<key_id>.<secret>` con parseo estricto sin consultar la base de datos y comparación en tiempo constante con `subtle`), la emisión y verificación de JWT EdDSA con los 12 claims exactos de `contracts/test-vectors/token_claims.json` (sin claims adicionales, exigidos con `deny_unknown_fields`), el orden de verificación de `docs/06` §4.3 pasos 1–3 (forma compacta y `kid`, firma EdDSA, `iss`/`aud`/`nbf`/`exp` con `GS_JWT_LEEWAY_S`), el mapeo de errores a `ErrorCode` (`TOKEN_EXPIRED` vs `UNAUTHENTICATED`), y el conjunto de claves de firma (`SigningKeySet`) que carga `GS_JWT_KEYS_DIR`, verifica con todos los pares públicos durante la ventana de rotación y exige privada válida para `GS_JWT_ACTIVE_KID`. Suite `crates/gs-auth/tests/`: 7 pruebas de API key, 7 de scopes, 5 de firma y 9 de JWT (incluido el vector `token_claims.json` y los negativos de token expirado, futuro, `kid` desconocido, emisor/audiencia incorrectos, claims extra y rotación con par antiguo vigente); `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (143 pruebas, 0 fallos), `cargo deny check`, `cargo audit` y `geostream-tools all` verdes.
+- Notas: los pasos 4 y 5 de `docs/06` §4.3 (estado de tenant/aplicación/subject/dispositivo y comprobación de scope) requieren la verdad en PostgreSQL y se implementan en la frontera de autenticación de `gs-service` (T-F2-07/T-F2-08); `gs-auth` cubre la parte criptográfica y de forma.
+
 ### 2026-10-12 — T-F2-03 — CLI `geostream admin` (tenant, app, key, policy, signing-key)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.

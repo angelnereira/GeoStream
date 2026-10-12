@@ -10,14 +10,14 @@ Reglas:
 
 | Requisito | Prioridad | Fase | Título | Pruebas | Estado |
 |---|---|---|---|---|---|
-| FR-AUTH-001 | MUST | F2 | API keys de aplicación | `crates/gs-store/tests/repos_test.rs` | en curso |
+| FR-AUTH-001 | MUST | F2 | API keys de aplicación | `crates/gs-store/tests/repos_test.rs`, `crates/gs-auth/tests/api_key_test.rs` | en curso |
 | FR-AUTH-002 | MUST | F2 | Emisión de tokens de dispositivo | — | pendiente |
-| FR-AUTH-003 | MUST | F2 | Verificación de tokens | — | pendiente |
-| FR-AUTH-004 | MUST | F2 | Rotación de claves de firma | — | pendiente |
+| FR-AUTH-003 | MUST | F2 | Verificación de tokens | `crates/gs-auth/tests/jwt_test.rs` | en curso |
+| FR-AUTH-004 | MUST | F2 | Rotación de claves de firma | `crates/gs-auth/tests/jwt_test.rs`, `crates/gs-auth/tests/signing_key_test.rs` | en curso |
 | FR-AUTH-005 | MUST | F3 | Revocación de tokens y desactivación de dispositivos | — | pendiente |
 | FR-AUTH-006 | MUST | F4 | Tickets de stream de un solo uso | — | pendiente |
 | FR-AUTH-007 | MUST | F4 | Renovación de autenticación dentro de la conexión | — | pendiente |
-| FR-AUTH-008 | MUST | F2 | Scopes | — | pendiente |
+| FR-AUTH-008 | MUST | F2 | Scopes | `crates/gs-auth/tests/scopes_test.rs` | en curso |
 | FR-AUTH-009 | COULD | F15 | Tokens firmados por el integrador | — | pendiente |
 | FR-ADM-001 | MUST | F2 | CLI de administración | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs` | en curso |
 | FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | en curso |
