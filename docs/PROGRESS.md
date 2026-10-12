@@ -55,10 +55,18 @@ Formato de cada entrada (más reciente arriba):
 - Notas: desviaciones, decisiones tomadas dentro del margen de 20 §7
 ```
 
+### 2026-10-12 — T-F0-04 — gs-protocol con build.rs y prueba de ida y vuelta
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: — (rama `feat/T-F0-04-gs-protocol-build`)
+- Requisitos: — (verificación de contratos de stream).
+- Evidencia: local, rustc 1.99.0 — `cargo test -p gs-protocol` (1 prueba de ida y vuelta completa que valida los 24 mensajes de `stream_messages.json`: JSON → Protobuf → Binario → Protobuf → JSON idéntico). `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo deny check`, `cargo audit`, `buf lint contracts/proto` limpios.
+- Notas: `build.rs` compila contratos Protobuf con `prost-build` y `pbjson-build` usando `protoc-bin-vendored`. Tipos de timestamp mapeados a `pbjson_types::Timestamp`.
+
 ### 2026-10-12 — T-F0-03 — Binario geostream con subcomandos
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.
-- PR: — (rama `feat/T-F0-03-geostream-cli`)
+- PR: #3 (fusionado en `main`)
 - Requisitos: FR-OPS-001.
 - Evidencia: local, rustc 1.99.0 — `cargo test -p geostream` (5 pruebas, 0 fallos: `test_version_subcommand`, `test_migrate_stub`, `test_admin_stub`, `test_serve_roles_validation`, `test_serve_health_live`). `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo deny check`, `cargo audit` limpios.
 - Notas: `build.rs` embebe el commit corto de git con fallback a `unknown`. `serve` implementa listener HTTP con endpoint `/health/live` y apagado ordenado ante SIGINT/SIGTERM. `migrate` y `admin` devuelven mensajes claros de no implementados (programados para F2).
