@@ -2,4 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ids;
+pub mod location;
+
 pub use ids::*;
+pub use location::*;

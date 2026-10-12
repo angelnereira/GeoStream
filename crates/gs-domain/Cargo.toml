@@ -8,9 +8,9 @@ publish.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror.workspace = true
-time.workspace = true
+time = { workspace = true, features = ["parsing", "formatting", "serde"] }
 uuid.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true

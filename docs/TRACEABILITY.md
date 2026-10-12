@@ -52,12 +52,12 @@ Reglas:
 | FR-SHR-003 | MUST | F3 | Detener compartición | — | pendiente |
 | FR-SHR-004 | MUST | F3 | Un único dispositivo publicador | — | pendiente |
 | FR-SHR-005 | MUST | F3 | Auditoría de compartición | — | pendiente |
-| FR-LOC-001 | MUST | F4 | Modelo de muestra | — | pendiente |
-| FR-LOC-002 | MUST | F4 | Validación de campos | — | pendiente |
+| FR-LOC-001 | MUST | F4 | Modelo de muestra | `tests/location_vectors_test.rs` | en curso |
+| FR-LOC-002 | MUST | F4 | Validación de campos | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-003 | MUST | F4 | Orden y deduplicación | — | pendiente |
-| FR-LOC-004 | MUST | F4 | Validación temporal | — | pendiente |
+| FR-LOC-004 | MUST | F4 | Validación temporal | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-005 | MUST | F4 | Tiempo de recepción del servidor | — | pendiente |
-| FR-LOC-006 | MUST | F4 | Calidad y tipo de dato | — | pendiente |
+| FR-LOC-006 | MUST | F4 | Calidad y tipo de dato | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-007 | MUST | F4 | Rate limit de publicación | — | pendiente |
 | FR-LOC-008 | MUST | F4 | Sequence floor | — | pendiente |
 | FR-LOC-009 | MUST | F8 | Ingesta HTTP por lotes | — | pendiente |

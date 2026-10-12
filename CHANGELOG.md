@@ -5,6 +5,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 ## [Unreleased]
 
 ### Added
+- `gs-domain`: tipos de ubicación redactados (`Position` con coordenadas privadas y `Debug`/`Display` redactados `Position { <redacted> }`), enums de origen, naturaleza y movimiento, pipeline de validación puro determinista `validate_sample` (16 reglas en orden normativo de `docs/09_VALIDATION_ERRORS.md` §3.1), evaluación de ciclo de vida `evaluate_sample` y suite de pruebas de integración parametrizada contra `contracts/test-vectors/location_samples.json` (49 casos `LOC-V-*` y `LOC-I-*`, FR-LOC-001, FR-LOC-002, FR-LOC-004, FR-LOC-006, T-F1-02).
 - `gs-domain`: identificadores de entidad tipados con prefijo sobre UUIDv7 (14 tipos de entidad), `ExternalSubjectId` e `InstallationId` (UUIDv4 canónico) con codec, validación estricta y suite de pruebas parametrizada contra `contracts/test-vectors/ids.json` (FR-API-006 base, T-F1-01).
 - Verificación de disponibilidad de nombres de paquetes en crates.io y pub.dev, registro de recordatorio de ADR-0019 (licencia) y cumplimiento de criterios de salida para el cierre de Fase F0 (T-F0-08).
 - Entorno de desarrollo local en `deploy/docker-compose.dev.yml` (PostgreSQL 16 y Valkey 7.2) y plantilla de variables de entorno de referencia `deploy/.env.example` (T-F0-07).
