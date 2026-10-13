@@ -10,6 +10,7 @@ pub mod invitations;
 pub mod members;
 pub mod pagination;
 pub mod problem;
+pub mod rate_limit;
 pub mod router;
 pub mod security;
 pub mod sessions;
@@ -28,6 +29,12 @@ pub use pagination::{PaginationQuery, PaginationQueryError, parse_pagination_que
 pub use problem::{
     DETAIL_MAX_LEN, FieldError, PROBLEM_TYPE_PREFIX, Problem, ProblemResponse, TitleCatalog,
     problem_type_of, title_for,
+};
+pub use rate_limit::{
+    METRIC_RATE_LIMITED_TOTAL, RateLimitConfig, RateLimitExceeded, RateLimitInfo, SCOPE_AUTH_IP,
+    SCOPE_INVITE_REDEEM, SCOPE_REST_APP, SCOPE_REST_DEVICE, apply_rate_limit_headers,
+    check_rate_limit, extract_client_ip, rate_limit_problem_response,
+    record_auth_failure_and_check,
 };
 pub use router::{
     AdminState, DEFAULT_MAX_BODY_BYTES, DependencyStatus, PrometheusRenderer, READINESS_TIMEOUT,

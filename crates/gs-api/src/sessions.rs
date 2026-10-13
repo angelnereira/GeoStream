@@ -33,10 +33,15 @@ use gs_service::sessions::{
 
 use crate::pagination::parse_pagination_query;
 use crate::problem::{Problem, ProblemResponse};
+use crate::rate_limit::{
+    RateLimitConfig, SCOPE_REST_APP, SCOPE_REST_DEVICE, check_rate_limit, extract_client_ip,
+    rate_limit_problem_response, record_auth_failure_and_check,
+};
 use crate::router::REQUEST_ID_HEADER;
 use crate::security::{principal_from_header, request_id_from};
 
 use gs_service::{InMemoryBus, InMemoryEphemeralStore};
+use time::OffsetDateTime;
 
 /// State for the sessions endpoints.
 #[derive(Clone)]
@@ -59,6 +64,8 @@ pub struct SessionApiState {
     pub bus: Arc<InMemoryBus>,
     /// Ephemeral key prefix (`GS_REDIS_KEY_PREFIX`, default `gs`).
     pub redis_key_prefix: String,
+    /// Rate limit configuration (docs/07 §8, docs/17 §2.5).
+    pub rate_limit_config: RateLimitConfig,
 }
 
 /// Principal authenticated for a session request.
@@ -83,25 +90,75 @@ impl CallerPrincipal {
     }
 }
 
-/// Authenticates the caller principal from `Authorization: Bearer`.
+/// Authenticates the caller principal from `Authorization: Bearer` and enforces REST rate limits (docs/07 §8, FR-API-004).
 pub(crate) async fn authenticate_caller(
     state: &SessionApiState,
     headers: &HeaderMap,
     request_id: &str,
 ) -> Result<CallerPrincipal, Box<Response>> {
+    let client_ip = extract_client_ip(headers);
     let header_value = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
     let principal = match principal_from_header(header_value, request_id) {
         Ok(p) => p,
-        Err(resp) => return Err(Box::new(resp.into_response())),
+        Err(resp) => {
+            if let Some(rl_resp) = record_auth_failure_and_check(
+                state.ephemeral.as_ref(),
+                &state.redis_key_prefix,
+                &client_ip,
+                state.rate_limit_config.auth_failure_rpm,
+                request_id,
+            )
+            .await
+            {
+                return Err(Box::new(rl_resp));
+            }
+            return Err(Box::new(resp.into_response()));
+        }
     };
 
     let raw_token = principal.credential();
     if raw_token.starts_with("gsk_") {
         match verify_application_principal(&state.pool, raw_token).await {
-            Ok(app) => Ok(CallerPrincipal::Application(Box::new(app))),
+            Ok(app) => {
+                let key_id = app.api_key.id.to_string();
+                let now = OffsetDateTime::now_utc();
+                match check_rate_limit(
+                    state.ephemeral.as_ref(),
+                    &state.redis_key_prefix,
+                    SCOPE_REST_APP,
+                    &key_id,
+                    state.rate_limit_config.app_rpm,
+                    now,
+                )
+                .await
+                {
+                    Ok(_info) => Ok(CallerPrincipal::Application(Box::new(app))),
+                    Err(exceeded) => {
+                        let resp = rate_limit_problem_response(
+                            exceeded.retry_after,
+                            exceeded.limit,
+                            SCOPE_REST_APP,
+                            request_id,
+                        );
+                        Err(Box::new(resp))
+                    }
+                }
+            }
             Err(err) => {
+                if err.error_code() == ErrorCode::Unauthenticated
+                    && let Some(rl_resp) = record_auth_failure_and_check(
+                        state.ephemeral.as_ref(),
+                        &state.redis_key_prefix,
+                        &client_ip,
+                        state.rate_limit_config.auth_failure_rpm,
+                        request_id,
+                    )
+                    .await
+                {
+                    return Err(Box::new(rl_resp));
+                }
                 let problem =
                     Problem::new(err.error_code(), request_id).with_detail(err.to_string());
                 Err(Box::new(ProblemResponse::new(problem).into_response()))
@@ -117,8 +174,44 @@ pub(crate) async fn authenticate_caller(
         )
         .await
         {
-            Ok(dev) => Ok(CallerPrincipal::Device(Box::new(dev))),
+            Ok(dev) => {
+                let device_id = dev.device.id.to_string();
+                let now = OffsetDateTime::now_utc();
+                match check_rate_limit(
+                    state.ephemeral.as_ref(),
+                    &state.redis_key_prefix,
+                    SCOPE_REST_DEVICE,
+                    &device_id,
+                    state.rate_limit_config.device_rpm,
+                    now,
+                )
+                .await
+                {
+                    Ok(_info) => Ok(CallerPrincipal::Device(Box::new(dev))),
+                    Err(exceeded) => {
+                        let resp = rate_limit_problem_response(
+                            exceeded.retry_after,
+                            exceeded.limit,
+                            SCOPE_REST_DEVICE,
+                            request_id,
+                        );
+                        Err(Box::new(resp))
+                    }
+                }
+            }
             Err(err) => {
+                if err.error_code() == ErrorCode::Unauthenticated
+                    && let Some(rl_resp) = record_auth_failure_and_check(
+                        state.ephemeral.as_ref(),
+                        &state.redis_key_prefix,
+                        &client_ip,
+                        state.rate_limit_config.auth_failure_rpm,
+                        request_id,
+                    )
+                    .await
+                {
+                    return Err(Box::new(rl_resp));
+                }
                 let problem =
                     Problem::new(err.error_code(), request_id).with_detail(err.to_string());
                 Err(Box::new(ProblemResponse::new(problem).into_response()))

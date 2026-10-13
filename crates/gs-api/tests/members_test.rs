@@ -175,6 +175,7 @@ async fn setup_fixture() -> TestFixture {
         ephemeral: gs_service::InMemoryEphemeralStore::new(),
         bus: gs_service::InMemoryBus::new(),
         redis_key_prefix: "gs".to_string(),
+        rate_limit_config: gs_api::RateLimitConfig::default(),
     };
 
     let router = sessions_router(api_state);

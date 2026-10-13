@@ -37,13 +37,20 @@ fn invitation_error_to_response(err: InvitationUseCaseError, request_id: &str) -
         ErrorCode::NotFound | ErrorCode::InvitationInvalid => StatusCode::NOT_FOUND,
         ErrorCode::RateLimited => {
             if let InvitationUseCaseError::RateLimited { retry_after } = err {
+                metrics::counter!("gs_rate_limited_total", "scope" => "invite_redeem").increment(1);
                 let problem =
                     Problem::new(ErrorCode::RateLimited, request_id).with_detail(err.to_string());
                 let mut resp =
                     (StatusCode::TOO_MANY_REQUESTS, ProblemResponse::new(problem)).into_response();
                 if let Ok(v) = axum::http::HeaderValue::from_str(&retry_after.to_string()) {
-                    resp.headers_mut().insert(header::RETRY_AFTER, v);
+                    resp.headers_mut().insert(header::RETRY_AFTER, v.clone());
+                    resp.headers_mut()
+                        .insert(axum::http::HeaderName::from_static("ratelimit-reset"), v);
                 }
+                resp.headers_mut().insert(
+                    axum::http::HeaderName::from_static("ratelimit-remaining"),
+                    axum::http::HeaderValue::from_static("0"),
+                );
                 if let Ok(v) = axum::http::HeaderValue::from_str(request_id) {
                     resp.headers_mut().insert(REQUEST_ID_HEADER, v);
                 }
@@ -609,7 +616,7 @@ pub async fn redeem_invitation_handler(
     }
 
     let now = OffsetDateTime::now_utc();
-    let rate_limit_rpm = 10u32; // GS_INVITE_REDEEM_RPM default
+    let rate_limit_rpm = state.rate_limit_config.invite_redeem_rpm;
 
     match redeem_invitation(RedeemInvitationParams {
         pool: &state.pool,

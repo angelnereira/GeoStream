@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F3-10 — Rate limits REST e invitaciones | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-api`, `crates/gs-ephemeral`, `crates/gs-service` | FR-API-004; leer `07` §8; depende de F2 |
+| T-F3-11 — Conformidad OpenAPI, matriz de autorización REST completa, aislamiento de tenants | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-api` | FR-API-001, FR-API-005, FR-API-006, NFR-SEC-004; leer `18` §5, `06` §8 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -47,6 +47,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F3-10 — Rate limits REST e invitaciones
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-API-004.
+- Evidencia: módulo `gs-api::rate_limit` con los 4 ámbitos de `docs/07` §8 (`rest_device`, `rest_app`, `invite_redeem`, `auth_ip`), ventana fija 60 s, 429 `RATE_LIMITED` con `Retry-After` y cabeceras `RateLimit-*`, métrica `gs_rate_limited_total`. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace`, `cargo deny check`, `cargo run -p geostream-tools -- all`: todos OK. Se amplió el límite de lote de `expire_due_sessions` en `audit_test` (10 → 10000) por ser frágil con filas vencidas residuales.
 
 ### 2026-10-13 — T-F3-09 — Auditoría de acciones sensibles
 - Autor/agente: Angel Nereira (con agente de código).

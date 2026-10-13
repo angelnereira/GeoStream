@@ -146,6 +146,7 @@ async fn setup_fixture() -> ApiFixture {
         ephemeral,
         bus: bus.clone(),
         redis_key_prefix: "gs".into(),
+        rate_limit_config: gs_api::RateLimitConfig::default(),
     };
 
     let router = sessions_router(state);

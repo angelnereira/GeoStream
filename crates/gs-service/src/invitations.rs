@@ -580,7 +580,7 @@ pub async fn redeem_invitation<E: EphemeralStore>(
     // 1. Device rate limit check (FR-INV-002, docs/07 §8: GS_INVITE_REDEEM_RPM)
     let now_unix = now.unix_timestamp();
     let window_bucket = now_unix / 60;
-    let rl_key = format!("{key_prefix}:rl:redeem:{device_id}:{window_bucket}");
+    let rl_key = format!("{key_prefix}:rl:invite_redeem:{device_id}:{window_bucket}");
 
     let count = ephemeral
         .increment_counter(&rl_key, StdDuration::from_secs(120))

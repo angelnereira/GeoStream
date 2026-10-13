@@ -574,7 +574,7 @@ async fn test_fr_prv_005_and_fr_shr_005_sensitive_actions_audited() {
         .await
         .expect("backdate session expires_at");
 
-    let expired_sessions = expire_due_sessions(&pool, 10)
+    let expired_sessions = expire_due_sessions(&pool, 10_000)
         .await
         .expect("expire due sessions");
     assert!(expired_sessions.contains(&exp_session.id));
