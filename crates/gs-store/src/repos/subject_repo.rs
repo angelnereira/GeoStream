@@ -144,6 +144,38 @@ impl SubjectRepository {
         }
     }
 
+    /// Atomically increments the token epoch of an active subject (revoking all active tokens),
+    /// returning the updated subject record.
+    pub async fn revoke_tokens(
+        pool: &PgPool,
+        tenant_id: TenantId,
+        subject_id: SubjectId,
+        now: OffsetDateTime,
+    ) -> Result<Subject, StoreError> {
+        let row = sqlx::query(
+            r#"
+            UPDATE subjects
+            SET token_epoch = token_epoch + 1, updated_at = $3
+            WHERE id = $1 AND tenant_id = $2 AND status = 'ACTIVE'
+            RETURNING id, tenant_id, external_subject_id, status, token_epoch, created_at, updated_at, erased_at;
+            "#,
+        )
+        .bind(subject_id.into_uuid())
+        .bind(tenant_id.into_uuid())
+        .bind(now)
+        .fetch_optional(pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        match row {
+            Some(r) => Self::map_row(r),
+            None => Err(StoreError::NotFound {
+                entity: "subject",
+                id: subject_id.to_string(),
+            }),
+        }
+    }
+
     /// Erases a subject, anonymizing its external identifier and marking status as ERASED.
     pub async fn erase(
         pool: &PgPool,

@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F3-07 — Subjects y dispositivos: búsqueda, consulta, revocación de tokens, desactivación de dispositivo | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-store`, `crates/gs-service`, `crates/gs-api` | FR-AUTH-005; leer `06` §7, `07` §9.5; depende de T-F3-03 |
+| T-F3-08 — Deshabilitar/habilitar tenant y aplicación por CLI con invalidación de cachés | Angel Nereira (con agente de código) | 2026-10-13 | `apps/geostream`, `crates/gs-service`, `crates/gs-store` | FR-ADM-003; leer `06` §7, `16` §3; depende de T-F3-07 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -47,6 +47,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F3-07 — Subjects y dispositivos: búsqueda, consulta, revocación de tokens, desactivación de dispositivo
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-AUTH-005.
+- Evidencia: Implementación completa del ciclo de vida y gestión de subjects y dispositivos en plano de control REST (`GET /v1/subjects?external_subject_id=...`, `GET /v1/subjects/{subject_id}`, `POST /v1/subjects/{subject_id}/revoke-tokens`, `GET /v1/devices/{device_id}`, `DELETE /v1/devices/{device_id}`) en `gs-store` (`SubjectRepository::revoke_tokens`, `DeviceRepository::deactivate_and_stop_publishing`), `gs-service` (`subjects`) y `gs-api` (`subjects`). Búsqueda estricta por `external_subject_id` con validación de caracteres (formato Crockford / alfanumérico) y rechazo 422 `VALIDATION_FAILED` ante query params desconocidos o faltantes. Autorización estricta por rol y matriz de permisos (`docs/06` §8.2): aplicaciones requieren scope `subjects:manage` (403 `INSUFFICIENT_SCOPE`), dispositivos denegados para operaciones de subject (403 `PERMISSION_DENIED`). Dispositivos restringidos a sus propios recursos: `getDevice` restringido a dispositivos del mismo subject (404 `NOT_FOUND` para otros sujetos por no enumeración `FR-API-006`), `deactivateDevice` restringido a `own_device` (404 `NOT_FOUND` para otros). Revocación atómica de tokens de subject incrementando `token_epoch` en base de datos; las peticiones posteriores con tokens emitidos con epoch anterior son rechazadas con 401 `UNAUTHENTICATED` (`AccountDisabled`). Desactivación de dispositivo idempotente (204 No Content), cesando automáticamente la compartición en todas las sesiones donde actuaba como publicador activo, limpiando snapshots de ubicación en almacén efímero con hasta 3 reintentos, incrementando la versión de membresías (`mver++`) y emitiendo el evento de control `SharingStopped` en el bus. Suites de integración completas: 4 pruebas en `gs-service` y 3 pruebas en `gs-api` contra PostgreSQL real. Gates de calidad: `cargo fmt`, `cargo clippy`, `cargo test --workspace` (218 pruebas verdes), `cargo deny check` y `geostream-tools all` exitosos.
 
 ### 2026-10-13 — T-F3-06 — Invitaciones: crear, listar, revocar, canjear con concurrencia y rate limit
 - Autor/agente: Angel Nereira (con agente de código).

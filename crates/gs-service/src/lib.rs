@@ -7,6 +7,7 @@ pub mod idempotency;
 pub mod invitations;
 pub mod members;
 pub mod sessions;
+pub mod subjects;
 pub mod tokens;
 pub mod migrate {
     pub use gs_store::PgPool;
@@ -46,6 +47,11 @@ pub use sessions::{
     SessionUseCaseError, UpdateSessionRequest, close_session, create_session, expire_due_sessions,
     get_session, list_sessions_for_application, list_sessions_for_subject, update_session,
     verify_device_active_member, verify_device_manage_capability,
+};
+pub use subjects::{
+    DeactivateDeviceParams, DeviceResource, SubjectListResource, SubjectResource,
+    SubjectUseCaseError, deactivate_device, find_subject_by_external_id, get_device, get_subject,
+    revoke_subject_tokens,
 };
 pub use tokens::{
     MintedToken, REQUIRED_SCOPE, TokenError, TokenRequest, TokenResponse, TokenTtlBounds,

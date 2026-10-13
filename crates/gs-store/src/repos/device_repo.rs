@@ -162,6 +162,65 @@ impl DeviceRepository {
         Ok(res.rows_affected() > 0)
     }
 
+    /// Atomically deactivates an active device and stops sharing for any memberships where it was the publisher
+    /// (docs/06 §7, docs/05 §7, FR-AUTH-005).
+    ///
+    /// Returns the list of affected memberships `(session_id, member_id)` where sharing was stopped.
+    pub async fn deactivate_and_stop_publishing(
+        pool: &PgPool,
+        tenant_id: TenantId,
+        device_id: DeviceId,
+        now: OffsetDateTime,
+    ) -> Result<Vec<(gs_domain::ids::SessionId, gs_domain::ids::MemberId)>, StoreError> {
+        let mut tx = pool.begin().await.map_err(StoreError::Database)?;
+
+        sqlx::query(
+            r#"
+            UPDATE devices
+            SET status = 'INACTIVE', deactivated_at = $3
+            WHERE id = $1 AND tenant_id = $2 AND status = 'ACTIVE';
+            "#,
+        )
+        .bind(device_id.into_uuid())
+        .bind(tenant_id.into_uuid())
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .map_err(StoreError::Database)?;
+
+        let rows = sqlx::query(
+            r#"
+            UPDATE memberships
+            SET sharing = false,
+                publisher_device_id = NULL,
+                sharing_changed_at = $3,
+                version = version + 1
+            WHERE tenant_id = $1 AND publisher_device_id = $2 AND sharing = true
+            RETURNING session_id, id;
+            "#,
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(device_id.into_uuid())
+        .bind(now)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(StoreError::Database)?;
+
+        tx.commit().await.map_err(StoreError::Database)?;
+
+        let mut stopped = Vec::with_capacity(rows.len());
+        for row in rows {
+            let session_raw: Uuid = row.get("session_id");
+            let member_raw: Uuid = row.get("id");
+            stopped.push((
+                gs_domain::ids::SessionId::from_uuid(session_raw),
+                gs_domain::ids::MemberId::from_uuid(member_raw),
+            ));
+        }
+
+        Ok(stopped)
+    }
+
     /// Lists active devices for a subject, ordered by most recently seen first.
     pub async fn list_active_by_subject(
         pool: &PgPool,

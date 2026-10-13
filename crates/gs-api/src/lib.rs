@@ -13,6 +13,7 @@ pub mod problem;
 pub mod router;
 pub mod security;
 pub mod sessions;
+pub mod subjects;
 pub mod tokens;
 
 // Storage access stays behind `gs-service` (docs/04 §4.1); these re-exports exist so the
@@ -39,4 +40,5 @@ pub use security::{
     request_id_from,
 };
 pub use sessions::{SessionApiState, sessions_router};
+pub use subjects::subjects_routes;
 pub use tokens::{SigningKeyRef, TokenState, mint_token_handler, v1_router};
