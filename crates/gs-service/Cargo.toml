@@ -15,6 +15,7 @@ gs-bus.workspace = true
 gs-protocol.workspace = true
 dashmap.workspace = true
 serde = { workspace = true, features = ["derive"] }
+base64.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["formatting"] }
@@ -32,4 +33,5 @@ sqlx = { workspace = true, features = ["runtime-tokio", "postgres", "uuid", "tim
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 time = { workspace = true, features = ["formatting"] }
 serde = { workspace = true, features = ["derive"] }
+base64.workspace = true
 serde_json.workspace = true

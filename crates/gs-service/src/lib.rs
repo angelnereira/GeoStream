@@ -3,6 +3,7 @@
 
 pub mod admin;
 pub mod auth;
+pub mod idempotency;
 pub mod tokens;
 pub mod migrate {
     pub use gs_store::PgPool;
@@ -16,6 +17,11 @@ pub use admin::{
 pub use auth::{
     ApplicationPrincipal, AuthError, VerifiedPrincipal, require_scope, verify_application_key,
     verify_application_principal, verify_device_token_principal,
+};
+pub use idempotency::{
+    IDEMPOTENCY_KEY_MAX_LEN, IdempotencyContext, IdempotencyDecision, IdempotencyError,
+    StoredResponse, begin as idempotency_begin, canonical_json, discard as idempotency_discard,
+    finish as idempotency_finish, request_fingerprint, run_idempotent,
 };
 pub use tokens::{
     MintedToken, REQUIRED_SCOPE, TokenError, TokenRequest, TokenResponse, TokenTtlBounds,

@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod api_key;
+pub mod crypto;
 pub mod jwt;
 pub mod scopes;
 pub mod signing_key;
@@ -9,6 +10,10 @@ pub mod signing_key;
 pub use api_key::{
     ApiKeyError, CREDENTIAL_PREFIX, KEY_ID_HEX_LEN, SECRET_BYTES, SECRET_LEN, format_credential,
     generate_secret, hash_secret, parse_credential, verify_credential,
+};
+pub use crypto::{
+    CryptoError, CryptoRotator, DataCipher, ENVELOPE_VERSION, NONCE_LEN, cipher_from_config_key,
+    parse_envelope,
 };
 pub use jwt::{
     DeviceTokenClaims, IssuedDeviceToken, JwtError, SigningKey, SigningKeySet, TOKEN_AUDIENCE,
