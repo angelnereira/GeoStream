@@ -422,17 +422,111 @@ async fn test_verification_rejects_disabled_and_epoch_changed_principals() {
     )
     .await
     .expect("bump epoch");
+    let err = gs_service::auth::verify_device_token_principal(
+        &pool,
+        minted.response.access_token.as_str(),
+        &keys,
+        "https://geostream.example.com",
+        30,
+    )
+    .await
+    .expect_err("bumped epoch must fail verification");
     assert!(matches!(
+        err,
+        gs_service::auth::AuthError::Unauthenticated(_)
+    ));
+    assert_eq!(
+        gs_service::gs_domain::error::AsErrorCode::error_code(&err),
+        gs_service::gs_domain::error::ErrorCode::Unauthenticated
+    );
+
+    // Step 4a: Disabling the application returns AccountDisabled (403).
+    let minted2 = mint_device_token(
+        &pool,
+        &credential,
+        &request(),
+        bounds(),
+        "https://geostream.example.com",
+        &signing,
+        "verify-test",
+    )
+    .await
+    .expect("mint token 2");
+
+    gs_service::admin::set_application_enabled(&pool, &application_id.to_string(), false)
+        .await
+        .expect("disable application");
+    let err = gs_service::auth::verify_device_token_principal(
+        &pool,
+        minted2.response.access_token.as_str(),
+        &keys,
+        "https://geostream.example.com",
+        30,
+    )
+    .await
+    .expect_err("disabled app must fail verification");
+    assert!(matches!(
+        err,
+        gs_service::auth::AuthError::AccountDisabled(_)
+    ));
+    assert_eq!(
+        gs_service::gs_domain::error::AsErrorCode::error_code(&err),
+        gs_service::gs_domain::error::ErrorCode::AccountDisabled
+    );
+
+    // Re-enabling application restores access.
+    gs_service::admin::set_application_enabled(&pool, &application_id.to_string(), true)
+        .await
+        .expect("enable application");
+    assert!(
         gs_service::auth::verify_device_token_principal(
             &pool,
-            minted.response.access_token.as_str(),
+            minted2.response.access_token.as_str(),
             &keys,
             "https://geostream.example.com",
             30,
         )
-        .await,
-        Err(gs_service::auth::AuthError::AccountDisabled(_))
+        .await
+        .is_ok()
+    );
+
+    // Disabling tenant returns AccountDisabled (403).
+    gs_service::admin::set_tenant_enabled(&pool, &tenant_id.to_string(), false)
+        .await
+        .expect("disable tenant");
+    let err = gs_service::auth::verify_device_token_principal(
+        &pool,
+        minted2.response.access_token.as_str(),
+        &keys,
+        "https://geostream.example.com",
+        30,
+    )
+    .await
+    .expect_err("disabled tenant must fail verification");
+    assert!(matches!(
+        err,
+        gs_service::auth::AuthError::AccountDisabled(_)
     ));
+    assert_eq!(
+        gs_service::gs_domain::error::AsErrorCode::error_code(&err),
+        gs_service::gs_domain::error::ErrorCode::AccountDisabled
+    );
+
+    // Re-enabling tenant restores access.
+    gs_service::admin::set_tenant_enabled(&pool, &tenant_id.to_string(), true)
+        .await
+        .expect("enable tenant");
+    assert!(
+        gs_service::auth::verify_device_token_principal(
+            &pool,
+            minted2.response.access_token.as_str(),
+            &keys,
+            "https://geostream.example.com",
+            30,
+        )
+        .await
+        .is_ok()
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -469,17 +563,23 @@ async fn test_verification_rejects_deactivated_device() {
     .await
     .expect("deactivate device");
 
+    let err = gs_service::auth::verify_device_token_principal(
+        &pool,
+        minted.response.access_token.as_str(),
+        &keys,
+        "https://geostream.example.com",
+        30,
+    )
+    .await
+    .expect_err("deactivated device must fail verification");
     assert!(matches!(
-        gs_service::auth::verify_device_token_principal(
-            &pool,
-            minted.response.access_token.as_str(),
-            &keys,
-            "https://geostream.example.com",
-            30,
-        )
-        .await,
-        Err(gs_service::auth::AuthError::AccountDisabled(_))
+        err,
+        gs_service::auth::AuthError::Unauthenticated(_)
     ));
+    assert_eq!(
+        gs_service::gs_domain::error::AsErrorCode::error_code(&err),
+        gs_service::gs_domain::error::ErrorCode::Unauthenticated
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

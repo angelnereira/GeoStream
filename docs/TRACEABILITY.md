@@ -21,7 +21,7 @@ Reglas:
 | FR-AUTH-009 | COULD | F15 | Tokens firmados por el integrador | — | pendiente |
 | FR-ADM-001 | MUST | F2 | CLI de administración | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs` | en curso |
 | FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | en curso |
-| FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | — | pendiente |
+| FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs`, `crates/gs-service/tests/tokens_test.rs`, `crates/gs-api/tests/account_disabled_test.rs` | cumplido |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | pendiente |
 | FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs`, `crates/gs-api/tests/skeleton_test.rs` | en curso |
 | FR-API-002 | MUST | F3 | Idempotencia | `crates/gs-service/tests/idempotency_test.rs`, `crates/gs-auth/tests/crypto_test.rs` | en curso |

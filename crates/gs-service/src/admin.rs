@@ -14,6 +14,7 @@ use zeroize::Zeroizing;
 use gs_auth::api_key::{format_credential, generate_secret, hash_secret};
 use gs_auth::signing_key::{self, SigningKeyError};
 use gs_auth::{PolicyError, TenantPolicy};
+use gs_bus::{Bus, InMemoryBus};
 use gs_domain::ids::{ApiKeyId, ApplicationId, AuditId, TenantId};
 use gs_store::models::{
     ActorKind, ApiKey, ApiKeyStatus, Application, ApplicationStatus, AuditEvent, AuditOutcome,
@@ -165,11 +166,13 @@ pub async fn get_tenant(pool: &PgPool, tenant_id: &str) -> Result<Tenant, AdminE
     Ok(tenant)
 }
 
-/// Enables or disables a tenant, auditing the transition (docs/16 §3).
-pub async fn set_tenant_enabled(
+/// Enables or disables a tenant with optional bus invalidation (docs/16 §3, FR-ADM-003).
+pub async fn set_tenant_enabled_with_bus<B: Bus>(
     pool: &PgPool,
     tenant_id: &str,
     enabled: bool,
+    bus: Option<&B>,
+    key_prefix: Option<&str>,
 ) -> Result<Tenant, AdminError> {
     let tenant_id = parse_tenant_id(tenant_id)?;
     let current = TenantRepository::get_by_id(pool, tenant_id)
@@ -187,9 +190,8 @@ pub async fn set_tenant_enabled(
         return Ok(current);
     }
 
-    let updated =
-        TenantRepository::update_status(pool, tenant_id, desired, OffsetDateTime::now_utc())
-            .await?;
+    let now = OffsetDateTime::now_utc();
+    let updated = TenantRepository::update_status(pool, tenant_id, desired, now).await?;
     if !updated {
         return Err(AdminError::TenantNotFound {
             tenant_id: tenant_id.to_string(),
@@ -211,7 +213,33 @@ pub async fn set_tenant_enabled(
     )
     .await?;
 
+    if let Some(bus) = bus {
+        let prefix = key_prefix.unwrap_or("gs");
+        let topic = format!("{prefix}:bus:global");
+        let event_name = if enabled {
+            "TenantEnabled"
+        } else {
+            "TenantDisabled"
+        };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "event": event_name,
+            "tenant_id": tenant_id.to_string(),
+            "at": now.format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
+        }))
+        .unwrap_or_default();
+        let _ = bus.publish(&topic, &payload).await;
+    }
+
     get_tenant(pool, &tenant_id.to_string()).await
+}
+
+/// Enables or disables a tenant, auditing the transition (docs/16 §3).
+pub async fn set_tenant_enabled(
+    pool: &PgPool,
+    tenant_id: &str,
+    enabled: bool,
+) -> Result<Tenant, AdminError> {
+    set_tenant_enabled_with_bus::<InMemoryBus>(pool, tenant_id, enabled, None, None).await
 }
 
 /// Creates an application inside a tenant and audits `application.created` (docs/16 §3).
@@ -278,14 +306,16 @@ pub async fn list_applications(
     Ok(ApplicationRepository::list_by_tenant(pool, tenant.id).await?)
 }
 
-/// Enables or disables an application, auditing the transition (docs/16 §3).
+/// Enables or disables an application with optional bus invalidation (docs/16 §3, FR-ADM-003).
 ///
 /// The owning tenant is derived from the application itself, as `docs/16` §3 documents
 /// `app disable --app <app_…>` without `--tenant`. The write stays tenant-scoped.
-pub async fn set_application_enabled(
+pub async fn set_application_enabled_with_bus<B: Bus>(
     pool: &PgPool,
     app_id: &str,
     enabled: bool,
+    bus: Option<&B>,
+    key_prefix: Option<&str>,
 ) -> Result<Application, AdminError> {
     let app_id = parse_application_id(app_id)?;
     let application = ApplicationRepository::find_by_id(pool, app_id)
@@ -301,14 +331,9 @@ pub async fn set_application_enabled(
         ApplicationStatus::Disabled
     };
     if application.status != desired {
-        ApplicationRepository::update_status(
-            pool,
-            application.tenant_id,
-            app_id,
-            desired,
-            OffsetDateTime::now_utc(),
-        )
-        .await?;
+        let now = OffsetDateTime::now_utc();
+        ApplicationRepository::update_status(pool, application.tenant_id, app_id, desired, now)
+            .await?;
 
         let action = if enabled {
             "application.enabled"
@@ -324,6 +349,24 @@ pub async fn set_application_enabled(
             serde_json::json!({"previous_status": application.status.to_string()}),
         )
         .await?;
+
+        if let Some(bus) = bus {
+            let prefix = key_prefix.unwrap_or("gs");
+            let topic = format!("{prefix}:bus:global");
+            let event_name = if enabled {
+                "ApplicationEnabled"
+            } else {
+                "ApplicationDisabled"
+            };
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "event": event_name,
+                "tenant_id": application.tenant_id.to_string(),
+                "application_id": app_id.to_string(),
+                "at": now.format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
+            }))
+            .unwrap_or_default();
+            let _ = bus.publish(&topic, &payload).await;
+        }
     }
 
     ApplicationRepository::find_by_id(pool, app_id)
@@ -332,6 +375,18 @@ pub async fn set_application_enabled(
             tenant_id: application.tenant_id.to_string(),
             app_id: app_id.to_string(),
         })
+}
+
+/// Enables or disables an application, auditing the transition (docs/16 §3).
+///
+/// The owning tenant is derived from the application itself, as `docs/16` §3 documents
+/// `app disable --app <app_…>` without `--tenant`. The write stays tenant-scoped.
+pub async fn set_application_enabled(
+    pool: &PgPool,
+    app_id: &str,
+    enabled: bool,
+) -> Result<Application, AdminError> {
+    set_application_enabled_with_bus::<InMemoryBus>(pool, app_id, enabled, None, None).await
 }
 
 /// Creates an api key for an application and audits `api_key.created` (docs/16 §3).
@@ -428,11 +483,16 @@ pub async fn list_api_keys(pool: &PgPool, app_id: &str) -> Result<Vec<ApiKey>, A
     Ok(ApiKeyRepository::list_by_application(pool, application.tenant_id, application.id).await?)
 }
 
-/// Revokes an api key and audits `api_key.revoked`. Revocation is terminal (docs/06 §3.3).
+/// Revokes an api key with optional bus invalidation (docs/16 §3, docs/06 §3.3).
 ///
 /// The owning tenant is derived from the key itself, as `docs/16` §3 documents
 /// `key revoke --key <key_…>` without `--tenant`. The write stays tenant-scoped.
-pub async fn revoke_api_key(pool: &PgPool, key_id: &str) -> Result<ApiKey, AdminError> {
+pub async fn revoke_api_key_with_bus<B: Bus>(
+    pool: &PgPool,
+    key_id: &str,
+    bus: Option<&B>,
+    key_prefix: Option<&str>,
+) -> Result<ApiKey, AdminError> {
     let key_id = parse_api_key_id(key_id)?;
     let current = ApiKeyRepository::find_by_id(pool, key_id)
         .await?
@@ -443,8 +503,8 @@ pub async fn revoke_api_key(pool: &PgPool, key_id: &str) -> Result<ApiKey, Admin
     let tenant_id = current.tenant_id;
 
     if current.status != ApiKeyStatus::Revoked {
-        let revoked =
-            ApiKeyRepository::revoke(pool, tenant_id, key_id, OffsetDateTime::now_utc()).await?;
+        let now = OffsetDateTime::now_utc();
+        let revoked = ApiKeyRepository::revoke(pool, tenant_id, key_id, now).await?;
         if !revoked {
             return Err(AdminError::ApiKeyNotFound {
                 tenant_id: tenant_id.to_string(),
@@ -460,6 +520,19 @@ pub async fn revoke_api_key(pool: &PgPool, key_id: &str) -> Result<ApiKey, Admin
             serde_json::json!({"label": current.label}),
         )
         .await?;
+
+        if let Some(bus) = bus {
+            let prefix = key_prefix.unwrap_or("gs");
+            let topic = format!("{prefix}:bus:global");
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "event": "ApiKeyRevoked",
+                "tenant_id": tenant_id.to_string(),
+                "api_key_id": key_id.to_string(),
+                "at": now.format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
+            }))
+            .unwrap_or_default();
+            let _ = bus.publish(&topic, &payload).await;
+        }
     }
 
     ApiKeyRepository::find_by_id(pool, key_id)
@@ -468,6 +541,14 @@ pub async fn revoke_api_key(pool: &PgPool, key_id: &str) -> Result<ApiKey, Admin
             tenant_id: tenant_id.to_string(),
             key_id: key_id.to_string(),
         })
+}
+
+/// Revokes an api key and audits `api_key.revoked`. Revocation is terminal (docs/06 §3.3).
+///
+/// The owning tenant is derived from the key itself, as `docs/16` §3 documents
+/// `key revoke --key <key_…>` without `--tenant`. The write stays tenant-scoped.
+pub async fn revoke_api_key(pool: &PgPool, key_id: &str) -> Result<ApiKey, AdminError> {
+    revoke_api_key_with_bus::<InMemoryBus>(pool, key_id, None, None).await
 }
 
 /// Reads the effective policy of a tenant: stored overrides over the defaults (docs/17 §4).

@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F3-08 — Deshabilitar/habilitar tenant y aplicación por CLI con invalidación de cachés | Angel Nereira (con agente de código) | 2026-10-13 | `apps/geostream`, `crates/gs-service`, `crates/gs-store` | FR-ADM-003; leer `06` §7, `16` §3; depende de T-F3-07 |
+| T-F3-09 — Auditoría de acciones sensibles | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-service`, `crates/gs-store`, `crates/gs-api` | FR-PRV-005, FR-SHR-005; leer `10` §8.3; depende de T-F3-04 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -47,6 +47,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F3-08 — Deshabilitar/habilitar tenant y aplicación por CLI con invalidación de cachés
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-ADM-003.
+- Evidencia: Implementación completa del ciclo de deshabilitar y habilitar tenants y aplicaciones tanto por CLI (`geostream admin tenant disable|enable`, `geostream admin app disable|enable`) como a través de la capa de servicio con invalidación en bus global (`set_tenant_enabled_with_bus`, `set_application_enabled_with_bus`, `revoke_api_key_with_bus`) y bloqueo estricto en el plano de control REST (`FR-ADM-003`, `docs/06` §7, `docs/16` §3). Publicación de eventos de invalidación en `{prefix}:bus:global` (`TenantDisabled`, `TenantEnabled`, `ApplicationDisabled`, `ApplicationEnabled`, `ApiKeyRevoked`, y `SubjectTokensRevoked` en revocación de tokens) con formato JSON normativo y timestamp RFC 3339. Diferenciación estricta en el modelo de autenticación (`gs-service::auth::AuthError`): ante un tenant o aplicación desactivada (`status != Active`), las peticiones REST con credencial de aplicación (API key) o token de dispositivo devuelven de inmediato HTTP 403 `ACCOUNT_DISABLED` con Problem Details RFC 9457 (`status=403`, `code=ACCOUNT_DISABLED`), mientras que fallos de época de subject, dispositivo desactivado o API key revocada/expirada devuelven HTTP 401 `UNAUTHENTICATED`. La reactivación de un tenant o aplicación restablece el acceso REST de forma inmediata sin latencia ni retención obsoleta. Suites de pruebas de integración completas: prueba de ciclo de vida de aplicación con `enable` en `apps/geostream/tests/admin_test.rs`, pruebas de publicación y recepción de eventos en bus en `crates/gs-service/tests/admin_test.rs`, pruebas de rechazo paso 4a/4b/4c en `crates/gs-service/tests/tokens_test.rs`, y suite REST de extremo a extremo en `crates/gs-api/tests/account_disabled_test.rs` verificando respuestas 403/200 tanto para API keys como para tokens JWT de dispositivo. Gates de calidad: `cargo fmt`, `cargo clippy`, `cargo test --workspace` (221 pruebas verdes), `cargo deny check` y `geostream-tools all` exitosos.
 
 ### 2026-10-13 — T-F3-07 — Subjects y dispositivos: búsqueda, consulta, revocación de tokens, desactivación de dispositivo
 - Autor/agente: Angel Nereira (con agente de código).

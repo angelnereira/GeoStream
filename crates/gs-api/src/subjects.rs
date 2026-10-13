@@ -7,6 +7,7 @@ use axum::Json;
 use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use gs_service::Bus;
 use gs_service::gs_domain::error::{AsErrorCode, ErrorCode};
 use gs_service::gs_domain::ids::{DeviceId, ExternalSubjectId, SubjectId};
 use gs_service::subjects::{
@@ -326,7 +327,19 @@ pub async fn revoke_subject_tokens_handler(
 
     let now = OffsetDateTime::now_utc();
     match revoke_subject_tokens(&state.pool, tenant_id, subject_id, now).await {
-        Ok(sub) => with_standard_headers(Json(sub).into_response(), &request_id),
+        Ok(sub) => {
+            let topic = format!("{}:bus:global", state.redis_key_prefix);
+            let payload = serde_json::to_vec(&serde_json::json!({
+                "event": "SubjectTokensRevoked",
+                "tenant_id": tenant_id.to_string(),
+                "subject_id": subject_id.to_string(),
+                "token_epoch": sub.token_epoch,
+                "at": now.format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
+            }))
+            .unwrap_or_default();
+            let _ = state.bus.publish(&topic, &payload).await;
+            with_standard_headers(Json(sub).into_response(), &request_id)
+        }
         Err(e) => subject_error_to_response(e, &request_id),
     }
 }

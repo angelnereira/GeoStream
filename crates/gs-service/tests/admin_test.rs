@@ -7,9 +7,11 @@ use time::Duration;
 use gs_domain::ids::{ApiKeyId, ApplicationId, TenantId};
 use gs_service::admin::{
     AdminError, DEFAULT_APPLICATION_DEVICE_SCOPES, create_api_key, create_application,
-    create_tenant, get_effective_policy, list_api_keys, revoke_api_key, set_application_enabled,
-    set_policy_values, set_tenant_enabled,
+    create_tenant, get_effective_policy, list_api_keys, revoke_api_key, revoke_api_key_with_bus,
+    set_application_enabled, set_application_enabled_with_bus, set_policy_values,
+    set_tenant_enabled, set_tenant_enabled_with_bus,
 };
+use gs_service::{Bus, InMemoryBus};
 use gs_store::models::ApiKeyStatus;
 use gs_store::{PgPool, connect_pool, run_migrations};
 
@@ -426,4 +428,154 @@ async fn test_signing_key_generation_is_delegated_without_a_database() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn test_tenant_and_application_disable_enable_with_bus_invalidation() {
+    // covers: FR-ADM-003, docs/16 §3, docs/04 §6.1, docs/06 §7
+    let pool = setup_db().await;
+    let tenant = create_tenant(&pool, "Bus Invalidation Tenant")
+        .await
+        .expect("tenant");
+    let application = create_application(&pool, &tenant.id.to_string(), "bus-app", None, None)
+        .await
+        .expect("application");
+    let created_key = create_api_key(&pool, &application.id.to_string(), None, None, None)
+        .await
+        .expect("api key");
+
+    let bus = InMemoryBus::new();
+    let sub_id = bus.subscribe("gs:bus:global").await.expect("subscribe");
+
+    // 1. Disable tenant with bus -> TenantDisabled published
+    let disabled_tenant = set_tenant_enabled_with_bus(
+        &pool,
+        &tenant.id.to_string(),
+        false,
+        Some(&*bus),
+        Some("gs"),
+    )
+    .await
+    .expect("disable tenant with bus");
+    assert_eq!(
+        disabled_tenant.status,
+        gs_store::models::TenantStatus::Disabled
+    );
+
+    let msg = bus
+        .next_message(sub_id)
+        .await
+        .expect("msg")
+        .expect("some msg");
+    assert_eq!(msg.topic, "gs:bus:global");
+    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).expect("json payload");
+    assert_eq!(payload["event"], "TenantDisabled");
+    assert_eq!(payload["tenant_id"], tenant.id.to_string());
+    assert!(payload["at"].is_string());
+
+    // Disabling again (no-op) must not publish a duplicate message
+    let again = set_tenant_enabled_with_bus(
+        &pool,
+        &tenant.id.to_string(),
+        false,
+        Some(&*bus),
+        Some("gs"),
+    )
+    .await
+    .expect("disable again");
+    assert_eq!(again.status, gs_store::models::TenantStatus::Disabled);
+
+    // 2. Enable tenant with bus -> TenantEnabled published
+    let enabled_tenant =
+        set_tenant_enabled_with_bus(&pool, &tenant.id.to_string(), true, Some(&*bus), Some("gs"))
+            .await
+            .expect("enable tenant with bus");
+    assert_eq!(
+        enabled_tenant.status,
+        gs_store::models::TenantStatus::Active
+    );
+
+    let msg = bus
+        .next_message(sub_id)
+        .await
+        .expect("msg")
+        .expect("some msg");
+    assert_eq!(msg.topic, "gs:bus:global");
+    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).expect("json payload");
+    assert_eq!(payload["event"], "TenantEnabled");
+    assert_eq!(payload["tenant_id"], tenant.id.to_string());
+
+    // 3. Disable application with bus -> ApplicationDisabled published
+    let disabled_app = set_application_enabled_with_bus(
+        &pool,
+        &application.id.to_string(),
+        false,
+        Some(&*bus),
+        Some("gs"),
+    )
+    .await
+    .expect("disable application with bus");
+    assert_eq!(
+        disabled_app.status,
+        gs_store::models::ApplicationStatus::Disabled
+    );
+
+    let msg = bus
+        .next_message(sub_id)
+        .await
+        .expect("msg")
+        .expect("some msg");
+    assert_eq!(msg.topic, "gs:bus:global");
+    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).expect("json payload");
+    assert_eq!(payload["event"], "ApplicationDisabled");
+    assert_eq!(payload["tenant_id"], tenant.id.to_string());
+    assert_eq!(payload["application_id"], application.id.to_string());
+
+    // 4. Enable application with bus -> ApplicationEnabled published
+    let enabled_app = set_application_enabled_with_bus(
+        &pool,
+        &application.id.to_string(),
+        true,
+        Some(&*bus),
+        Some("gs"),
+    )
+    .await
+    .expect("enable application with bus");
+    assert_eq!(
+        enabled_app.status,
+        gs_store::models::ApplicationStatus::Active
+    );
+
+    let msg = bus
+        .next_message(sub_id)
+        .await
+        .expect("msg")
+        .expect("some msg");
+    assert_eq!(msg.topic, "gs:bus:global");
+    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).expect("json payload");
+    assert_eq!(payload["event"], "ApplicationEnabled");
+    assert_eq!(payload["tenant_id"], tenant.id.to_string());
+    assert_eq!(payload["application_id"], application.id.to_string());
+
+    // 5. Revoke API key with bus -> ApiKeyRevoked published
+    let revoked_key = revoke_api_key_with_bus(
+        &pool,
+        &created_key.key.id.to_string(),
+        Some(&*bus),
+        Some("gs"),
+    )
+    .await
+    .expect("revoke key with bus");
+    assert_eq!(revoked_key.status, ApiKeyStatus::Revoked);
+
+    let msg = bus
+        .next_message(sub_id)
+        .await
+        .expect("msg")
+        .expect("some msg");
+    assert_eq!(msg.topic, "gs:bus:global");
+    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).expect("json payload");
+    assert_eq!(payload["event"], "ApiKeyRevoked");
+    assert_eq!(payload["tenant_id"], tenant.id.to_string());
+    assert_eq!(payload["api_key_id"], created_key.key.id.to_string());
 }

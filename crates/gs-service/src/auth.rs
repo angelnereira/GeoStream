@@ -41,9 +41,13 @@ pub enum AuthError {
     #[error("invalid device token: {0}")]
     Token(#[from] JwtError),
 
-    /// The tenant, application, subject or device is disabled or has a mismatched epoch.
-    #[error("credential no longer valid: {0}")]
+    /// The tenant or application is disabled (docs/06 §4.3 step 4a, FR-ADM-003).
+    #[error("account disabled: {0}")]
     AccountDisabled(String),
+
+    /// The credential is no longer valid or deactivated (docs/06 §4.3 step 4b/4c: epoch mismatch, device deactivated, api key revoked/expired).
+    #[error("unauthenticated: {0}")]
+    Unauthenticated(String),
 
     /// The principal lacks the required scope.
     #[error("missing scope '{0}'")]
@@ -58,7 +62,8 @@ impl AsErrorCode for AuthError {
     fn error_code(&self) -> ErrorCode {
         match self {
             Self::Token(error) => error.error_code(),
-            Self::AccountDisabled(_) => ErrorCode::Unauthenticated,
+            Self::AccountDisabled(_) => ErrorCode::AccountDisabled,
+            Self::Unauthenticated(_) => ErrorCode::Unauthenticated,
             Self::MissingScope(_) => ErrorCode::InsufficientScope,
             Self::Store(_) => ErrorCode::Internal,
         }
@@ -101,9 +106,9 @@ pub async fn verify_device_token_principal(
     // Step 4b: subject state and epoch (docs/06 §4.2 `sep`).
     let subject = SubjectRepository::get_by_id(pool, tenant.id, claims.sub)
         .await?
-        .ok_or_else(|| AuthError::AccountDisabled("subject not found".to_string()))?;
+        .ok_or_else(|| AuthError::Unauthenticated("subject not found".to_string()))?;
     if subject.status != SubjectStatus::Active || subject.token_epoch != claims.sep {
-        return Err(AuthError::AccountDisabled(
+        return Err(AuthError::Unauthenticated(
             "subject epoch changed or subject erased".to_string(),
         ));
     }
@@ -111,14 +116,14 @@ pub async fn verify_device_token_principal(
     // Step 4c: device state, bound to the same subject and application.
     let device = DeviceRepository::get_by_id(pool, tenant.id, claims.did)
         .await?
-        .ok_or_else(|| AuthError::AccountDisabled("device not found".to_string()))?;
+        .ok_or_else(|| AuthError::Unauthenticated("device not found".to_string()))?;
     if device.subject_id != subject.id || device.application_id != application.id {
-        return Err(AuthError::AccountDisabled(
+        return Err(AuthError::Unauthenticated(
             "device belongs to another subject or application".to_string(),
         ));
     }
     if device.status != gs_store::models::DeviceStatus::Active {
-        return Err(AuthError::AccountDisabled("device deactivated".to_string()));
+        return Err(AuthError::Unauthenticated("device deactivated".to_string()));
     }
 
     Ok(VerifiedPrincipal {
@@ -147,24 +152,24 @@ pub async fn verify_application_key(
     use gs_auth::api_key::parse_credential;
 
     let (key_id, secret) = parse_credential(credential)
-        .map_err(|_| AuthError::AccountDisabled("malformed credential".to_string()))?;
+        .map_err(|_| AuthError::Unauthenticated("malformed credential".to_string()))?;
 
     let api_key = ApiKeyRepository::find_by_id(pool, key_id)
         .await?
-        .ok_or_else(|| AuthError::AccountDisabled("unknown api key".to_string()))?;
+        .ok_or_else(|| AuthError::Unauthenticated("unknown api key".to_string()))?;
 
     if gs_auth::api_key::hash_secret(secret) != api_key.secret_sha256 {
-        return Err(AuthError::AccountDisabled(
+        return Err(AuthError::Unauthenticated(
             "api key secret mismatch".to_string(),
         ));
     }
     if api_key.status != ApiKeyStatus::Active {
-        return Err(AuthError::AccountDisabled("api key revoked".to_string()));
+        return Err(AuthError::Unauthenticated("api key revoked".to_string()));
     }
     if let Some(expires_at) = api_key.expires_at
         && expires_at <= time::OffsetDateTime::now_utc()
     {
-        return Err(AuthError::AccountDisabled("api key expired".to_string()));
+        return Err(AuthError::Unauthenticated("api key expired".to_string()));
     }
 
     Ok(api_key)

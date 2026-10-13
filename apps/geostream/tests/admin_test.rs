@@ -179,6 +179,14 @@ fn test_admin_application_lifecycle_against_postgresql() {
         .find(|line| line.contains(&app_id))
         .expect("application must still be listed");
     assert!(line.contains("DISABLED"), "expected DISABLED, got: {line}");
+
+    run_ok(&["app", "enable", "--app", &app_id, "--database-url", &db]);
+    let listing = run_ok(&["app", "list", "--tenant", &tenant, "--database-url", &db]);
+    let line = listing
+        .lines()
+        .find(|line| line.contains(&app_id))
+        .expect("application must still be listed");
+    assert!(line.contains("ACTIVE"), "expected ACTIVE, got: {line}");
 }
 
 #[test]
