@@ -409,6 +409,14 @@ pub async fn list_invitations(
     caller: ListInvitationsCaller,
     now: OffsetDateTime,
 ) -> Result<InvitationListResource, InvitationUseCaseError> {
+    // Session must exist in the caller's tenant; otherwise 404 (FR-API-006, NFR-SEC-004).
+    if SessionRepository::get_by_id(pool, tenant_id, session_id)
+        .await?
+        .is_none()
+    {
+        return Err(InvitationUseCaseError::NotFound);
+    }
+
     // Determine creator filter based on caller permissions (x-gs-capability: manage_or_invite_own)
     let creator_filter = match caller {
         ListInvitationsCaller::Application => None,
@@ -483,6 +491,13 @@ pub async fn revoke_invitation(
     caller: RevokeInvitationCaller,
     now: OffsetDateTime,
 ) -> Result<(), InvitationUseCaseError> {
+    // The invitation must exist in this tenant and session for every caller (FR-API-006).
+    let inv =
+        match InvitationRepository::find_by_id(pool, tenant_id, session_id, invitation_id).await? {
+            Some(i) => i,
+            None => return Err(InvitationUseCaseError::NotFound),
+        };
+
     // Verify caller authorization (x-gs-capability: manage_or_issuer)
     match caller {
         RevokeInvitationCaller::Application => {}
@@ -493,18 +508,6 @@ pub async fn revoke_invitation(
         } => {
             if !capabilities.manage {
                 // Must be the issuer
-                let inv = match InvitationRepository::find_by_id(
-                    pool,
-                    tenant_id,
-                    session_id,
-                    invitation_id,
-                )
-                .await?
-                {
-                    Some(i) => i,
-                    None => return Err(InvitationUseCaseError::NotFound),
-                };
-
                 let is_issuer = inv.created_by_member_id == Some(member_id)
                     || match inv.created_by {
                         Actor::Device(did) => did == device_id,

@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F3-11 — Conformidad OpenAPI, matriz de autorización REST completa, aislamiento de tenants | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-api` | FR-API-001, FR-API-005, FR-API-006, NFR-SEC-004; leer `18` §5, `06` §8 |
+| _ninguna_ | | | | Fase F3 completa; siguiente: T-F4-01 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -47,6 +47,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F3-11 — Conformidad OpenAPI, matriz de autorización y aislamiento de tenants
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-API-001, FR-API-005, FR-API-006; NFR-SEC-004 en curso (mensajes de stream pendientes en F4).
+- Evidencia: `conformance_test.rs` (2 pruebas) valida request/response contra OpenAPI y ejecuta las matrices; destapó y corrigió dos defectos reales (`listInvitations`/`revokeInvitation` sin 404). Comandos: fmt, clippy -D warnings, `cargo test --workspace`, `cargo deny check`, `geostream-tools all`: todos OK. El test genera `target/openapi/geostream.v1.json` con `npx @redocly/cli bundle` si falta o está desactualizado (requiere Node.js). Se añadió `jsonschema` (lista aprobada) como dev-dependency de `gs-api` y un `allow(clippy::too_many_arguments)` acotado en un helper de test.
 
 ### 2026-10-13 — T-F3-10 — Rate limits REST e invitaciones
 - Autor/agente: Angel Nereira (con agente de código).

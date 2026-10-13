@@ -23,12 +23,12 @@ Reglas:
 | FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | en curso |
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs`, `crates/gs-service/tests/tokens_test.rs`, `crates/gs-api/tests/account_disabled_test.rs` | cumplido |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | pendiente |
-| FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs`, `crates/gs-api/tests/skeleton_test.rs` | en curso |
+| FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs`, `crates/gs-api/tests/skeleton_test.rs`, `crates/gs-api/tests/conformance_test.rs` | cumplido |
 | FR-API-002 | MUST | F3 | Idempotencia | `crates/gs-service/tests/idempotency_test.rs`, `crates/gs-auth/tests/crypto_test.rs` | en curso |
 | FR-API-003 | MUST | F3 | Paginación por cursor | `crates/gs-domain/src/pagination.rs`, `crates/gs-api/src/pagination.rs` | en curso |
 | FR-API-004 | MUST | F3 | Rate limit REST | crates/gs-api/src/rate_limit.rs; crates/gs-api/tests/rate_limit_test.rs | cumplido |
-| FR-API-005 | MUST | F3 | OpenAPI como fuente de verdad | — | pendiente |
-| FR-API-006 | MUST | F3 | No enumeración de recursos | — | pendiente |
+| FR-API-005 | MUST | F3 | OpenAPI como fuente de verdad | `crates/gs-api/tests/conformance_test.rs` | cumplido |
+| FR-API-006 | MUST | F3 | No enumeración de recursos | `crates/gs-api/tests/conformance_test.rs` | cumplido |
 | FR-SES-001 | MUST | F3 | Crear sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
 | FR-SES-002 | MUST | F3 | Consultar y listar sesiones | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
 | FR-SES-003 | MUST | F3 | Actualizar sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
@@ -140,7 +140,7 @@ Reglas:
 | NFR-SEC-001 | MUST | F2 | Transporte cifrado | deploy/caddy/Caddyfile, deploy/nginx/geostream.conf, docs/templates/RELEASE_TEMPLATE.md | implementado |
 | NFR-SEC-002 | MUST | F4 | Plazo de revocación | — | pendiente |
 | NFR-SEC-003 | MUST | F2 | Secretos fuera de registros | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/redacted.rs` | en curso |
-| NFR-SEC-004 | MUST | F3 | Aislamiento de tenant | — | pendiente |
+| NFR-SEC-004 | MUST | F3 | Aislamiento de tenant | `crates/gs-api/tests/conformance_test.rs` (REST; mensajes de stream en F4) | en curso |
 | NFR-SEC-005 | MUST | F10 | Fuzzing | — | pendiente |
 | NFR-SEC-006 | MUST | F0 | Auditoría de dependencias | CI (cargo deny, cargo audit) | cumplido |
 | NFR-PRIV-001 | MUST | F4 | Sin persistencia de coordenadas | — | pendiente |

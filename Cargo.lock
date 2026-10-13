@@ -1612,6 +1612,7 @@ dependencies = [
  "axum",
  "gs-service",
  "http",
+ "jsonschema",
  "metrics",
  "metrics-exporter-prometheus",
  "reqwest",
