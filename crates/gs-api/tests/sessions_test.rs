@@ -152,6 +152,9 @@ async fn setup_fixture() -> TestFixture {
         leeway_seconds: 5,
         crypto_rotator: Some(Arc::new(rotator)),
         idempotency_retention: Duration::from_secs(3600),
+        ephemeral: gs_service::InMemoryEphemeralStore::new(),
+        bus: gs_service::InMemoryBus::new(),
+        redis_key_prefix: "gs".to_string(),
     };
 
     let router = sessions_router(api_state);

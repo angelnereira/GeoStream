@@ -45,6 +45,7 @@ struct TestFixture {
     app_key_readonly: String,
     device_token: String,
     device_token_other: String,
+    device_token_no_sharing: String,
 }
 
 async fn setup_fixture() -> TestFixture {
@@ -136,6 +137,30 @@ async fn setup_fixture() -> TestFixture {
     .await
     .expect("mint 2");
 
+    let token_req_no_sharing = serde_json::from_value(json!({
+        "external_subject_id": "device-member-no-sharing",
+        "installation_id": "0192b6c0-a1e4-4c3f-9d2a-7b5e8f1c0d13",
+        "platform": "ANDROID",
+        "scopes": ["sessions:create"]
+    }))
+    .expect("token req");
+
+    let minted_no_sharing = mint_device_token(
+        &pool,
+        write_key.credential.as_str(),
+        &token_req_no_sharing,
+        TokenTtlBounds {
+            min_seconds: 300,
+            default_seconds: 900,
+            max_seconds: 3600,
+        },
+        "https://geostream.example.com",
+        &signing,
+        kid,
+    )
+    .await
+    .expect("mint no sharing");
+
     let raw = [12u8; 32];
     let rotator = CryptoRotator::empty()
         .with_active(DataCipher::new("test_key_members", &raw).expect("cipher"));
@@ -147,6 +172,9 @@ async fn setup_fixture() -> TestFixture {
         leeway_seconds: 60,
         crypto_rotator: Some(Arc::new(rotator)),
         idempotency_retention: Duration::from_secs(86_400),
+        ephemeral: gs_service::InMemoryEphemeralStore::new(),
+        bus: gs_service::InMemoryBus::new(),
+        redis_key_prefix: "gs".to_string(),
     };
 
     let router = sessions_router(api_state);
@@ -159,6 +187,7 @@ async fn setup_fixture() -> TestFixture {
         app_key_readonly: read_key.credential.to_string(),
         device_token: minted_1.response.access_token,
         device_token_other: minted_2.response.access_token,
+        device_token_no_sharing: minted_no_sharing.response.access_token,
     }
 }
 
@@ -577,4 +606,169 @@ async fn test_api_revoke_and_leave() {
         .await
         .expect("send");
     assert_eq!(resp_revoke.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn test_api_sharing_control_plane() {
+    // covers: FR-SHR-001..004, INV-SHR-1..3, docs/05 §7, docs/07 §9.3
+    let fix = setup_fixture().await;
+    let client = reqwest::Client::new();
+
+    // 1. Create session by device 1
+    let resp_create = client
+        .post(format!("{}/v1/sessions", fix.address))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.device_token))
+        .header(CONTENT_TYPE, "application/json")
+        .body(
+            json!({
+                "mode": "MANY_TO_MANY",
+                "expires_in_seconds": 7200
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_create.status(), reqwest::StatusCode::CREATED);
+    let sess_body = json_response(resp_create).await;
+    let session_id = sess_body["id"].as_str().unwrap();
+
+    // Get owner member id
+    let resp_me = client
+        .get(format!(
+            "{}/v1/sessions/{}/members/me",
+            fix.address, session_id
+        ))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.device_token))
+        .send()
+        .await
+        .expect("send");
+    let me_body = json_response(resp_me).await;
+    let owner_member_id = me_body["id"].as_str().unwrap();
+    assert_eq!(me_body["sharing"], false);
+
+    // 2. Device without sharing:write tries to activate sharing -> 403 INSUFFICIENT_SCOPE
+    let resp_no_scope = client
+        .put(format!(
+            "{}/v1/sessions/{}/members/me/sharing",
+            fix.address, session_id
+        ))
+        .header(
+            AUTHORIZATION,
+            format!("Bearer {}", fix.device_token_no_sharing),
+        )
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "sharing": true }).to_string())
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_no_scope.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // 3. Application tries /me/sharing -> 404 NOT_FOUND
+    let resp_app_me = client
+        .put(format!(
+            "{}/v1/sessions/{}/members/me/sharing",
+            fix.address, session_id
+        ))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.app_key_write))
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "sharing": true }).to_string())
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_app_me.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // 4. Application with readonly key tries to modify sharing -> 403 INSUFFICIENT_SCOPE
+    let resp_app_ro = client
+        .put(format!(
+            "{}/v1/sessions/{}/members/{}/sharing",
+            fix.address, session_id, owner_member_id
+        ))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.app_key_readonly))
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "sharing": false }).to_string())
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_app_ro.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // 5. Application tries to activate sharing for owner -> 403 PERMISSION_DENIED (INV-SHR-2)
+    let resp_app_start = client
+        .put(format!(
+            "{}/v1/sessions/{}/members/{}/sharing",
+            fix.address, session_id, owner_member_id
+        ))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.app_key_write))
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "sharing": true }).to_string())
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_app_start.status(), reqwest::StatusCode::FORBIDDEN);
+
+    // 6. Device 1 activates sharing via /me/sharing -> 200 OK
+    let resp_start = client
+        .put(format!(
+            "{}/v1/sessions/{}/members/me/sharing",
+            fix.address, session_id
+        ))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.device_token))
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "sharing": true }).to_string())
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_start.status(), reqwest::StatusCode::OK);
+    assert!(resp_start.headers().contains_key(ETAG));
+    assert!(resp_start.headers().contains_key("x-request-id"));
+    let start_body = json_response(resp_start).await;
+    assert_eq!(start_body["sharing"], true);
+
+    // 7. Device 1 idempotently activates sharing -> 200 OK
+    let resp_start_idem = client
+        .put(format!(
+            "{}/v1/sessions/{}/members/me/sharing",
+            fix.address, session_id
+        ))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.device_token))
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "sharing": true }).to_string())
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_start_idem.status(), reqwest::StatusCode::OK);
+    let idem_body = json_response(resp_start_idem).await;
+    assert_eq!(idem_body["sharing"], true);
+
+    // 8. Application stops sharing for owner -> 200 OK
+    let resp_app_stop = client
+        .put(format!(
+            "{}/v1/sessions/{}/members/{}/sharing",
+            fix.address, session_id, owner_member_id
+        ))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.app_key_write))
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "sharing": false }).to_string())
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_app_stop.status(), reqwest::StatusCode::OK);
+    let stop_body = json_response(resp_app_stop).await;
+    assert_eq!(stop_body["sharing"], false);
+
+    // 9. Device 1 stops sharing idempotently -> 200 OK
+    let resp_dev_stop = client
+        .put(format!(
+            "{}/v1/sessions/{}/members/me/sharing",
+            fix.address, session_id
+        ))
+        .header(AUTHORIZATION, format!("Bearer {}", fix.device_token))
+        .header(CONTENT_TYPE, "application/json")
+        .body(json!({ "sharing": false }).to_string())
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(resp_dev_stop.status(), reqwest::StatusCode::OK);
+    let dev_stop_body = json_response(resp_dev_stop).await;
+    assert_eq!(dev_stop_body["sharing"], false);
 }

@@ -8,8 +8,8 @@ use sqlx::Row;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use gs_domain::ids::{MemberId, SessionId, SubjectId, TenantId};
-use gs_domain::membership::{MemberRole, MemberStatusKind, Membership};
+use gs_domain::ids::{DeviceId, MemberId, SessionId, SubjectId, TenantId};
+use gs_domain::membership::{MemberRole, MemberStatusKind, Membership, SharingTransition};
 
 use crate::PgPool as Pool;
 use crate::error::StoreError;
@@ -97,6 +97,34 @@ pub enum LeaveOutcome {
         promoted_owner: Option<Box<MemberWithSubject>>,
         session_closed: bool,
     },
+}
+
+/// Parameters for setting member sharing state (FR-SHR-001..004, docs/05 §7).
+#[derive(Debug, Clone)]
+pub struct SetSharingParams {
+    pub desired_sharing: bool,
+    pub caller_subject_id: Option<SubjectId>,
+    pub publisher_device_id: Option<DeviceId>,
+    pub caller_is_app: bool,
+    pub caller_has_manage: bool,
+    pub now: OffsetDateTime,
+}
+
+/// Result of setting member sharing state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetSharingOutcome {
+    Success {
+        member: Box<MemberWithSubject>,
+        transition: SharingTransition,
+    },
+    Unchanged(Box<MemberWithSubject>),
+    SessionNotFound,
+    SessionNotActive,
+    MemberNotFound,
+    MemberNotActive,
+    OnlySelfCanActivateSharing,
+    MissingPublishCapability,
+    PermissionDenied,
 }
 
 /// Membership repository with tenant scoping (INV-TEN-1).
@@ -1176,6 +1204,190 @@ impl MembershipRepository {
             promoted_owner: promoted_member.map(Box::new),
             session_closed,
         })
+    }
+
+    /// Sets member sharing state with strict invariant enforcement (FR-SHR-001..004, docs/05 §7).
+    pub async fn set_sharing(
+        pool: &Pool,
+        tenant_id: TenantId,
+        session_id: SessionId,
+        member_id: MemberId,
+        params: SetSharingParams,
+    ) -> Result<SetSharingOutcome, StoreError> {
+        let mut tx = pool.begin().await.map_err(StoreError::Database)?;
+
+        // 1. Check session under lock
+        let session_row = sqlx::query(
+            r#"
+            SELECT status, expires_at
+            FROM sessions
+            WHERE tenant_id = $1 AND id = $2
+            FOR UPDATE;
+            "#,
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(session_id.into_uuid())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(StoreError::Database)?;
+
+        let session_row = match session_row {
+            Some(r) => r,
+            None => return Ok(SetSharingOutcome::SessionNotFound),
+        };
+
+        let session_status: String = session_row.get("status");
+        let expires_at: OffsetDateTime = session_row.get("expires_at");
+        if session_status != "ACTIVE" || expires_at <= params.now {
+            return Ok(SetSharingOutcome::SessionNotActive);
+        }
+
+        // 2. Fetch target member under lock
+        let member_row = sqlx::query(
+            r#"
+            SELECT m.id, m.tenant_id, m.session_id, m.subject_id, m.role,
+                   m.can_publish, m.can_read, m.can_invite, m.can_manage,
+                   m.status, m.sharing, m.publisher_device_id, m.sharing_changed_at,
+                   m.joined_via, m.invitation_id, m.joined_at, m.ended_at, m.version,
+                   s.external_subject_id
+            FROM memberships m
+            JOIN subjects s ON s.id = m.subject_id
+            WHERE m.tenant_id = $1 AND m.session_id = $2 AND m.id = $3
+            FOR UPDATE OF m;
+            "#,
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(session_id.into_uuid())
+        .bind(member_id.into_uuid())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(StoreError::Database)?;
+
+        let member_row = match member_row {
+            Some(r) => r,
+            None => return Ok(SetSharingOutcome::MemberNotFound),
+        };
+
+        let mut current_member = Self::map_row_with_subject(&member_row)?;
+        if current_member.membership.status != MemberStatusKind::Active {
+            return Ok(SetSharingOutcome::MemberNotActive);
+        }
+
+        // 3. Evaluate sharing transition and permissions
+        if params.desired_sharing {
+            // INV-SHR-2: only the subject itself can activate sharing
+            if params.caller_is_app
+                || params.caller_subject_id != Some(current_member.membership.subject_id)
+            {
+                return Ok(SetSharingOutcome::OnlySelfCanActivateSharing);
+            }
+
+            // Must have publish
+            if !current_member.membership.capabilities.publish {
+                return Ok(SetSharingOutcome::MissingPublishCapability);
+            }
+
+            let new_device = match params.publisher_device_id {
+                Some(d) => d,
+                None => return Ok(SetSharingOutcome::OnlySelfCanActivateSharing),
+            };
+
+            // INV-SHR-3: idempotent if already sharing from the same device
+            if current_member.membership.sharing
+                && current_member.membership.publisher_device_id == Some(new_device)
+            {
+                return Ok(SetSharingOutcome::Unchanged(Box::new(current_member)));
+            }
+
+            let transition = if current_member.membership.sharing {
+                let prev = current_member
+                    .membership
+                    .publisher_device_id
+                    .unwrap_or(new_device);
+                SharingTransition::Transferred {
+                    previous_device: prev,
+                    new_device,
+                }
+            } else {
+                SharingTransition::Started(new_device)
+            };
+
+            let updated_row = sqlx::query(
+                r#"
+                UPDATE memberships
+                SET sharing = true,
+                    publisher_device_id = $4,
+                    sharing_changed_at = $5,
+                    version = version + 1
+                WHERE tenant_id = $1 AND session_id = $2 AND id = $3
+                RETURNING version;
+                "#,
+            )
+            .bind(tenant_id.into_uuid())
+            .bind(session_id.into_uuid())
+            .bind(member_id.into_uuid())
+            .bind(new_device.into_uuid())
+            .bind(params.now)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::Database)?;
+
+            let new_version: i64 = updated_row.get("version");
+            current_member.membership.sharing = true;
+            current_member.membership.publisher_device_id = Some(new_device);
+            current_member.membership.sharing_changed_at = Some(params.now);
+            current_member.membership.version = u64::try_from(new_version).unwrap_or(1);
+
+            tx.commit().await.map_err(StoreError::Database)?;
+
+            Ok(SetSharingOutcome::Success {
+                member: Box::new(current_member),
+                transition,
+            })
+        } else {
+            // Stopping sharing (FR-SHR-003)
+            let is_self = params.caller_subject_id == Some(current_member.membership.subject_id);
+            let can_stop = params.caller_is_app || is_self || params.caller_has_manage;
+            if !can_stop {
+                return Ok(SetSharingOutcome::PermissionDenied);
+            }
+
+            if !current_member.membership.sharing {
+                return Ok(SetSharingOutcome::Unchanged(Box::new(current_member)));
+            }
+
+            let updated_row = sqlx::query(
+                r#"
+                UPDATE memberships
+                SET sharing = false,
+                    publisher_device_id = NULL,
+                    sharing_changed_at = $4,
+                    version = version + 1
+                WHERE tenant_id = $1 AND session_id = $2 AND id = $3
+                RETURNING version;
+                "#,
+            )
+            .bind(tenant_id.into_uuid())
+            .bind(session_id.into_uuid())
+            .bind(member_id.into_uuid())
+            .bind(params.now)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(StoreError::Database)?;
+
+            let new_version: i64 = updated_row.get("version");
+            current_member.membership.sharing = false;
+            current_member.membership.publisher_device_id = None;
+            current_member.membership.sharing_changed_at = Some(params.now);
+            current_member.membership.version = u64::try_from(new_version).unwrap_or(1);
+
+            tx.commit().await.map_err(StoreError::Database)?;
+
+            Ok(SetSharingOutcome::Success {
+                member: Box::new(current_member),
+                transition: SharingTransition::Stopped,
+            })
+        }
     }
 
     fn map_row_with_subject(row: &sqlx::postgres::PgRow) -> Result<MemberWithSubject, StoreError> {

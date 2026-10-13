@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F3-05 — Invitaciones: ciclo de vida, códigos Crockford, canje, revocación, estado agotado, prevención de replay | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-store`, `crates/gs-service`, `crates/gs-api` | FR-INV-001..006; leer `05` §6 y `07` §9.4; depende de T-F3-04 (cerrada) |
+| T-F3-06 — Invitaciones: crear, listar, revocar, canjear con concurrencia y rate limit | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-store`, `crates/gs-service`, `crates/gs-api` | FR-INV-001..003; leer `05` §6, `07` §9.4; depende de T-F3-04 y T-F3-05 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -47,6 +47,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F3-05 — Compartición: `PUT …/sharing` con efectos (borrado de snapshot, `mver++`, evento de control)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-SHR-001, FR-SHR-002, FR-SHR-003, FR-SHR-004.
+- Evidencia: Implementación completa del plano de control de compartición de ubicación (`PUT /v1/sessions/{session_id}/members/{member_id|me}/sharing`) en `gs-store` (`MembershipRepository::set_sharing`), `gs-service` (`members::set_sharing`) y `gs-api` (`members::set_sharing_handler`). Restricción estricta de inicio de compartición exclusivamente al propio subject con dispositivo activo, capacidad `publish` y scope de token `sharing:write` (`INV-SHR-2`, `FR-SHR-002`), garantizando un único dispositivo publicador por membresía con transferencia atómica de rol si se invoca desde otro dispositivo del mismo subject (`FR-SHR-004`), e idempotencia sin eventos si se repite desde el mismo dispositivo (`INV-SHR-3`). Detención de compartición (`sharing=false`) autorizada para el propio subject, miembros con `can_manage=true` o aplicaciones con scope `members:write` (`FR-SHR-003`). Efectos síncronos antes de responder: borrado inmediato del snapshot de última ubicación en almacén efímero con reintentos automáticos (hasta 3 intentos, `NFR-PRIV-002`, `docs/11` §2.1), incremento atómico de la versión de membresías (`mver++`) y publicación del evento de control en el bus (`SharingStarted`, `SharingTransferred`, `SharingStopped`) en `{prefix}:bus:ctl:{session_id}`. Suites de integración: 6 pruebas unitarias/de servicio en `gs-service` y 6 pruebas de integración REST en `gs-api` contra PostgreSQL real. Gates de calidad: `cargo fmt`, `cargo clippy`, `cargo test --workspace` (211 pruebas verdes), `cargo deny check` y `geostream-tools all` exitosos.
 
 ### 2026-10-13 — T-F3-04 — Membresías: alta, listado, consulta (`me`), cambio de capacidades/rol, revocación, salida, transferencia de propiedad, readmisión
 - Autor/agente: Angel Nereira (con agente de código).

@@ -4,16 +4,18 @@
 
 use std::str::FromStr;
 
-use gs_domain::ids::{DeviceId, MemberId, SubjectId, TenantId};
-use gs_domain::membership::{Capabilities, MemberRole, MemberStatusKind};
+use gs_domain::ids::{ApplicationId, DeviceId, MemberId, SubjectId, TenantId};
+use gs_domain::membership::{Capabilities, MemberRole, MemberStatusKind, MembershipError};
 use gs_domain::session::{Actor, ClosedReason, SessionMode, SessionStatus};
 use gs_service::admin::{create_application, create_tenant};
 use gs_service::members::{
-    AddMemberRequest, MemberUseCaseError, UpdateCaller, UpdateMemberRequest, add_member,
-    get_member_for_device_me, leave_session, list_members, revoke_member, update_member,
+    AddMemberRequest, MemberUseCaseError, SetSharingCaller, SetSharingContext, UpdateCaller,
+    UpdateMemberRequest, add_member, get_member_for_device_me, leave_session, list_members,
+    revoke_member, set_sharing, update_member,
 };
 use gs_service::sessions::{CreateSessionRequest, SessionPolicy, create_session, get_session};
 use gs_service::tokens::mint_device_token;
+use gs_service::{EphemeralStore, InMemoryBus, InMemoryEphemeralStore};
 use gs_store::repos::MembershipRepository;
 use gs_store::{PgPool, connect_pool, run_migrations};
 
@@ -608,4 +610,383 @@ async fn test_transfer_ownership_and_owner_departure_cascade() {
         .expect("get session");
     assert_eq!(sess_closed.status, SessionStatus::Closed);
     assert_eq!(sess_closed.closed_reason, Some(ClosedReason::OwnerLeft));
+}
+
+#[tokio::test]
+async fn test_sharing_lifecycle_and_invariants() {
+    let (pool, tenant_id, api_key, signing) = setup_tenant_and_app().await;
+
+    let (dev_1, m2_sub) = mint_device(
+        &pool,
+        &api_key,
+        &signing,
+        "member-sharer",
+        "0192b6c0-a1e4-4c3f-9d2a-7b5e8f1c0d11",
+    )
+    .await;
+    let (dev_2, _) = mint_device(
+        &pool,
+        &api_key,
+        &signing,
+        "member-sharer",
+        "0192b6c0-a1e4-4c3f-9d2a-7b5e8f1c0d12",
+    )
+    .await;
+    let (dev_no_pub, m3_sub) = mint_device(
+        &pool,
+        &api_key,
+        &signing,
+        "member-no-pub",
+        "0192b6c0-a1e4-4c3f-9d2a-7b5e8f1c0d13",
+    )
+    .await;
+
+    // Create session
+    let session = create_session(
+        &pool,
+        tenant_id,
+        Actor::Application(ApplicationId::new()),
+        &create_req(SessionMode::ManyToMany, Some(10)),
+        test_policy(),
+    )
+    .await
+    .expect("create session");
+
+    // Add Member 2 with publish capability
+    let m2 = add_member(
+        &pool,
+        tenant_id,
+        session.id,
+        &AddMemberRequest {
+            external_subject_id: "member-sharer".to_string(),
+            role: Some(MemberRole::Member),
+            capabilities: Some(Capabilities {
+                publish: true,
+                read: true,
+                invite: false,
+                manage: false,
+            }),
+        },
+    )
+    .await
+    .expect("add m2");
+    let m2_id = MemberId::from_str(&m2.id).expect("m2 id");
+
+    // Add Member 3 WITHOUT publish capability
+    let m3 = add_member(
+        &pool,
+        tenant_id,
+        session.id,
+        &AddMemberRequest {
+            external_subject_id: "member-no-pub".to_string(),
+            role: Some(MemberRole::Member),
+            capabilities: Some(Capabilities {
+                publish: false,
+                read: true,
+                invite: false,
+                manage: false,
+            }),
+        },
+    )
+    .await
+    .expect("add m3");
+    let m3_id = MemberId::from_str(&m3.id).expect("m3 id");
+
+    let ephemeral = InMemoryEphemeralStore::new();
+    let bus = InMemoryBus::new();
+    let prefix = "gs";
+
+    // 1. Invariant: Application caller cannot activate sharing (INV-SHR-2, FR-SHR-002)
+    let app_err = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        true,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: true,
+                subject_id: None,
+                device_id: None,
+                has_manage: false,
+            },
+        },
+    )
+    .await;
+    assert!(matches!(
+        app_err,
+        Err(MemberUseCaseError::Domain(
+            MembershipError::OnlySelfCanActivateSharing
+        ))
+    ));
+
+    // 2. Invariant: Another member (even with manage) cannot activate sharing for someone else (INV-SHR-2)
+    let other_err = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        true,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(SubjectId::new()),
+                device_id: Some(DeviceId::new()),
+                has_manage: true,
+            },
+        },
+    )
+    .await;
+    assert!(matches!(
+        other_err,
+        Err(MemberUseCaseError::Domain(
+            MembershipError::OnlySelfCanActivateSharing
+        ))
+    ));
+
+    // 3. Invariant: Member without publish cannot activate sharing (FR-SHR-002)
+    let no_pub_err = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m3_id,
+        true,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(m3_sub),
+                device_id: Some(dev_no_pub),
+                has_manage: false,
+            },
+        },
+    )
+    .await;
+    assert!(matches!(
+        no_pub_err,
+        Err(MemberUseCaseError::Domain(
+            MembershipError::MissingPublishCapability
+        ))
+    ));
+
+    // 4. Start sharing successfully by self from dev_1
+    let started = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        true,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(m2_sub),
+                device_id: Some(dev_1),
+                has_manage: false,
+            },
+        },
+    )
+    .await
+    .expect("start sharing");
+    assert!(started.sharing);
+    let v_started = started.version;
+
+    // Check mver in ephemeral store was incremented
+    let mver_key = format!("{prefix}:mver:{}", session.id);
+    let mver_val = ephemeral
+        .get_membership_version(&mver_key)
+        .await
+        .unwrap()
+        .expect("mver set");
+    assert_eq!(mver_val, 1);
+
+    // 5. Idempotent start sharing from SAME device dev_1 (INV-SHR-3)
+    let idempotent = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        true,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(m2_sub),
+                device_id: Some(dev_1),
+                has_manage: false,
+            },
+        },
+    )
+    .await
+    .expect("idempotent start");
+    assert!(idempotent.sharing);
+    assert_eq!(idempotent.version, v_started);
+
+    // 6. Transfer publisher role to another device dev_2 (FR-SHR-004)
+    let transferred = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        true,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(m2_sub),
+                device_id: Some(dev_2),
+                has_manage: false,
+            },
+        },
+    )
+    .await
+    .expect("transfer publisher");
+    assert!(transferred.sharing);
+    assert!(transferred.version > v_started);
+
+    // 7. Stop sharing authorization: Member 3 (no manage) cannot stop Member 2's sharing
+    let stop_unauth = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        false,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(m3_sub),
+                device_id: Some(dev_1),
+                has_manage: false,
+            },
+        },
+    )
+    .await;
+    assert!(matches!(
+        stop_unauth,
+        Err(MemberUseCaseError::PermissionDenied(_))
+    ));
+
+    // 8. Member 2 stops sharing: snapshot deleted, mver++, sharing=false (FR-SHR-003, NFR-PRIV-002)
+    let snap_key = format!("{prefix}:snap:{}:{m2_id}", session.id);
+    ephemeral
+        .set_snapshot(
+            &snap_key,
+            b"synthetic_snapshot_payload",
+            std::time::Duration::from_secs(60),
+        )
+        .await
+        .expect("write snap");
+    assert!(ephemeral.get_snapshot(&snap_key).await.unwrap().is_some());
+
+    let stopped = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        false,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(m2_sub),
+                device_id: Some(dev_2),
+                has_manage: false,
+            },
+        },
+    )
+    .await
+    .expect("stop sharing");
+    assert!(!stopped.sharing);
+
+    // Snapshot was deleted immediately!
+    assert!(ephemeral.get_snapshot(&snap_key).await.unwrap().is_none());
+
+    // 9. Idempotent stop sharing
+    let stop_idem = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        false,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(m2_sub),
+                device_id: Some(dev_2),
+                has_manage: false,
+            },
+        },
+    )
+    .await
+    .expect("idempotent stop");
+    assert!(!stop_idem.sharing);
+    assert_eq!(stop_idem.version, stopped.version);
+
+    // 10. Manager / Application can stop sharing (FR-SHR-003)
+    // Restart sharing
+    set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        true,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: false,
+                subject_id: Some(m2_sub),
+                device_id: Some(dev_2),
+                has_manage: false,
+            },
+        },
+    )
+    .await
+    .expect("restart sharing");
+
+    // Application stops sharing
+    let app_stopped = set_sharing(
+        &pool,
+        tenant_id,
+        session.id,
+        m2_id,
+        false,
+        SetSharingContext {
+            ephemeral: &ephemeral,
+            bus: &bus,
+            key_prefix: prefix,
+            caller: SetSharingCaller {
+                is_app: true,
+                subject_id: None,
+                device_id: None,
+                has_manage: false,
+            },
+        },
+    )
+    .await
+    .expect("app stop sharing");
+    assert!(!app_stopped.sharing);
 }

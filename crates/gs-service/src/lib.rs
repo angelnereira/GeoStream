@@ -20,15 +20,18 @@ pub use auth::{
     ApplicationPrincipal, AuthError, VerifiedPrincipal, require_scope, verify_application_key,
     verify_application_principal, verify_device_token_principal,
 };
+pub use gs_bus::{Bus, BusError, BusMessage, InMemoryBus};
+pub use gs_ephemeral::{EphemeralError, EphemeralStore, InMemoryEphemeralStore};
 pub use idempotency::{
     IDEMPOTENCY_KEY_MAX_LEN, IdempotencyContext, IdempotencyDecision, IdempotencyError,
     StoredResponse, begin as idempotency_begin, canonical_json, discard as idempotency_discard,
     finish as idempotency_finish, request_fingerprint, run_idempotent,
 };
 pub use members::{
-    AddMemberRequest, MemberList, MemberResource, MemberUseCaseError, UpdateCaller,
-    UpdateMemberRequest, add_member, get_member, get_member_for_device_me, leave_session,
-    list_members, revoke_member, update_member,
+    AddMemberRequest, MemberList, MemberResource, MemberUseCaseError, SetSharingCaller,
+    SetSharingContext, SharingRequest, UpdateCaller, UpdateMemberRequest, add_member, get_member,
+    get_member_for_device_me, leave_session, list_members, revoke_member, set_sharing,
+    update_member,
 };
 pub use sessions::{
     CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,
@@ -45,5 +48,7 @@ pub use tokens::{
 // (docs/04 §4.1), so the layers above name their types through these re-exports instead of
 // adding dependencies the dependency checker would reject.
 pub use gs_auth;
+pub use gs_bus;
 pub use gs_domain;
+pub use gs_ephemeral;
 pub use gs_store;

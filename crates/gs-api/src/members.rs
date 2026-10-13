@@ -16,9 +16,10 @@ use gs_service::idempotency::{
     finish as idempotency_finish,
 };
 use gs_service::members::{
-    AddMemberRequest, MemberResource, MemberUseCaseError, MembershipRepository, UpdateCaller,
-    UpdateMemberRequest, add_member, get_member, get_member_for_device_me, leave_session,
-    list_members, revoke_member, update_member,
+    AddMemberRequest, MemberResource, MemberUseCaseError, MembershipRepository, SetSharingCaller,
+    SetSharingContext, SharingRequest, UpdateCaller, UpdateMemberRequest, add_member, get_member,
+    get_member_for_device_me, leave_session, list_members, revoke_member, set_sharing,
+    update_member,
 };
 
 use crate::pagination::parse_pagination_query;
@@ -39,6 +40,10 @@ pub fn members_routes() -> axum::Router<SessionApiState> {
             axum::routing::get(get_member_handler)
                 .patch(update_member_handler)
                 .delete(revoke_member_handler),
+        )
+        .route(
+            "/v1/sessions/{session_id}/members/{member_id}/sharing",
+            axum::routing::put(set_sharing_handler),
         )
         .route(
             "/v1/sessions/{session_id}/leave",
@@ -807,6 +812,162 @@ pub async fn leave_session_handler(
     match leave_session(&state.pool, tenant_id, session_id, dev.subject.id).await {
         Ok(()) => {
             let mut resp = StatusCode::NO_CONTENT.into_response();
+            if let Ok(v) = axum::http::HeaderValue::from_str(&request_id) {
+                resp.headers_mut().insert(REQUEST_ID_HEADER, v);
+            }
+            resp
+        }
+        Err(err) => member_error_to_response(err, &request_id),
+    }
+}
+
+/// PUT /v1/sessions/{session_id}/members/{member_id}/sharing (FR-SHR-001..004, docs/07 §9.3).
+async fn set_sharing_handler(
+    State(state): State<SessionApiState>,
+    Path((session_id, member_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<SharingRequest>,
+) -> Response {
+    let request_id = request_id_from(&headers);
+
+    let session_id = match SessionId::from_str(&session_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return ProblemResponse::new(
+                Problem::new(ErrorCode::NotFound, &request_id)
+                    .with_detail("invalid session_id format"),
+            )
+            .into_response();
+        }
+    };
+
+    let caller = match authenticate_caller(&state, &headers, &request_id).await {
+        Ok(p) => p,
+        Err(resp) => return *resp,
+    };
+
+    let tenant_id = caller.tenant_id();
+
+    // Verify caller permissions and resolve target_member_id
+    let (target_member_id, caller_ctx) = match caller {
+        CallerPrincipal::Application(ref app) => {
+            if !app.api_key.scopes.iter().any(|s| s == "members:write") {
+                return ProblemResponse::new(
+                    Problem::new(ErrorCode::InsufficientScope, &request_id)
+                        .with_detail("application requires members:write scope"),
+                )
+                .into_response();
+            }
+
+            if member_id == "me" {
+                return ProblemResponse::new(
+                    Problem::new(ErrorCode::NotFound, &request_id)
+                        .with_detail("'me' is only valid for device callers"),
+                )
+                .into_response();
+            }
+
+            let tid = match MemberId::from_str(&member_id) {
+                Ok(id) => id,
+                Err(_) => {
+                    return ProblemResponse::new(
+                        Problem::new(ErrorCode::NotFound, &request_id)
+                            .with_detail("invalid member_id format"),
+                    )
+                    .into_response();
+                }
+            };
+
+            let ctx = SetSharingCaller {
+                is_app: true,
+                subject_id: None,
+                device_id: None,
+                has_manage: false,
+            };
+
+            (tid, ctx)
+        }
+        CallerPrincipal::Device(ref dev) => {
+            if !dev.claims.scp.iter().any(|s| s == "sharing:write") {
+                return ProblemResponse::new(
+                    Problem::new(ErrorCode::InsufficientScope, &request_id)
+                        .with_detail("device requires sharing:write scope"),
+                )
+                .into_response();
+            }
+
+            // Find caller's own active membership in this session
+            let caller_mem = match MembershipRepository::find_active_by_session_and_subject(
+                &state.pool,
+                tenant_id,
+                session_id,
+                dev.subject.id,
+            )
+            .await
+            {
+                Ok(Some(m)) => m,
+                Ok(None) => {
+                    return ProblemResponse::new(
+                        Problem::new(ErrorCode::NotFound, &request_id)
+                            .with_detail("caller is not an active member of this session"),
+                    )
+                    .into_response();
+                }
+                Err(err) => {
+                    return ProblemResponse::new(
+                        Problem::new(ErrorCode::Internal, &request_id).with_detail(err.to_string()),
+                    )
+                    .into_response();
+                }
+            };
+
+            let tid = if member_id == "me" {
+                caller_mem.id
+            } else {
+                match MemberId::from_str(&member_id) {
+                    Ok(id) => id,
+                    Err(_) => {
+                        return ProblemResponse::new(
+                            Problem::new(ErrorCode::NotFound, &request_id)
+                                .with_detail("invalid member_id format"),
+                        )
+                        .into_response();
+                    }
+                }
+            };
+
+            let ctx = SetSharingCaller {
+                is_app: false,
+                subject_id: Some(dev.subject.id),
+                device_id: Some(dev.device.id),
+                has_manage: caller_mem.capabilities.manage,
+            };
+
+            (tid, ctx)
+        }
+    };
+
+    match set_sharing(
+        &state.pool,
+        tenant_id,
+        session_id,
+        target_member_id,
+        request.sharing,
+        SetSharingContext {
+            ephemeral: state.ephemeral.as_ref(),
+            bus: state.bus.as_ref(),
+            key_prefix: &state.redis_key_prefix,
+            caller: caller_ctx,
+        },
+    )
+    .await
+    {
+        Ok(member) => {
+            let etag_val = member.etag();
+            let mut resp = (StatusCode::OK, Json(member)).into_response();
+            if let Ok(v) = axum::http::HeaderValue::from_str(&etag_val) {
+                resp.headers_mut().insert(header::ETAG, v);
+            }
             if let Ok(v) = axum::http::HeaderValue::from_str(&request_id) {
                 resp.headers_mut().insert(REQUEST_ID_HEADER, v);
             }

@@ -16,14 +16,18 @@
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use gs_bus::Bus;
 use gs_domain::error::{AsErrorCode, ErrorCode};
-use gs_domain::ids::{MemberId, SessionId, SubjectId, TenantId};
+use gs_domain::ids::{DeviceId, MemberId, SessionId, SubjectId, TenantId};
 use gs_domain::membership::{
     Capabilities, Connectivity, MemberRole, MemberStatusKind, Membership, MembershipError,
+    SharingTransition,
 };
+use gs_ephemeral::EphemeralStore;
 pub use gs_store::repos::{
     AddMemberOutcome, LeaveOutcome, MemberPage, MemberWithSubject, MembershipRepository,
-    RevokeOutcome, TransferOwnershipOutcome, UpdateCapabilitiesOutcome, UpdateCapabilitiesParams,
+    RevokeOutcome, SetSharingOutcome, SetSharingParams as StoreSetSharingParams,
+    TransferOwnershipOutcome, UpdateCapabilitiesOutcome, UpdateCapabilitiesParams,
 };
 use gs_store::repos::{SessionRepository, SubjectRepository};
 use gs_store::{PgPool, StoreError};
@@ -93,7 +97,9 @@ impl AsErrorCode for MemberUseCaseError {
                 MembershipError::OwnerCapabilitiesImmutable
                 | MembershipError::CannotEscalateCapabilities
                 | MembershipError::CannotModifyOwnCapabilities
-                | MembershipError::PermissionDenied => ErrorCode::PermissionDenied,
+                | MembershipError::PermissionDenied
+                | MembershipError::OnlySelfCanActivateSharing
+                | MembershipError::MissingPublishCapability => ErrorCode::PermissionDenied,
                 MembershipError::SessionFull => ErrorCode::SessionFull,
                 MembershipError::AlreadyActiveMember => ErrorCode::Conflict,
                 MembershipError::NotActiveMember => ErrorCode::Conflict,
@@ -209,6 +215,30 @@ pub struct UpdateMemberRequest {
 pub enum UpdateCaller<'a> {
     Application,
     Device(&'a Membership),
+}
+
+/// Request body for `PUT /v1/sessions/{session_id}/members/{member_id}/sharing` (docs/07 §9.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharingRequest {
+    pub sharing: bool,
+}
+
+/// Caller context for setting member sharing state.
+#[derive(Debug, Clone)]
+pub struct SetSharingCaller {
+    pub is_app: bool,
+    pub subject_id: Option<SubjectId>,
+    pub device_id: Option<DeviceId>,
+    pub has_manage: bool,
+}
+
+/// Context parameters for the set_sharing use case.
+pub struct SetSharingContext<'a, E, B> {
+    pub ephemeral: &'a E,
+    pub bus: &'a B,
+    pub key_prefix: &'a str,
+    pub caller: SetSharingCaller,
 }
 
 /// Formats a timestamp into RFC 3339.
@@ -546,5 +576,142 @@ pub async fn leave_session(
     match outcome {
         LeaveOutcome::NotFound => Err(MemberUseCaseError::NotFound),
         LeaveOutcome::Left { .. } => Ok(()),
+    }
+}
+
+/// Activates or stops location sharing for a member (FR-SHR-001..004, docs/05 §7, docs/04 §7.4).
+pub async fn set_sharing<E: EphemeralStore, B: Bus>(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    target_member_id: MemberId,
+    desired_sharing: bool,
+    ctx: SetSharingContext<'_, E, B>,
+) -> Result<MemberResource, MemberUseCaseError> {
+    let now = OffsetDateTime::now_utc();
+
+    let outcome = MembershipRepository::set_sharing(
+        pool,
+        tenant_id,
+        session_id,
+        target_member_id,
+        StoreSetSharingParams {
+            desired_sharing,
+            caller_subject_id: ctx.caller.subject_id,
+            publisher_device_id: ctx.caller.device_id,
+            caller_is_app: ctx.caller.is_app,
+            caller_has_manage: ctx.caller.has_manage,
+            now,
+        },
+    )
+    .await?;
+
+    match outcome {
+        SetSharingOutcome::Success { member, transition } => {
+            // Apply ephemeral and bus effects (docs/04 §7.4, docs/11 §2.1)
+            let mver_key = format!("{}:mver:{session_id}", ctx.key_prefix);
+            let new_mver = match ctx.ephemeral.increment_membership_version(&mver_key).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to increment membership version in ephemeral store");
+                    1
+                }
+            };
+
+            let ctl_topic = format!("{}:bus:ctl:{session_id}", ctx.key_prefix);
+
+            match transition {
+                SharingTransition::Stopped => {
+                    // Delete snapshot immediately, retrying up to 3 times (NFR-PRIV-002, docs/11 §2.1)
+                    let snap_key = format!(
+                        "{}:snap:{session_id}:{}",
+                        ctx.key_prefix, member.membership.id
+                    );
+                    for attempt in 0..3 {
+                        match ctx.ephemeral.delete_snapshot(&snap_key).await {
+                            Ok(_) => break,
+                            Err(e) => {
+                                tracing::warn!(attempt, error = %e, "failed to delete ephemeral snapshot");
+                            }
+                        }
+                    }
+
+                    let payload = serde_json::to_vec(&serde_json::json!({
+                        "event": "SharingStopped",
+                        "session_id": session_id.to_string(),
+                        "member_id": member.membership.id.to_string(),
+                        "external_subject_id": member.external_subject_id,
+                        "sharing": false,
+                        "mver": new_mver,
+                        "occurred_at": format_rfc3339(now),
+                    }))
+                    .unwrap_or_default();
+
+                    if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
+                        tracing::warn!(error = %e, "failed to publish SharingStopped control event on bus");
+                    }
+                }
+                SharingTransition::Started(_) => {
+                    let payload = serde_json::to_vec(&serde_json::json!({
+                        "event": "SharingStarted",
+                        "session_id": session_id.to_string(),
+                        "member_id": member.membership.id.to_string(),
+                        "external_subject_id": member.external_subject_id,
+                        "sharing": true,
+                        "mver": new_mver,
+                        "occurred_at": format_rfc3339(now),
+                    }))
+                    .unwrap_or_default();
+
+                    if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
+                        tracing::warn!(error = %e, "failed to publish SharingStarted control event on bus");
+                    }
+                }
+                SharingTransition::Transferred {
+                    previous_device,
+                    new_device,
+                } => {
+                    let payload = serde_json::to_vec(&serde_json::json!({
+                        "event": "SharingTransferred",
+                        "session_id": session_id.to_string(),
+                        "member_id": member.membership.id.to_string(),
+                        "external_subject_id": member.external_subject_id,
+                        "previous_device_id": previous_device.to_string(),
+                        "new_device_id": new_device.to_string(),
+                        "sharing": true,
+                        "mver": new_mver,
+                        "occurred_at": format_rfc3339(now),
+                    }))
+                    .unwrap_or_default();
+
+                    if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
+                        tracing::warn!(error = %e, "failed to publish SharingTransferred control event on bus");
+                    }
+                }
+                SharingTransition::Unchanged => {}
+            }
+
+            Ok(MemberResource::from_member_with_subject(
+                &member, false, None,
+            ))
+        }
+        SetSharingOutcome::Unchanged(member) => Ok(MemberResource::from_member_with_subject(
+            &member, false, None,
+        )),
+        SetSharingOutcome::SessionNotFound | SetSharingOutcome::MemberNotFound => {
+            Err(MemberUseCaseError::NotFound)
+        }
+        SetSharingOutcome::SessionNotActive | SetSharingOutcome::MemberNotActive => {
+            Err(MemberUseCaseError::InactiveSession)
+        }
+        SetSharingOutcome::OnlySelfCanActivateSharing => Err(MemberUseCaseError::Domain(
+            MembershipError::OnlySelfCanActivateSharing,
+        )),
+        SetSharingOutcome::MissingPublishCapability => Err(MemberUseCaseError::Domain(
+            MembershipError::MissingPublishCapability,
+        )),
+        SetSharingOutcome::PermissionDenied => Err(MemberUseCaseError::PermissionDenied(
+            "caller is not allowed to stop sharing for this member",
+        )),
     }
 }

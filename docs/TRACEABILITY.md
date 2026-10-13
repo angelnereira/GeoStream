@@ -47,10 +47,10 @@ Reglas:
 | FR-INV-002 | MUST | F3 | Canjear invitación | `tests/invitation_vectors_test.rs` | en curso |
 | FR-INV-003 | MUST | F3 | Listar y revocar invitaciones | — | pendiente |
 | FR-INV-004 | COULD | F15 | Aprobación de solicitudes de unión | — | pendiente |
-| FR-SHR-001 | MUST | F3 | Apagado por defecto | `tests/invariants_test.rs` | en curso |
-| FR-SHR-002 | MUST | F3 | Activación solo por el propio subject | `tests/invariants_test.rs` | en curso |
-| FR-SHR-003 | MUST | F3 | Detener compartición | — | pendiente |
-| FR-SHR-004 | MUST | F3 | Un único dispositivo publicador | `tests/invariants_test.rs` | en curso |
+| FR-SHR-001 | MUST | F3 | Apagado por defecto | `crates/gs-store/tests/constraints_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-SHR-002 | MUST | F3 | Activación solo por el propio subject | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-SHR-003 | MUST | F3 | Detener compartición | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-SHR-004 | MUST | F3 | Un único dispositivo publicador | `crates/gs-store/tests/constraints_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-SHR-005 | MUST | F3 | Auditoría de compartición | — | pendiente |
 | FR-LOC-001 | MUST | F4 | Modelo de muestra | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-002 | MUST | F4 | Validación de campos | `tests/location_vectors_test.rs` | en curso |

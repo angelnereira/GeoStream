@@ -36,6 +36,8 @@ use crate::problem::{Problem, ProblemResponse};
 use crate::router::REQUEST_ID_HEADER;
 use crate::security::{principal_from_header, request_id_from};
 
+use gs_service::{InMemoryBus, InMemoryEphemeralStore};
+
 /// State for the sessions endpoints.
 #[derive(Clone)]
 pub struct SessionApiState {
@@ -51,6 +53,12 @@ pub struct SessionApiState {
     pub crypto_rotator: Option<Arc<CryptoRotator>>,
     /// Idempotency retention duration.
     pub idempotency_retention: Duration,
+    /// Ephemeral store for snapshots and counters (docs/11 §3).
+    pub ephemeral: Arc<InMemoryEphemeralStore>,
+    /// Bus for control event broadcasting (docs/04 §6.1).
+    pub bus: Arc<InMemoryBus>,
+    /// Ephemeral key prefix (`GS_REDIS_KEY_PREFIX`, default `gs`).
+    pub redis_key_prefix: String,
 }
 
 /// Principal authenticated for a session request.

@@ -437,3 +437,88 @@ fn parse_counter(bytes: &[u8]) -> Result<u64, EphemeralError> {
             message: format!("counter is not a decimal integer: {e}"),
         })
 }
+
+impl<T: EphemeralStore + ?Sized> EphemeralStore for Arc<T> {
+    async fn set_snapshot(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<(), EphemeralError> {
+        (**self).set_snapshot(key, value, ttl).await
+    }
+
+    async fn get_snapshot(&self, key: &str) -> Result<Option<Vec<u8>>, EphemeralError> {
+        (**self).get_snapshot(key).await
+    }
+
+    async fn delete_snapshot(&self, key: &str) -> Result<bool, EphemeralError> {
+        (**self).delete_snapshot(key).await
+    }
+
+    async fn compare_and_set_sequence(
+        &self,
+        key: &str,
+        current: u64,
+        next: u64,
+    ) -> Result<SequenceCas, EphemeralError> {
+        (**self).compare_and_set_sequence(key, current, next).await
+    }
+
+    async fn set_if_greater(&self, key: &str, value: u64) -> Result<u64, EphemeralError> {
+        (**self).set_if_greater(key, value).await
+    }
+
+    async fn set_presence(
+        &self,
+        key: &str,
+        fields: &[(&str, &str)],
+        ttl: Duration,
+    ) -> Result<(), EphemeralError> {
+        (**self).set_presence(key, fields, ttl).await
+    }
+
+    async fn get_presence(
+        &self,
+        key: &str,
+    ) -> Result<Option<Vec<(String, String)>>, EphemeralError> {
+        (**self).get_presence(key).await
+    }
+
+    async fn release_presence(
+        &self,
+        key: &str,
+        connection_id: &str,
+    ) -> Result<bool, EphemeralError> {
+        (**self).release_presence(key, connection_id).await
+    }
+
+    async fn get_membership_version(&self, key: &str) -> Result<Option<u64>, EphemeralError> {
+        (**self).get_membership_version(key).await
+    }
+
+    async fn increment_membership_version(&self, key: &str) -> Result<u64, EphemeralError> {
+        (**self).increment_membership_version(key).await
+    }
+
+    async fn set_ticket(
+        &self,
+        key: &str,
+        grant: &[u8],
+        ttl: Duration,
+    ) -> Result<(), EphemeralError> {
+        (**self).set_ticket(key, grant, ttl).await
+    }
+
+    async fn take_ticket(&self, key: &str) -> Result<Option<Vec<u8>>, EphemeralError> {
+        (**self).take_ticket(key).await
+    }
+
+    async fn increment_counter(&self, key: &str, window: Duration) -> Result<u64, EphemeralError> {
+        (**self).increment_counter(key, window).await
+    }
+
+    fn is_ready(&self) -> bool {
+        (**self).is_ready()
+    }
+}

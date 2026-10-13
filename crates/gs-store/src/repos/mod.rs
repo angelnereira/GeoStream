@@ -20,7 +20,8 @@ pub use idempotency_repo::{
 };
 pub use membership_repo::{
     AddMemberOutcome, LeaveOutcome, MemberPage, MemberWithSubject, MembershipRepository,
-    RevokeOutcome, TransferOwnershipOutcome, UpdateCapabilitiesOutcome, UpdateCapabilitiesParams,
+    RevokeOutcome, SetSharingOutcome, SetSharingParams, TransferOwnershipOutcome,
+    UpdateCapabilitiesOutcome, UpdateCapabilitiesParams,
 };
 pub use session_repo::{SessionFilters, SessionPage, SessionRepository, SessionUpdate};
 pub use subject_repo::SubjectRepository;
