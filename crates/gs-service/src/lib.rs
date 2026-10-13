@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod admin;
+pub mod auth;
 pub mod tokens;
 pub mod migrate {
     pub use gs_store::PgPool;
@@ -11,6 +12,10 @@ pub mod migrate {
 
 pub use admin::{
     AdminError, CreatedApiKey, DEFAULT_APPLICATION_DEVICE_SCOPES, GeneratedSigningKeyFiles,
+};
+pub use auth::{
+    ApplicationPrincipal, AuthError, VerifiedPrincipal, require_scope, verify_application_key,
+    verify_application_principal, verify_device_token_principal,
 };
 pub use tokens::{
     MintedToken, REQUIRED_SCOPE, TokenError, TokenRequest, TokenResponse, TokenTtlBounds,

@@ -8,6 +8,7 @@ use gs_service::admin::{create_api_key, create_application, create_tenant};
 use gs_service::tokens::{TokenRequest, TokenTtlBounds, mint_device_token};
 use gs_store::{PgPool as StorePool, connect_pool, run_migrations};
 use serde_json::{Value, json};
+use time::OffsetDateTime;
 
 fn test_database_url() -> String {
     std::env::var("GS_DATABASE_URL").unwrap_or_else(|_| {
@@ -347,6 +348,137 @@ async fn test_revoked_key_and_disabled_application_cannot_mint() {
         )
         .await,
         Err(gs_service::tokens::TokenError::AccountDisabled(_))
+    ));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn test_verification_rejects_disabled_and_epoch_changed_principals() {
+    // covers: FR-AUTH-003, docs/06 §4.3 step 4
+    let (pool, tenant_id, application_id, credential) = setup().await;
+
+    let dir = std::env::temp_dir().join(format!("gs-auth-verify-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let generated = generate_signing_key("verify-test").expect("generate key");
+    generated.write_pair(&dir).expect("write pair");
+    let keys = SigningKeySet::load_from_dir(&dir).expect("load keys");
+    let signing = gs_auth::parse_private_pem(generated.private_pem()).expect("parse key");
+
+    let minted = mint_device_token(
+        &pool,
+        &credential,
+        &request(),
+        bounds(),
+        "https://geostream.example.com",
+        &signing,
+        "verify-test",
+    )
+    .await
+    .expect("mint token");
+
+    // A freshly issued token verifies against the state in the database.
+    let principal = gs_service::auth::verify_device_token_principal(
+        &pool,
+        minted.response.access_token.as_str(),
+        &keys,
+        "https://geostream.example.com",
+        30,
+    )
+    .await
+    .expect("verify principal");
+    assert_eq!(principal.tenant.id, tenant_id);
+    assert_eq!(principal.application.id, application_id);
+    assert_eq!(principal.subject.id, minted.subject.id);
+    assert_eq!(principal.device.id, minted.device.id);
+    assert!(
+        gs_service::auth::require_scope(&principal, "sessions:create").is_ok(),
+        "the minted scope must be granted"
+    );
+    assert!(matches!(
+        gs_service::auth::require_scope(&principal, "stream:connect"),
+        Err(gs_service::auth::AuthError::MissingScope(_))
+    ));
+
+    // A token from another issuer or with a tampered signature does not verify.
+    assert!(
+        gs_service::auth::verify_device_token_principal(
+            &pool,
+            minted.response.access_token.as_str(),
+            &keys,
+            "https://other.example.com",
+            30,
+        )
+        .await
+        .is_err()
+    );
+
+    // Bumping the subject epoch invalidates every outstanding token (docs/06 §4.3 step 4b).
+    gs_store::repos::SubjectRepository::increment_token_epoch(
+        &pool,
+        tenant_id,
+        minted.subject.id,
+        OffsetDateTime::now_utc(),
+    )
+    .await
+    .expect("bump epoch");
+    assert!(matches!(
+        gs_service::auth::verify_device_token_principal(
+            &pool,
+            minted.response.access_token.as_str(),
+            &keys,
+            "https://geostream.example.com",
+            30,
+        )
+        .await,
+        Err(gs_service::auth::AuthError::AccountDisabled(_))
+    ));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn test_verification_rejects_deactivated_device() {
+    // covers: FR-AUTH-003, docs/06 §4.3 step 4c
+    let (pool, tenant_id, _application_id, credential) = setup().await;
+    let dir = std::env::temp_dir().join(format!("gs-auth-dev-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let generated = generate_signing_key("verify-dev").expect("generate key");
+    generated.write_pair(&dir).expect("write pair");
+    let keys = SigningKeySet::load_from_dir(&dir).expect("load keys");
+    let signing = gs_auth::parse_private_pem(generated.private_pem()).expect("parse key");
+
+    let minted = mint_device_token(
+        &pool,
+        &credential,
+        &request(),
+        bounds(),
+        "https://geostream.example.com",
+        &signing,
+        "verify-dev",
+    )
+    .await
+    .expect("mint token");
+
+    gs_store::repos::DeviceRepository::deactivate(
+        &pool,
+        tenant_id,
+        minted.device.id,
+        OffsetDateTime::now_utc(),
+    )
+    .await
+    .expect("deactivate device");
+
+    assert!(matches!(
+        gs_service::auth::verify_device_token_principal(
+            &pool,
+            minted.response.access_token.as_str(),
+            &keys,
+            "https://geostream.example.com",
+            30,
+        )
+        .await,
+        Err(gs_service::auth::AuthError::AccountDisabled(_))
     ));
 
     let _ = std::fs::remove_dir_all(&dir);
