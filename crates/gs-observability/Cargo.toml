@@ -10,7 +10,13 @@ publish.workspace = true
 gs-domain.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros"] }
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time = { workspace = true, features = ["formatting"] }
+zeroize.workspace = true
 tracing-subscriber.workspace = true
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
@@ -19,3 +25,7 @@ tracing-opentelemetry = { workspace = true, optional = true }
 [features]
 # Optional OTLP trace export (docs/16_OPERATIONS.md §4.4).
 otlp = ["dep:opentelemetry", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
+serde_json.workspace = true

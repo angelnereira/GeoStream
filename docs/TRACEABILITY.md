@@ -114,7 +114,7 @@ Reglas:
 | FR-PRV-001 | MUST | F4 | Efímero por defecto | — | pendiente |
 | FR-PRV-002 | MUST | F10 | Borrado y exportación de subject | — | pendiente |
 | FR-PRV-003 | MUST | F10 | Jobs de retención | — | pendiente |
-| FR-PRV-004 | MUST | F4 | Redacción de coordenadas | — | pendiente |
+| FR-PRV-004 | MUST | F4 | Redacción de coordenadas | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/log_verifier.rs` | en curso |
 | FR-PRV-005 | MUST | F3 | Auditoría | `crates/gs-store/tests/repos_test.rs` | en curso |
 | FR-HIS-001 | COULD | F13 | Historial opt-in | — | pendiente |
 | FR-HIS-002 | COULD | F13 | Cola offline acumulada | — | pendiente |
@@ -139,7 +139,7 @@ Reglas:
 | NFR-AVAIL-001 | SHOULD | F12 | Objetivo de disponibilidad | — | pendiente |
 | NFR-SEC-001 | MUST | F2 | Transporte cifrado | — | pendiente |
 | NFR-SEC-002 | MUST | F4 | Plazo de revocación | — | pendiente |
-| NFR-SEC-003 | MUST | F2 | Secretos fuera de registros | — | pendiente |
+| NFR-SEC-003 | MUST | F2 | Secretos fuera de registros | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/redacted.rs` | en curso |
 | NFR-SEC-004 | MUST | F3 | Aislamiento de tenant | — | pendiente |
 | NFR-SEC-005 | MUST | F10 | Fuzzing | — | pendiente |
 | NFR-SEC-006 | MUST | F0 | Auditoría de dependencias | CI (cargo deny, cargo audit) | cumplido |
@@ -154,8 +154,8 @@ Reglas:
 | NFR-COMPAT-002 | MUST | F5 | Compatibilidad de contratos | — | pendiente |
 | NFR-MAINT-001 | MUST | F0 | Versionado | docs/templates/RELEASE_TEMPLATE.md, tools (geostream-tools changelog) | cumplido |
 | NFR-MAINT-002 | MUST | F1 | Cobertura de pruebas | crates/gs-domain/tests/property_tests.rs, llvm-cov 90.76% | cumplido |
-| NFR-OBS-001 | MUST | F2 | Observabilidad estructurada | — | pendiente |
-| NFR-OBS-002 | MUST | F2 | Cardinalidad acotada | — | pendiente |
+| NFR-OBS-001 | MUST | F2 | Observabilidad estructurada | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/metrics.rs` | en curso |
+| NFR-OBS-002 | MUST | F2 | Cardinalidad acotada | `crates/gs-observability/src/metrics.rs` | en curso |
 | NFR-COST-001 | MUST | F6 | Operación sin proveedores comerciales | — | pendiente |
 | NFR-DX-001 | MUST | F8 | Quickstart en menos de 30 minutos | — | pendiente |
 | NFR-DOC-001 | MUST | F0 | Documentación completa | CI (geostream-tools all) | cumplido |

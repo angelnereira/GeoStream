@@ -155,7 +155,10 @@ pub async fn run(cli: Cli) -> Result<()> {
 
 /// Run the server listener.
 async fn run_serve(args: ServeArgs) -> Result<()> {
-    // Initialize tracing subscriber if not already initialized
+    // Plain tracing subscriber. Wiring `gs_observability::init_from_env` (JSON logs with the
+    // fields of docs/16 §4.3, GS_LOG_FORMAT, GS_LOG_UNSAFE_LOCATIONS) is blocked by
+    // DR-20261012-04: `tools/check_crate_deps` does not allow `geostream` to depend on
+    // `gs-observability`, which docs/04 §4.1 explicitly permits.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

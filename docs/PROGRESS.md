@@ -9,7 +9,7 @@
 | Fase activa | **F1 — Núcleo de dominio** (en curso) |
 | Último hito alcanzado | Cierre de Fase F0 (Bootstrap del repositorio y CI) — 2026-10-12 |
 | Paquete documental | v0.2.0 (2026-10-11) |
-| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11). DR-20261012-03 (resolución de tenant en `geostream admin`, `16` §3 vs `05` §3 INV-TEN-1) — implementado con la lectura de operador, pendiente de confirmación del propietario |
+| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11). DR-20261012-03 (resolución de tenant en `geostream admin`, `16` §3 vs `05` §3 INV-TEN-1) — implementado con la lectura de operador, pendiente de confirmación del propietario. DR-20261012-04 (`gs-observability` inalcanzable desde `geostream` según `tools/check_crate_deps`, frente a la frase de `04` §4.1 que lo permite) — bloquea cablear los logs JSON en `serve` |
 | Disponibilidad de nombres | crates.io (`geostream`, `gs-protocol`, `geostream-sdk`, `geostream-server`) y pub.dev (`geostream`, `geostream_flutter`): todos disponibles (verificado 2026-10-12) |
 
 ## Tareas en curso
@@ -24,6 +24,7 @@
 |---|---|---|---|
 | DR-20261012-02 | T-F2-02 | `05` §11 solo admite pruebas de invariantes en `gs-domain` o `gs-service`; las cuatro invariantes de persistencia (`INV-TEN-1`, `INV-SUB-1`, `INV-DEV-1`, `INV-DEV-2`) las hace cumplir el esquema y se prueban en `gs-store`. Pendiente de amendar `05` §11 | 2026-10-12 |
 | DR-20261012-03 | T-F2-03 | `16` §3 documenta `app disable --app`, `key create/list --app` y `key revoke --key` sin `--tenant`, mientras INV-TEN-1 exige filtrar por `tenant_id`. Implementado con resolución de tenant desde la entidad (operador) y mutaciones acotadas al tenant resuelto; pendiente de confirmación | 2026-10-12 |
+| DR-20261012-04 | T-F2-06 | El diagrama de `04` §4.1 (que codifica `tools/check_crate_deps`) impide que `geostream` dependa de `gs-observability`, pero la frase siguiente del mismo §4.1 dice que «puede ser usado por cualquier crate excepto `gs-domain`». Los logs JSON quedan implementados y probados en el crate, sin cablear en `serve` | 2026-10-12 |
 
 ## Fases
 
@@ -55,6 +56,14 @@ Formato de cada entrada (más reciente arriba):
 - Requisitos: …
 - Evidencia: enlace a CI / informe
 ```
+
+### 2026-10-12 — T-F2-06 — `gs-observability`: tipos redactados, métricas base, logs JSON y verificador de captura
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada salvo el cableado en `serve` (bloqueado por DR-20261012-04).
+- PR: main (commit incremental).
+- Requisitos: FR-PRV-004 (base), NFR-OBS-001, NFR-OBS-002, NFR-SEC-003.
+- Evidencia: `gs-observability` implementa (1) los newtypes de secreto `ApiKeySecret`, `AccessToken`, `Ticket`, `InvitationCode` y `WebhookSecret` con `Debug`/`Display` redactados y `Zeroize` al soltarse (`docs/10` §8.2); (2) el catálogo completo de métricas y etiquetas de `docs/16` §4.2 (40 nombres de métrica, 22 nombres de etiqueta permitidos y enums acotados `PrincipalKind`, `StatusClass`, `RateLimitScope`, `SampleResult`, `TopicKind`, `AuthzCacheEvent`), con rechazo explícito de cualquier etiqueta con identificador de sesión, miembro, dispositivo, subject o tenant (NFR-OBS-002); (3) el formateador de logs JSON con exactamente los campos de `docs/16` §4.3 más `init_from_env`, que respeta `GS_LOG_FORMAT`, `GS_LOG_LEVEL` y `GS_ENV` y falla si `GS_LOG_UNSAFE_LOCATIONS=true` fuera de `dev`; y (4) el verificador de captura de `docs/18` §7, que busca las coordenadas sintéticas de los vectores y los patrones `gsk_`, `gst_`, `whsec_`, `eyJ`, con informe de línea y fragmento acotado. Suite: 15 pruebas unitarias y 3 de integración, incluida una que instala el formateador real sobre un `tracing` subscriber, comprueba los 8 campos documentados y verifica que el newtype de secreto solo aparece como `<redacted>`; `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (166 pruebas, 0 fallos), `cargo deny check`, `cargo audit` y `geostream-tools all` verdes.
+- Notas: `geostream serve` mantiene el subscriber a secas porque `tools/check_crate_deps` no permite que el binario dependa de `gs-observability`; DR-20261012-04 abierta para que el propietario decida entre enmendar el checker (recomendado, alinea con la frase normativa de `04` §4.1) o enmendar el documento. No se desactivó ningún check.
 
 ### 2026-10-12 — T-F2-05 — `gs-ephemeral` y `gs-bus`: traits e implementación en memoria con suite parametrizada
 - Autor/agente: Angel Nereira (con agente de código).

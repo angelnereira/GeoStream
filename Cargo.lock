@@ -1721,9 +1721,15 @@ dependencies = [
  "metrics-exporter-prometheus",
  "opentelemetry",
  "opentelemetry-otlp",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]
