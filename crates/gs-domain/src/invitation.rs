@@ -131,6 +131,16 @@ pub fn hash_raw_invitation_code(raw_code: &str) -> Result<String, InvitationCode
     Ok(hash_invitation_code(&normalized))
 }
 
+/// Computes SHA-256 hash of a normalized invitation code returning raw 32 bytes (docs/05 §6).
+pub fn hash_invitation_code_bytes(normalized_code: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(normalized_code.as_bytes());
+    let result = hasher.finalize();
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(&result);
+    bytes
+}
+
 /// Redacted container for invitation code secrets (docs/10 §8.2).
 #[derive(Clone, PartialEq, Eq)]
 pub struct InvitationCodeSecret(String);
@@ -242,4 +252,28 @@ impl Invitation {
         self.revoked_at = Some(now);
         Ok(())
     }
+
+    /// Computes the calculated status following the precedence of docs/07 §9.4:
+    /// REVOKED > EXPIRED > EXHAUSTED > ACTIVE.
+    pub fn status_at(&self, now: OffsetDateTime) -> InvitationStatus {
+        if self.revoked_at.is_some() {
+            InvitationStatus::Revoked
+        } else if self.expires_at <= now {
+            InvitationStatus::Expired
+        } else if self.uses >= self.max_uses {
+            InvitationStatus::Exhausted
+        } else {
+            InvitationStatus::Active
+        }
+    }
+}
+
+/// Invitation status calculated by precedence: REVOKED > EXPIRED > EXHAUSTED > ACTIVE (docs/07 §9.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum InvitationStatus {
+    Active,
+    Exhausted,
+    Expired,
+    Revoked,
 }

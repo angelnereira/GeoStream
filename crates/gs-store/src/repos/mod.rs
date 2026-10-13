@@ -6,6 +6,7 @@ pub mod app_repo;
 pub mod audit_repo;
 pub mod device_repo;
 pub mod idempotency_repo;
+pub mod invitation_repo;
 pub mod membership_repo;
 pub mod session_repo;
 pub mod subject_repo;
@@ -17,6 +18,10 @@ pub use audit_repo::AuditRepository;
 pub use device_repo::{DeviceRepository, UpsertDeviceParams};
 pub use idempotency_repo::{
     BeginOutcome, IdempotencyRecord, IdempotencyRepository, IdempotencyState,
+};
+pub use invitation_repo::{
+    CreateInvitationOutcome, CreateInvitationParams, InvitationPage, InvitationRepository,
+    InvitationRow, RedeemOutcome,
 };
 pub use membership_repo::{
     AddMemberOutcome, LeaveOutcome, MemberPage, MemberWithSubject, MembershipRepository,

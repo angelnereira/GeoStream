@@ -4,6 +4,7 @@
 pub mod admin;
 pub mod auth;
 pub mod idempotency;
+pub mod invitations;
 pub mod members;
 pub mod sessions;
 pub mod tokens;
@@ -26,6 +27,13 @@ pub use idempotency::{
     IDEMPOTENCY_KEY_MAX_LEN, IdempotencyContext, IdempotencyDecision, IdempotencyError,
     StoredResponse, begin as idempotency_begin, canonical_json, discard as idempotency_discard,
     finish as idempotency_finish, request_fingerprint, run_idempotent,
+};
+pub use invitations::{
+    CreateInvitationCaller, CreateInvitationRequest, InvitationCreatedResource,
+    InvitationListResource, InvitationResource, InvitationUseCaseError, ListInvitationsCaller,
+    RedeemInvitationParams, RedeemInvitationRequest, RedeemInvitationResponse,
+    RevokeInvitationCaller, create_invitation, list_invitations, redeem_invitation,
+    revoke_invitation,
 };
 pub use members::{
     AddMemberRequest, MemberList, MemberResource, MemberUseCaseError, SetSharingCaller,

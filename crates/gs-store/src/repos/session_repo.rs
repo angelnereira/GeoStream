@@ -421,7 +421,7 @@ impl SessionRepository {
         Ok(u64::try_from(count).unwrap_or(0))
     }
 
-    fn map_row(row: sqlx::postgres::PgRow) -> Result<Session, StoreError> {
+    pub(crate) fn map_row(row: sqlx::postgres::PgRow) -> Result<Session, StoreError> {
         let mode: String = row.get("mode");
         let mode = match mode.as_str() {
             "ONE_TO_ONE" => SessionMode::OneToOne,

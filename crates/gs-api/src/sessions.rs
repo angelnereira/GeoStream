@@ -150,6 +150,7 @@ pub fn sessions_router(state: SessionApiState) -> axum::Router {
             axum::routing::post(close_session_handler),
         )
         .merge(crate::members::members_routes())
+        .merge(crate::invitations::invitations_routes())
         .with_state(state)
 }
 

@@ -43,9 +43,9 @@ Reglas:
 | FR-MEM-005 | MUST | F3 | Abandonar sesión | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-MEM-006 | MUST | F3 | Límite de miembros | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-MEM-007 | MUST | F3 | Readmisión | `tests/invariants_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
-| FR-INV-001 | MUST | F3 | Crear invitación | `tests/invitation_vectors_test.rs` | en curso |
-| FR-INV-002 | MUST | F3 | Canjear invitación | `tests/invitation_vectors_test.rs` | en curso |
-| FR-INV-003 | MUST | F3 | Listar y revocar invitaciones | — | pendiente |
+| FR-INV-001 | MUST | F3 | Crear invitación | `tests/invitation_vectors_test.rs`, `crates/gs-service/tests/invitations_test.rs`, `crates/gs-api/tests/invitations_test.rs` | cumplido |
+| FR-INV-002 | MUST | F3 | Canjear invitación | `tests/invitation_vectors_test.rs`, `crates/gs-service/tests/invitations_test.rs`, `crates/gs-api/tests/invitations_test.rs` | cumplido |
+| FR-INV-003 | MUST | F3 | Listar y revocar invitaciones | `crates/gs-service/tests/invitations_test.rs`, `crates/gs-api/tests/invitations_test.rs` | cumplido |
 | FR-INV-004 | COULD | F15 | Aprobación de solicitudes de unión | — | pendiente |
 | FR-SHR-001 | MUST | F3 | Apagado por defecto | `crates/gs-store/tests/constraints_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-SHR-002 | MUST | F3 | Activación solo por el propio subject | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |

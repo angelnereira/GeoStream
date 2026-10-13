@@ -6,6 +6,7 @@
 //! PostgreSQL and the `/v1` operations arrive with the service layer of F3.
 #![forbid(unsafe_code)]
 
+pub mod invitations;
 pub mod members;
 pub mod pagination;
 pub mod problem;
@@ -20,6 +21,7 @@ pub mod tokens;
 pub use gs_service::admin;
 pub use gs_service::migrate;
 
+pub use invitations::invitations_routes;
 pub use members::members_router;
 pub use pagination::{PaginationQuery, PaginationQueryError, parse_pagination_query};
 pub use problem::{

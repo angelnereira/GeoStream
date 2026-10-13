@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F3-06 — Invitaciones: crear, listar, revocar, canjear con concurrencia y rate limit | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-store`, `crates/gs-service`, `crates/gs-api` | FR-INV-001..003; leer `05` §6, `07` §9.4; depende de T-F3-04 y T-F3-05 |
+| T-F3-07 — Subjects y dispositivos: búsqueda, consulta, revocación de tokens, desactivación de dispositivo | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-store`, `crates/gs-service`, `crates/gs-api` | FR-AUTH-005; leer `06` §7, `07` §9.5; depende de T-F3-03 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -47,6 +47,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F3-06 — Invitaciones: crear, listar, revocar, canjear con concurrencia y rate limit
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-INV-001, FR-INV-002, FR-INV-003.
+- Evidencia: Implementación completa del plano de control REST y ciclo de vida de invitaciones (`POST /v1/sessions/{session_id}/invitations`, `GET /v1/sessions/{session_id}/invitations`, `DELETE /v1/sessions/{session_id}/invitations/{invitation_id}`, `POST /v1/invitations/redeem`) en `gs-domain` (`InvitationStatus`, `status_at`), `gs-store` (`InvitationRepository`), `gs-service` (`invitations`) y `gs-api` (`invitations`). Generación uniforme de códigos en Crockford Base32 sin caracteres ambiguos con almacenamiento exclusivo del digest SHA-256 (`docs/05` §6). Validación estricta de parámetros: `max_uses` (1..=`invitation_max_uses`) y TTL (`60..=invitation_max_ttl_seconds`, acotado por la expiración de la sesión). Reglas de capacidades del emisor: las capacidades otorgadas deben ser un subconjunto estricto de las que posee el emisor y la concesión de `manage` solo está autorizada para el propietario (`role=OWNER`) o una aplicación. Paginación por cursor opaco (`created_at DESC, id DESC`) y filtrado por emisor (`manage_or_invite_own`). Revocación idempotente autorizada para gestores o el emisor. Canje atómico en PostgreSQL con bloqueo de filas (`SELECT ... FOR UPDATE`), evaluando la precedencia de estados (`REVOKED > EXPIRED > EXHAUSTED > ACTIVE`, `docs/07` §9.4), detección de membresía previa activa (409 `CONFLICT`), validación de cupo de la sesión (409 `SESSION_FULL`), rate limit por dispositivo en ventana de 60 s contra `GS_INVITE_REDEEM_RPM` con cabecera `Retry-After` (429 `RATE_LIMITED`), incremento atómico de la versión de membresías (`mver++`) y persistencia de respuestas idempotentes cifradas en reposo con AES-256-GCM. Suites de integración completas: 3 pruebas en `gs-service` y 2 pruebas en `gs-api` contra PostgreSQL real. Gates de calidad: `cargo fmt`, `cargo clippy`, `cargo test --workspace` (214 pruebas verdes), `cargo deny check` y `geostream-tools all` exitosos.
 
 ### 2026-10-13 — T-F3-05 — Compartición: `PUT …/sharing` con efectos (borrado de snapshot, `mver++`, evento de control)
 - Autor/agente: Angel Nereira (con agente de código).
