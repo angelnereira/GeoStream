@@ -201,6 +201,12 @@ impl From<SigningKeyError> for JwtError {
     }
 }
 
+/// Signing key type used by issuance (docs/06 §4.4). Re-exported for the layers above.
+pub type SigningKey = ed25519_dalek::SigningKey;
+
+/// Verification key type used by verification (docs/06 §4.4). Re-exported for the layers above.
+pub type VerifyingKey = ed25519_dalek::VerifyingKey;
+
 /// Verification and signing keys loaded from `GS_JWT_KEYS_DIR` (docs/06 §4.4).
 ///
 /// Verification accepts every `<kid>.pub.pem` of the directory (rotation window: the old pair
@@ -208,8 +214,8 @@ impl From<SigningKeyError> for JwtError {
 /// must have a `<kid>.key.pem`.
 #[derive(Debug, Default)]
 pub struct SigningKeySet {
-    verifying: BTreeMap<String, ed25519_dalek::VerifyingKey>,
-    signing: BTreeMap<String, ed25519_dalek::SigningKey>,
+    verifying: BTreeMap<String, VerifyingKey>,
+    signing: BTreeMap<String, SigningKey>,
     active_kid: Option<String>,
 }
 
@@ -289,7 +295,7 @@ impl SigningKeySet {
     }
 
     /// Active signing key, if any.
-    pub fn active_signing_key(&self) -> Option<(&str, &ed25519_dalek::SigningKey)> {
+    pub fn active_signing_key(&self) -> Option<(&str, &SigningKey)> {
         let kid = self.active_kid.as_deref()?;
         self.signing.get(kid).map(|key| (kid, key))
     }

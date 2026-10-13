@@ -14,6 +14,7 @@ gs-ephemeral.workspace = true
 gs-bus.workspace = true
 gs-protocol.workspace = true
 dashmap.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 time = { workspace = true, features = ["formatting"] }
@@ -30,4 +31,5 @@ zeroize.workspace = true
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres", "uuid", "time", "json", "migrate"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 time = { workspace = true, features = ["formatting"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

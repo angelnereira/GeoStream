@@ -1767,6 +1767,7 @@ dependencies = [
  "gs-ephemeral",
  "gs-protocol",
  "gs-store",
+ "serde",
  "serde_json",
  "sqlx",
  "thiserror",

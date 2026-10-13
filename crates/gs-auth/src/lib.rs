@@ -11,7 +11,7 @@ pub use api_key::{
     generate_secret, hash_secret, parse_credential, verify_credential,
 };
 pub use jwt::{
-    DeviceTokenClaims, IssuedDeviceToken, JwtError, SigningKeySet, TOKEN_AUDIENCE,
+    DeviceTokenClaims, IssuedDeviceToken, JwtError, SigningKey, SigningKeySet, TOKEN_AUDIENCE,
     issue_device_token, verify_device_token,
 };
 pub use scopes::{

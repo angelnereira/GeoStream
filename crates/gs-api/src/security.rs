@@ -96,6 +96,17 @@ impl AsErrorCode for PrincipalError {
     }
 }
 
+/// Reads the correlation id of a request, generating one when absent (docs/07 §1).
+pub fn request_id_from(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get(crate::REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .map(str::to_string)
+        .unwrap_or_else(|| gs_service::gs_domain::ids::RequestId::new().to_string())
+}
+
 /// Extracts the principal from an `Authorization` header value.
 ///
 /// The header value itself is never logged; only the classification is (docs/10 §8.2).

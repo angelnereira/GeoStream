@@ -9,6 +9,7 @@
 pub mod problem;
 pub mod router;
 pub mod security;
+pub mod tokens;
 
 // Storage access stays behind `gs-service` (docs/04 §4.1); these re-exports exist so the
 // binary can reach the repositories through the same facade it already used before the
@@ -28,4 +29,6 @@ pub use router::{
 };
 pub use security::{
     CredentialKind, Principal, PrincipalError, extract_principal, principal_from_header,
+    request_id_from,
 };
+pub use tokens::{SigningKeyRef, TokenState, mint_token_handler, v1_router};
