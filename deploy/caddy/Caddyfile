@@ -1,0 +1,76 @@
+# GeoStream — Caddyfile de referencia (NFR-SEC-001, docs/16 §2.3)
+#
+# Terminación TLS para GeoStream. El servidor escucha en HTTP sin TLS y el proxy añade
+# TLS 1.2+, HSTS y el soporte de WebSocket.
+#
+#   caddy run --config deploy/caddy/Caddyfile --adapter caddyfile
+#
+# Requisitos normativos que cumple (docs/16_OPERATIONS.md §2.3):
+#   - TLS 1.2 o superior.
+#   - HSTS en el despliegue público.
+#   - WebSocket: HTTP/1.1 Upgrade hacia 127.0.0.1:8080.
+#   - read_timeout mayor que GS_STREAM_IDLE_TIMEOUT_MS + margen (mínimo recomendado 90 s).
+#   - Límite de cuerpo mayor o igual que GS_REST_MAX_BODY_BYTES (65536 bytes por defecto).
+#   - X-Forwarded-For y X-Forwarded-Proto: el servidor solo los confía con
+#     GS_TRUST_PROXY_HEADERS=true y desde GS_TRUSTED_PROXY_CIDRS.
+#   - Sin afinidad de sesión: no se configura ninguna.
+#
+# El listener de administración (GS_ADMIN_ADDR, por defecto 127.0.0.1:9090) no se monta aquí:
+# /metrics y la copia de /health/* deben quedar en una interfaz interna (T-F6-05).
+
+{
+	# Correo para el registro de cuenta ACME de Caddy.
+	email admin@example.com
+}
+
+geostream.example.com {
+	# Servidor GeoStream en HTTP (GS_HTTP_ADDR).
+	reverse_proxy 127.0.0.1:8080 {
+		# Cabeceras de proxy que el servidor solo confía con GS_TRUST_PROXY_HEADERS=true.
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Host {host}
+
+		# El proxy nunca debe cerrar antes que el idle timeout del stream.
+		transport http {
+			read_timeout 3600s
+			write_timeout 3600s
+			dial_timeout 10s
+		}
+	}
+
+	# Soporte de WebSocket: HTTP/1.1 con Upgrade y Connection.
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websocket 127.0.0.1:8080 {
+		header_up Connection {http.request.header.Connection}
+		header_up Upgrade {http.request.header.Upgrade}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Límite de cuerpo: 1 MB cubre el máximo de GS_REST_MAX_BODY_BYTES (1024..=1048576).
+	request_body {
+		max_size 1MB
+	}
+
+	# HSTS en el despliegue público (docs/16 §2.3).
+	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+
+	# Sin caché en las respuestas versionadas (docs/07 §1).
+	header Cache-Control "no-store"
+
+	encode {
+		# Las respuestas JSON no se comprimen; las de OpenAPI renderizadas sí se benefician.
+		match {
+			header Content-Type application/problem+json
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

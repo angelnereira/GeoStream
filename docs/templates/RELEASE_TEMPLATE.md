@@ -34,6 +34,7 @@
 - [ ] Prueba de captura de logs sin coordenadas ni secretos (`FR-PRV-004`, `NFR-SEC-003`).
 - [ ] `/metrics` sin labels prohibidos (`NFR-OBS-002`).
 - [ ] Rate limits y límites de tamaño probados.
+- [ ] Configuración TLS de referencia de `deploy/` verificada en un despliegue real: TLS 1.2 o superior, HSTS presente y upgrade de WebSocket respondiendo `101` (`NFR-SEC-001`, `docs/16_OPERATIONS.md` §2.3).
 - [ ] `cargo deny` / `cargo audit` sin advisories de severidad alta abiertas.
 - [ ] Licencias de dependencias compatibles con la licencia del proyecto (ADR-0019, ADR-0020).
 - [ ] Fuzzing nocturno sin fallos durante la última semana (desde F10).

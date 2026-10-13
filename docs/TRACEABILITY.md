@@ -11,7 +11,7 @@ Reglas:
 | Requisito | Prioridad | Fase | Título | Pruebas | Estado |
 |---|---|---|---|---|---|
 | FR-AUTH-001 | MUST | F2 | API keys de aplicación | `crates/gs-store/tests/repos_test.rs`, `crates/gs-auth/tests/api_key_test.rs` | en curso |
-| FR-AUTH-002 | MUST | F2 | Emisión de tokens de dispositivo | — | pendiente |
+| FR-AUTH-002 | MUST | F2 | Emisión de tokens de dispositivo | `crates/gs-service/tests/tokens_test.rs` | en curso |
 | FR-AUTH-003 | MUST | F2 | Verificación de tokens | `crates/gs-auth/tests/jwt_test.rs` | en curso |
 | FR-AUTH-004 | MUST | F2 | Rotación de claves de firma | `crates/gs-auth/tests/jwt_test.rs`, `crates/gs-auth/tests/signing_key_test.rs` | en curso |
 | FR-AUTH-005 | MUST | F3 | Revocación de tokens y desactivación de dispositivos | — | pendiente |
@@ -137,7 +137,7 @@ Reglas:
 | NFR-SCALE-001 | MUST | F6 | Escalado horizontal | — | pendiente |
 | NFR-SCALE-002 | MUST | F6 | Tormenta de reconexión | — | pendiente |
 | NFR-AVAIL-001 | SHOULD | F12 | Objetivo de disponibilidad | — | pendiente |
-| NFR-SEC-001 | MUST | F2 | Transporte cifrado | — | pendiente |
+| NFR-SEC-001 | MUST | F2 | Transporte cifrado | deploy/caddy/Caddyfile, deploy/nginx/geostream.conf, docs/templates/RELEASE_TEMPLATE.md | implementado |
 | NFR-SEC-002 | MUST | F4 | Plazo de revocación | — | pendiente |
 | NFR-SEC-003 | MUST | F2 | Secretos fuera de registros | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/redacted.rs` | en curso |
 | NFR-SEC-004 | MUST | F3 | Aislamiento de tenant | — | pendiente |
