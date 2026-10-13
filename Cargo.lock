@@ -1612,10 +1612,18 @@ dependencies = [
  "axum",
  "gs-service",
  "http",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
+ "time",
+ "tokio",
  "tower",
  "tower-http 0.7.1",
+ "tracing",
+ "zeroize",
 ]
 
 [[package]]

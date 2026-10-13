@@ -23,7 +23,7 @@ Reglas:
 | FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | en curso |
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | — | pendiente |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | pendiente |
-| FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs` | en curso |
+| FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs`, `crates/gs-api/tests/skeleton_test.rs` | en curso |
 | FR-API-002 | MUST | F3 | Idempotencia | — | pendiente |
 | FR-API-003 | MUST | F3 | Paginación por cursor | — | pendiente |
 | FR-API-004 | MUST | F3 | Rate limit REST | — | pendiente |
@@ -121,7 +121,7 @@ Reglas:
 | FR-HIS-003 | COULD | F13 | Consulta de historial | — | pendiente |
 | FR-HIS-004 | COULD | F13 | Calidad de trayectoria y map-matching | — | pendiente |
 | FR-OPS-001 | MUST | F0 | Binario único con roles | tests/cli_test.rs | cumplido |
-| FR-OPS-002 | MUST | F2 | Salud y métricas | — | pendiente |
+| FR-OPS-002 | MUST | F2 | Salud y métricas | `crates/gs-api/tests/skeleton_test.rs` | en curso |
 | FR-OPS-003 | MUST | F1 | Configuración validada | `crates/gs-config/tests/server_config_test.rs` | cumplido |
 | FR-OPS-004 | MUST | F2 | Migraciones versionadas | migrations/0001_init.sql, apps/geostream (migrate), crates/gs-store/tests/constraints_test.rs | cumplido |
 | FR-OPS-005 | MUST | F6 | Imagen y compose | — | pendiente |

@@ -9,8 +9,19 @@ publish.workspace = true
 [dependencies]
 gs-service.workspace = true
 axum.workspace = true
+thiserror.workspace = true
 http.workspace = true
 serde.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+serde_json.workspace = true
+time = { workspace = true, features = ["formatting"] }
+tracing.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+reqwest.workspace = true
 serde_json.workspace = true
 tower.workspace = true
 tower-http.workspace = true

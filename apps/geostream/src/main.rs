@@ -8,9 +8,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
-use axum::{Json, Router, routing::get};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use serde_json::json;
 use tracing::info;
 
 use crate::admin::{AdminArgs, run_admin};
@@ -167,10 +165,10 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
         .try_init();
 
     // Verify database schema version or auto-migrate (docs/11 §4)
-    if let Some(db_url) = args
-        .database_url
-        .or_else(|| std::env::var("GS_DATABASE_URL").ok())
-    {
+    let database_url = std::env::var("GS_DATABASE_URL")
+        .ok()
+        .or_else(|| args.database_url.clone());
+    if let Some(db_url) = database_url.clone() {
         let pool = gs_api::migrate::connect_pool(&db_url)
             .await
             .context("failed to connect to database on server startup")?;
@@ -208,7 +206,9 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
         "starting geostream server"
     );
 
-    let app = router();
+    // Readiness checks the configured dependencies (docs/16 §4.1, FR-OPS-002).
+    let probe = readiness_probe(database_url.as_deref());
+    let app = gs_api::http_router_with_readiness(gs_api::DEFAULT_MAX_BODY_BYTES, probe);
     let listener = tokio::net::TcpListener::bind(args.http_addr)
         .await
         .with_context(|| format!("failed to bind HTTP listener to {}", args.http_addr))?;
@@ -224,16 +224,45 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
     Ok(())
 }
 
-/// Build the Axum router for the HTTP listener.
-pub fn router() -> Router {
-    Router::new().route("/health/live", get(health_live_handler))
-}
-
-/// Handler for `/health/live` returning HTTP 200 OK.
-async fn health_live_handler() -> Json<serde_json::Value> {
-    Json(json!({
-        "status": "ok"
-    }))
+/// Builds the readiness probe of the configured dependencies (docs/16 §4.1).
+///
+/// `/health/ready` answers 503 whenever PostgreSQL does not answer within the documented
+/// timeout; the ephemeral store and the bus are reported when they are configured.
+fn readiness_probe(database_url: Option<&str>) -> gs_api::ReadinessProbe {
+    let database_url = database_url.map(str::to_string);
+    match database_url {
+        Some(url) => gs_api::ReadinessProbe::new(move || {
+            let url = url.clone();
+            async move {
+                let mut checked = Vec::new();
+                match tokio::time::timeout(gs_api::READINESS_TIMEOUT, async {
+                    let pool = gs_api::migrate::connect_pool(&url).await?;
+                    let connection = pool.acquire().await?;
+                    Ok::<_, gs_api::migrate::StoreError>(connection)
+                })
+                .await
+                {
+                    Ok(Ok(_connection)) => checked.push(gs_api::DependencyStatus {
+                        name: "postgresql".to_string(),
+                        ok: true,
+                        detail: None,
+                    }),
+                    Ok(Err(error)) => checked.push(gs_api::DependencyStatus {
+                        name: "postgresql".to_string(),
+                        ok: false,
+                        detail: Some(error.to_string()),
+                    }),
+                    Err(_elapsed) => checked.push(gs_api::DependencyStatus {
+                        name: "postgresql".to_string(),
+                        ok: false,
+                        detail: Some("timeout".to_string()),
+                    }),
+                }
+                checked
+            }
+        }),
+        None => gs_api::ReadinessProbe::default(),
+    }
 }
 
 /// Graceful shutdown listener for SIGINT and SIGTERM signals.

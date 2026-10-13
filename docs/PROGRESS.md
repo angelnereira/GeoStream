@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| — | | | | |
+| T-F2-08 — `POST /v1/tokens` con upsert de subject/dispositivo e INV-DEV-2 | Angel Nereira (con agente de código) | 2026-10-12 | `crates/gs-service`, `crates/gs-auth` | FR-AUTH-002; leer `06` §4 y OpenAPI `mintToken`; depende de T-F2-07 (cerrada) |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -56,6 +56,14 @@ Formato de cada entrada (más reciente arriba):
 - Requisitos: …
 - Evidencia: enlace a CI / informe
 ```
+
+### 2026-10-12 — T-F2-07 — `gs-api` esqueleto: router, `X-Request-Id`, Problem Details, principal, límites, salud y métricas
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-OPS-002, FR-API-001 (base).
+- Evidencia: `gs-api` implementa (1) `problem`: Problem Details con `type`, `title` fija por código, `status`, `code`, `detail` acotado a 200 caracteres, `request_id` y `errors` solo en `VALIDATION_FAILED`, renderizado como `application/problem+json`; (2) `security`: extracción del principal desde `Authorization: Bearer` clasificando `gsk_…` (aplicación) y JWT (dispositivo), con el credencial en un `Zeroizing` cuyo `Debug` es `<redacted>` y mapeo de errores a `UNAUTHENTICATED`; (3) `router`: middleware que propaga o genera `X-Request-Id: req_…`, `DefaultBodyLimit`, log de acceso que solo registra método, ruta, presencia de credencial, estado y duración (nunca `Authorization` ni cuerpos), `/health/live`, `/health/ready` con sonda de dependencias (PostgreSQL con timeout de 1 s → 503) y `/metrics` Prometheus montado con `PrometheusRenderer` sobre el listener de administración. `geostream serve` usa el router nuevo con la sonda real de base de datos. Pruebas: 11 unitarias y 7 de integración contra un listener real (id de correlación generado y propagado, ready degradado → 503, cuerpo oversized → 413, Problem Details de credencial ausente); `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (184 pruebas, 0 fallos), `cargo deny check`, `cargo audit` y `geostream-tools all` verdes.
+- Notas: `gs-domain` se usa a través de `pub use gs_domain;` en `gs-service` porque `tools/check_crate_deps` solo permite `{gs-service}` a `gs-api`; es la misma fachada que ya existía para `migrate` y `admin`. El formato JSON de los logs de acceso sigue bloqueado por DR-20261012-04.
 
 ### 2026-10-12 — T-F2-06 — `gs-observability`: tipos redactados, métricas base, logs JSON y verificador de captura
 - Autor/agente: Angel Nereira (con agente de código).
