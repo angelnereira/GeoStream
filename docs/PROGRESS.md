@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F3-04 — Miembros: alta, listado, consulta (`me`), cambio de capacidades/rol, revocación, salida, transferencia de propiedad, readmisión | Angel Nereira (con agente de código) | 2026-10-12 | `crates/gs-store`, `crates/gs-service`, `crates/gs-api` | FR-MEM-001..007, FR-SES-007; leer `05` §5 y `07` §9.3; depende de T-F3-03 (cerrada) |
+| T-F3-05 — Invitaciones: ciclo de vida, códigos Crockford, canje, revocación, estado agotado, prevención de replay | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-store`, `crates/gs-service`, `crates/gs-api` | FR-INV-001..006; leer `05` §6 y `07` §9.4; depende de T-F3-04 (cerrada) |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -47,6 +47,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F3-04 — Membresías: alta, listado, consulta (`me`), cambio de capacidades/rol, revocación, salida, transferencia de propiedad, readmisión
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-MEM-001, FR-MEM-002, FR-MEM-003, FR-MEM-004, FR-MEM-005, FR-MEM-006, FR-MEM-007, FR-SES-007.
+- Evidencia: Implementación completa del ciclo de vida de membresías en plano de control REST (`POST /v1/sessions/{session_id}/members`, `GET /v1/sessions/{session_id}/members`, `GET /v1/sessions/{session_id}/members/{member_id}`, `GET /v1/sessions/{session_id}/members/me`, `PATCH /v1/sessions/{session_id}/members/{member_id}`, `DELETE /v1/sessions/{session_id}/members/{member_id}`, `POST /v1/sessions/{session_id}/leave`) en `gs-store` (`MembershipRepository`), `gs-service` (`members`) y `gs-api` (`members`). Incluye verificación atómica de límite de miembros con bloqueo `FOR UPDATE` sobre la fila de sesión (INV-MEM-7), soporte de readmisión de miembros `LEFT` y `REVOKED` (FR-MEM-007), control de concurrencia optimista con precondición `If-Match`, inmutabilidad de capacidades del propietario (INV-MEM-1), prohibición de auto-modificación (INV-MEM-3), regla anti-escalada de capacidades (INV-MEM-2), cese inmediato de compartición al retirar `publish` (INV-MEM-4), transferencia atómica de rol `OWNER` (FR-MEM-005), revocación idempotente (204 No Content), abandono de sesión por dispositivo y cascada de salida del propietario al miembro más antiguo con `can_manage=true` o cierre/limpieza de sesión si no hay sustituto (FR-SES-007). Suites de integración: 5 pruebas en `gs-service` y 5 pruebas en `gs-api` contra PostgreSQL real. Gates de calidad: `cargo fmt`, `cargo clippy`, `cargo test --workspace` (210 pruebas verdes), `cargo deny check` y `geostream-tools all` exitosos.
 
 ### 2026-10-12 — T-F3-03 — Sesiones: control plane REST, control de concurrencia y expiración
 - Autor/agente: Angel Nereira (con agente de código).

@@ -54,20 +54,20 @@ pub struct SessionApiState {
 }
 
 /// Principal authenticated for a session request.
-enum CallerPrincipal {
+pub(crate) enum CallerPrincipal {
     Application(Box<ApplicationPrincipal>),
     Device(Box<VerifiedPrincipal>),
 }
 
 impl CallerPrincipal {
-    fn tenant_id(&self) -> TenantId {
+    pub(crate) fn tenant_id(&self) -> TenantId {
         match self {
             Self::Application(app) => app.tenant.id,
             Self::Device(dev) => dev.tenant.id,
         }
     }
 
-    fn principal_id(&self) -> uuid::Uuid {
+    pub(crate) fn principal_id(&self) -> uuid::Uuid {
         match self {
             Self::Application(app) => app.api_key.id.into_uuid(),
             Self::Device(dev) => dev.device.id.into_uuid(),
@@ -76,7 +76,7 @@ impl CallerPrincipal {
 }
 
 /// Authenticates the caller principal from `Authorization: Bearer`.
-async fn authenticate_caller(
+pub(crate) async fn authenticate_caller(
     state: &SessionApiState,
     headers: &HeaderMap,
     request_id: &str,
@@ -126,7 +126,7 @@ fn session_error_to_response(error: SessionUseCaseError, request_id: &str) -> Re
     ProblemResponse::new(Problem::new(code, request_id).with_detail(detail)).into_response()
 }
 
-/// Builds the sessions router (docs/07 §9.2).
+/// Builds the sessions and members router (docs/07 §9.2, §9.3).
 pub fn sessions_router(state: SessionApiState) -> axum::Router {
     axum::Router::new()
         .route(
@@ -141,6 +141,7 @@ pub fn sessions_router(state: SessionApiState) -> axum::Router {
             "/v1/sessions/{session_id}/close",
             axum::routing::post(close_session_handler),
         )
+        .merge(crate::members::members_routes())
         .with_state(state)
 }
 

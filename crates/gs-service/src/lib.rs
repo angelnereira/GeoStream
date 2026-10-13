@@ -4,6 +4,7 @@
 pub mod admin;
 pub mod auth;
 pub mod idempotency;
+pub mod members;
 pub mod sessions;
 pub mod tokens;
 pub mod migrate {
@@ -23,6 +24,11 @@ pub use idempotency::{
     IDEMPOTENCY_KEY_MAX_LEN, IdempotencyContext, IdempotencyDecision, IdempotencyError,
     StoredResponse, begin as idempotency_begin, canonical_json, discard as idempotency_discard,
     finish as idempotency_finish, request_fingerprint, run_idempotent,
+};
+pub use members::{
+    AddMemberRequest, MemberList, MemberResource, MemberUseCaseError, UpdateCaller,
+    UpdateMemberRequest, add_member, get_member, get_member_for_device_me, leave_session,
+    list_members, revoke_member, update_member,
 };
 pub use sessions::{
     CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,

@@ -35,14 +35,14 @@ Reglas:
 | FR-SES-004 | MUST | F3 | Cerrar sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
 | FR-SES-005 | MUST | F3 | Expiración automática | `crates/gs-service/tests/sessions_test.rs` | cumplido |
 | FR-SES-006 | MUST | F3 | Modos de sesión | `tests/invariants_test.rs`, `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
-| FR-SES-007 | MUST | F3 | Salida del propietario | `tests/invariants_test.rs` | en curso |
-| FR-MEM-001 | MUST | F3 | Agregar miembros (aplicación) | — | pendiente |
-| FR-MEM-002 | MUST | F3 | Listar y consultar miembros | — | pendiente |
-| FR-MEM-003 | MUST | F3 | Cambiar capacidades | `tests/invariants_test.rs` | en curso |
-| FR-MEM-004 | MUST | F3 | Revocar miembro | — | pendiente |
-| FR-MEM-005 | MUST | F3 | Abandonar sesión | — | pendiente |
-| FR-MEM-006 | MUST | F3 | Límite de miembros | — | pendiente |
-| FR-MEM-007 | MUST | F3 | Readmisión | `tests/invariants_test.rs` | en curso |
+| FR-SES-007 | MUST | F3 | Salida del propietario | `tests/invariants_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-MEM-001 | MUST | F3 | Agregar miembros (aplicación) | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-MEM-002 | MUST | F3 | Listar y consultar miembros | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-MEM-003 | MUST | F3 | Cambiar capacidades | `tests/invariants_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-MEM-004 | MUST | F3 | Revocar miembro | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-MEM-005 | MUST | F3 | Abandonar sesión | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-MEM-006 | MUST | F3 | Límite de miembros | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
+| FR-MEM-007 | MUST | F3 | Readmisión | `tests/invariants_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-INV-001 | MUST | F3 | Crear invitación | `tests/invitation_vectors_test.rs` | en curso |
 | FR-INV-002 | MUST | F3 | Canjear invitación | `tests/invitation_vectors_test.rs` | en curso |
 | FR-INV-003 | MUST | F3 | Listar y revocar invitaciones | — | pendiente |

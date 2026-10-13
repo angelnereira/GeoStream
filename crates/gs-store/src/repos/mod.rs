@@ -18,7 +18,10 @@ pub use device_repo::{DeviceRepository, UpsertDeviceParams};
 pub use idempotency_repo::{
     BeginOutcome, IdempotencyRecord, IdempotencyRepository, IdempotencyState,
 };
-pub use membership_repo::MembershipRepository;
+pub use membership_repo::{
+    AddMemberOutcome, LeaveOutcome, MemberPage, MemberWithSubject, MembershipRepository,
+    RevokeOutcome, TransferOwnershipOutcome, UpdateCapabilitiesOutcome, UpdateCapabilitiesParams,
+};
 pub use session_repo::{SessionFilters, SessionPage, SessionRepository, SessionUpdate};
 pub use subject_repo::SubjectRepository;
 pub use tenant_repo::TenantRepository;
