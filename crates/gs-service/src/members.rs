@@ -24,6 +24,7 @@ use gs_domain::membership::{
     SharingTransition,
 };
 use gs_ephemeral::EphemeralStore;
+use gs_store::models::{ActorKind, AuditOutcome};
 pub use gs_store::repos::{
     AddMemberOutcome, LeaveOutcome, MemberPage, MemberWithSubject, MembershipRepository,
     RevokeOutcome, SetSharingOutcome, SetSharingParams as StoreSetSharingParams,
@@ -31,6 +32,8 @@ pub use gs_store::repos::{
 };
 use gs_store::repos::{SessionRepository, SubjectRepository};
 use gs_store::{PgPool, StoreError};
+
+use crate::audit::record_audit;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -326,6 +329,27 @@ pub async fn add_member(
 
     match outcome {
         AddMemberOutcome::Success(m) => {
+            let _ = record_audit(
+                pool,
+                tenant_id,
+                ActorKind::Application,
+                None,
+                Some(m.membership.subject_id),
+                "member.added",
+                Some("member"),
+                Some(m.membership.id.into_uuid()),
+                AuditOutcome::Success,
+                None,
+                serde_json::json!({
+                    "session_id": session_id.to_string(),
+                    "role": m.membership.role.to_string(),
+                    "can_publish": m.membership.capabilities.publish,
+                    "can_read": m.membership.capabilities.read,
+                    "can_invite": m.membership.capabilities.invite,
+                    "can_manage": m.membership.capabilities.manage,
+                }),
+            )
+            .await;
             Ok(MemberResource::from_member_with_subject(&m, false, None))
         }
         AddMemberOutcome::SessionNotFound => Err(MemberUseCaseError::NotFound),
@@ -444,6 +468,31 @@ pub async fn update_member(
 
         match outcome {
             TransferOwnershipOutcome::Success(m) => {
+                let (actor_kind, actor_id, actor_sub_id) = match caller {
+                    UpdateCaller::Application => (ActorKind::Application, None, None),
+                    UpdateCaller::Device(cm) => (
+                        ActorKind::Device,
+                        Some(cm.id.into_uuid()),
+                        Some(cm.subject_id),
+                    ),
+                };
+                let _ = record_audit(
+                    pool,
+                    tenant_id,
+                    actor_kind,
+                    actor_id,
+                    actor_sub_id,
+                    "member.updated",
+                    Some("member"),
+                    Some(target_member_id.into_uuid()),
+                    AuditOutcome::Success,
+                    None,
+                    serde_json::json!({
+                        "session_id": session_id.to_string(),
+                        "new_role": "OWNER",
+                    }),
+                )
+                .await;
                 return Ok(MemberResource::from_member_with_subject(&m, false, None));
             }
             TransferOwnershipOutcome::SessionNotFound
@@ -520,6 +569,54 @@ pub async fn update_member(
 
         match outcome {
             UpdateCapabilitiesOutcome::Success(m) => {
+                let (actor_kind, actor_id, actor_sub_id) = match caller {
+                    UpdateCaller::Application => (ActorKind::Application, None, None),
+                    UpdateCaller::Device(cm) => (
+                        ActorKind::Device,
+                        Some(cm.id.into_uuid()),
+                        Some(cm.subject_id),
+                    ),
+                };
+                let _ = record_audit(
+                    pool,
+                    tenant_id,
+                    actor_kind,
+                    actor_id,
+                    actor_sub_id,
+                    "member.updated",
+                    Some("member"),
+                    Some(target_member_id.into_uuid()),
+                    AuditOutcome::Success,
+                    None,
+                    serde_json::json!({
+                        "session_id": session_id.to_string(),
+                        "can_publish": new_caps.publish,
+                        "can_read": new_caps.read,
+                        "can_invite": new_caps.invite,
+                        "can_manage": new_caps.manage,
+                    }),
+                )
+                .await;
+                if stop_sharing {
+                    let _ = record_audit(
+                        pool,
+                        tenant_id,
+                        actor_kind,
+                        actor_id,
+                        Some(m.membership.subject_id),
+                        "sharing.stopped",
+                        Some("member"),
+                        Some(target_member_id.into_uuid()),
+                        AuditOutcome::Success,
+                        None,
+                        serde_json::json!({
+                            "session_id": session_id.to_string(),
+                            "sharing": false,
+                            "reason": "publish_withdrawn",
+                        }),
+                    )
+                    .await;
+                }
                 return Ok(MemberResource::from_member_with_subject(&m, false, None));
             }
             UpdateCapabilitiesOutcome::NotFound => return Err(MemberUseCaseError::NotFound),
@@ -557,7 +654,48 @@ pub async fn revoke_member(
     match outcome {
         RevokeOutcome::NotFound => Err(MemberUseCaseError::NotFound),
         RevokeOutcome::AlreadyEnded => Ok(()), // Idempotent 204
-        RevokeOutcome::Revoked { .. } => Ok(()),
+        RevokeOutcome::Revoked {
+            member,
+            session_closed,
+            ..
+        } => {
+            let _ = record_audit(
+                pool,
+                tenant_id,
+                ActorKind::Application,
+                None,
+                Some(member.membership.subject_id),
+                "member.revoked",
+                Some("member"),
+                Some(target_member_id.into_uuid()),
+                AuditOutcome::Success,
+                None,
+                serde_json::json!({
+                    "session_id": session_id.to_string(),
+                    "session_closed": session_closed,
+                }),
+            )
+            .await;
+            if session_closed {
+                let _ = record_audit(
+                    pool,
+                    tenant_id,
+                    ActorKind::System,
+                    None,
+                    Some(member.membership.subject_id),
+                    "session.closed",
+                    Some("session"),
+                    Some(session_id.into_uuid()),
+                    AuditOutcome::Success,
+                    None,
+                    serde_json::json!({
+                        "reason": "owner_left",
+                    }),
+                )
+                .await;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -575,7 +713,48 @@ pub async fn leave_session(
 
     match outcome {
         LeaveOutcome::NotFound => Err(MemberUseCaseError::NotFound),
-        LeaveOutcome::Left { .. } => Ok(()),
+        LeaveOutcome::Left {
+            member,
+            session_closed,
+            ..
+        } => {
+            let _ = record_audit(
+                pool,
+                tenant_id,
+                ActorKind::Device,
+                None,
+                Some(caller_subject_id),
+                "member.left",
+                Some("member"),
+                Some(member.membership.id.into_uuid()),
+                AuditOutcome::Success,
+                None,
+                serde_json::json!({
+                    "session_id": session_id.to_string(),
+                    "session_closed": session_closed,
+                }),
+            )
+            .await;
+            if session_closed {
+                let _ = record_audit(
+                    pool,
+                    tenant_id,
+                    ActorKind::System,
+                    None,
+                    Some(caller_subject_id),
+                    "session.closed",
+                    Some("session"),
+                    Some(session_id.into_uuid()),
+                    AuditOutcome::Success,
+                    None,
+                    serde_json::json!({
+                        "reason": "owner_left",
+                    }),
+                )
+                .await;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -650,8 +829,34 @@ pub async fn set_sharing<E: EphemeralStore, B: Bus>(
                     if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
                         tracing::warn!(error = %e, "failed to publish SharingStopped control event on bus");
                     }
+
+                    let (actor_kind, actor_id) = if ctx.caller.is_app {
+                        (ActorKind::Application, None)
+                    } else {
+                        (
+                            ActorKind::Device,
+                            ctx.caller.device_id.map(|d| d.into_uuid()),
+                        )
+                    };
+                    let _ = record_audit(
+                        pool,
+                        tenant_id,
+                        actor_kind,
+                        actor_id,
+                        Some(member.membership.subject_id),
+                        "sharing.stopped",
+                        Some("member"),
+                        Some(member.membership.id.into_uuid()),
+                        AuditOutcome::Success,
+                        None,
+                        serde_json::json!({
+                            "session_id": session_id.to_string(),
+                            "sharing": false,
+                        }),
+                    )
+                    .await;
                 }
-                SharingTransition::Started(_) => {
+                SharingTransition::Started(publisher_device) => {
                     let payload = serde_json::to_vec(&serde_json::json!({
                         "event": "SharingStarted",
                         "session_id": session_id.to_string(),
@@ -666,6 +871,25 @@ pub async fn set_sharing<E: EphemeralStore, B: Bus>(
                     if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
                         tracing::warn!(error = %e, "failed to publish SharingStarted control event on bus");
                     }
+
+                    let _ = record_audit(
+                        pool,
+                        tenant_id,
+                        ActorKind::Device,
+                        Some(publisher_device.into_uuid()),
+                        Some(member.membership.subject_id),
+                        "sharing.started",
+                        Some("member"),
+                        Some(member.membership.id.into_uuid()),
+                        AuditOutcome::Success,
+                        None,
+                        serde_json::json!({
+                            "session_id": session_id.to_string(),
+                            "sharing": true,
+                            "publisher_device_id": publisher_device.to_string(),
+                        }),
+                    )
+                    .await;
                 }
                 SharingTransition::Transferred {
                     previous_device,
@@ -687,6 +911,26 @@ pub async fn set_sharing<E: EphemeralStore, B: Bus>(
                     if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
                         tracing::warn!(error = %e, "failed to publish SharingTransferred control event on bus");
                     }
+
+                    let _ = record_audit(
+                        pool,
+                        tenant_id,
+                        ActorKind::Device,
+                        Some(new_device.into_uuid()),
+                        Some(member.membership.subject_id),
+                        "sharing.started",
+                        Some("member"),
+                        Some(member.membership.id.into_uuid()),
+                        AuditOutcome::Success,
+                        None,
+                        serde_json::json!({
+                            "session_id": session_id.to_string(),
+                            "sharing": true,
+                            "publisher_device_id": new_device.to_string(),
+                            "previous_device_id": previous_device.to_string(),
+                        }),
+                    )
+                    .await;
                 }
                 SharingTransition::Unchanged => {}
             }

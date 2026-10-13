@@ -12,9 +12,12 @@ use std::time::Duration;
 use gs_domain::error::{AsErrorCode, ErrorCode};
 use gs_domain::ids::{DeviceId, SessionId, SubjectId, TenantId};
 use gs_domain::session::{Actor, ClosedReason, Session, SessionError, SessionMode, SessionStatus};
+use gs_store::models::{ActorKind, AuditOutcome};
 pub use gs_store::repos::{SessionFilters, SessionPage};
 use gs_store::repos::{SessionRepository, SessionUpdate};
 use gs_store::{PgPool, StoreError};
+
+use crate::audit::record_audit;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -344,11 +347,28 @@ async fn apply_lazy_expiry(
     }
 
     let now = time::OffsetDateTime::now_utc();
-    Ok(
-        SessionRepository::mark_expired(pool, session.tenant_id, session.id, now)
-            .await?
-            .unwrap_or(session),
+    let res = SessionRepository::mark_expired(pool, session.tenant_id, session.id, now)
+        .await?
+        .unwrap_or(session);
+
+    let _ = record_audit(
+        pool,
+        res.tenant_id,
+        ActorKind::System,
+        None,
+        res.owner_subject_id,
+        "session.expired",
+        Some("session"),
+        Some(res.id.into_uuid()),
+        AuditOutcome::Success,
+        None,
+        serde_json::json!({
+            "reason": "expired",
+        }),
     )
+    .await;
+
+    Ok(res)
 }
 
 /// Lists the sessions visible to a principal (docs/07 §9.2, FR-SES-002).
@@ -479,6 +499,31 @@ pub async fn create_session(
 
     SessionRepository::create(pool, &session).await?;
 
+    let (actor_kind, actor_id) = match actor {
+        Actor::Device(dev_id) => (ActorKind::Device, Some(dev_id.into_uuid())),
+        Actor::Application(app_id) => (ActorKind::Application, Some(app_id.into_uuid())),
+    };
+    record_audit(
+        pool,
+        tenant_id,
+        actor_kind,
+        actor_id,
+        owner_subject_id,
+        "session.created",
+        Some("session"),
+        Some(session.id.into_uuid()),
+        AuditOutcome::Success,
+        None,
+        serde_json::json!({
+            "mode": session.mode.to_string(),
+            "max_members": session.max_members,
+            "snapshot_ttl_seconds": session.snapshot_ttl_seconds,
+            "stale_after_seconds": session.stale_after_seconds,
+            "expires_at": format_rfc3339(session.expires_at),
+        }),
+    )
+    .await?;
+
     // A session with an owner subject gets an owner membership (docs/05 §4.1, INV-MEM-1).
     if let Some(owner_sub_id) = owner_subject_id {
         let membership = gs_domain::membership::Membership::new_owner(
@@ -489,6 +534,27 @@ pub async fn create_session(
             now,
         );
         gs_store::repos::MembershipRepository::create(pool, &membership).await?;
+        let _ = record_audit(
+            pool,
+            tenant_id,
+            actor_kind,
+            actor_id,
+            Some(owner_sub_id),
+            "member.added",
+            Some("member"),
+            Some(membership.id.into_uuid()),
+            AuditOutcome::Success,
+            None,
+            serde_json::json!({
+                "session_id": session.id.to_string(),
+                "role": "OWNER",
+                "can_publish": true,
+                "can_read": true,
+                "can_invite": true,
+                "can_manage": true,
+            }),
+        )
+        .await;
     }
 
     // Application caller can add initial members (docs/07 §9.2).
@@ -519,6 +585,27 @@ pub async fn create_session(
                 now,
             );
             gs_store::repos::MembershipRepository::create(pool, &membership).await?;
+            let _ = record_audit(
+                pool,
+                tenant_id,
+                actor_kind,
+                actor_id,
+                Some(subject.id),
+                "member.added",
+                Some("member"),
+                Some(membership.id.into_uuid()),
+                AuditOutcome::Success,
+                None,
+                serde_json::json!({
+                    "session_id": session.id.to_string(),
+                    "role": "MEMBER",
+                    "can_publish": caps.publish,
+                    "can_read": caps.read,
+                    "can_invite": caps.invite,
+                    "can_manage": caps.manage,
+                }),
+            )
+            .await;
         }
     }
 
@@ -533,6 +620,28 @@ pub async fn update_session(
     expected_version: Option<u64>,
     request: &UpdateSessionRequest,
     policy: SessionPolicy,
+) -> Result<Session, SessionUseCaseError> {
+    update_session_with_actor(
+        pool,
+        tenant_id,
+        session_id,
+        expected_version,
+        request,
+        policy,
+        None,
+    )
+    .await
+}
+
+/// Updates a session with an explicit actor for audit trails (docs/10 §8.3).
+pub async fn update_session_with_actor(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    expected_version: Option<u64>,
+    request: &UpdateSessionRequest,
+    policy: SessionPolicy,
+    actor: Option<Actor>,
 ) -> Result<Session, SessionUseCaseError> {
     let current = get_session(pool, tenant_id, session_id).await?;
     if current.status != SessionStatus::Active {
@@ -610,6 +719,32 @@ pub async fn update_session(
     .await?
     .ok_or(SessionUseCaseError::PreconditionFailed)?;
 
+    let (actor_kind, actor_id) = match actor {
+        Some(Actor::Device(dev_id)) => (ActorKind::Device, Some(dev_id.into_uuid())),
+        Some(Actor::Application(app_id)) => (ActorKind::Application, Some(app_id.into_uuid())),
+        None => (ActorKind::System, None),
+    };
+    let _ = record_audit(
+        pool,
+        tenant_id,
+        actor_kind,
+        actor_id,
+        updated.owner_subject_id,
+        "session.updated",
+        Some("session"),
+        Some(session_id.into_uuid()),
+        AuditOutcome::Success,
+        None,
+        serde_json::json!({
+            "version": updated.version,
+            "max_members": updated.max_members,
+            "snapshot_ttl_seconds": updated.snapshot_ttl_seconds,
+            "stale_after_seconds": updated.stale_after_seconds,
+            "expires_at": format_rfc3339(updated.expires_at),
+        }),
+    )
+    .await;
+
     Ok(updated)
 }
 
@@ -619,6 +754,17 @@ pub async fn close_session(
     tenant_id: TenantId,
     session_id: SessionId,
     reason: ClosedReason,
+) -> Result<Session, SessionUseCaseError> {
+    close_session_with_actor(pool, tenant_id, session_id, reason, None).await
+}
+
+/// Closes a session with an explicit actor for audit trails (docs/10 §8.3).
+pub async fn close_session_with_actor(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    reason: ClosedReason,
+    actor: Option<Actor>,
 ) -> Result<Session, SessionUseCaseError> {
     let current = SessionRepository::get_by_id(pool, tenant_id, session_id)
         .await?
@@ -638,7 +784,36 @@ pub async fn close_session(
     )
     .await?;
 
-    Ok(closed.unwrap_or(current))
+    let res = closed.unwrap_or(current.clone());
+
+    let (actor_kind, actor_id) = match actor {
+        Some(Actor::Device(dev_id)) => (ActorKind::Device, Some(dev_id.into_uuid())),
+        Some(Actor::Application(app_id)) => (ActorKind::Application, Some(app_id.into_uuid())),
+        None => match reason {
+            ClosedReason::ClosedByMember | ClosedReason::OwnerLeft => (ActorKind::Device, None),
+            ClosedReason::ClosedByApplication => (ActorKind::Application, None),
+            ClosedReason::Admin => (ActorKind::Operator, None),
+        },
+    };
+
+    let _ = record_audit(
+        pool,
+        tenant_id,
+        actor_kind,
+        actor_id,
+        current.owner_subject_id,
+        "session.closed",
+        Some("session"),
+        Some(session_id.into_uuid()),
+        AuditOutcome::Success,
+        None,
+        serde_json::json!({
+            "reason": reason.to_string(),
+        }),
+    )
+    .await;
+
+    Ok(res)
 }
 
 /// Verifies that a device's subject is an active member of the session (docs/07 §9.2).
@@ -681,13 +856,35 @@ pub async fn verify_device_manage_capability(
     }
 }
 
-/// Expires the sessions past their expiry (worker job, FR-SES-005).
+/// Expires the sessions past their expiry (worker job, FR-SES-005, docs/10 §8.3).
 pub async fn expire_due_sessions(
     pool: &PgPool,
     batch_limit: u32,
 ) -> Result<Vec<SessionId>, SessionUseCaseError> {
     let now = time::OffsetDateTime::now_utc();
-    Ok(SessionRepository::expire_due(pool, now, i64::from(batch_limit)).await?)
+    let pairs =
+        SessionRepository::expire_due_with_tenants(pool, now, i64::from(batch_limit)).await?;
+    let mut session_ids = Vec::with_capacity(pairs.len());
+    for (tenant_id, session_id) in pairs {
+        let _ = record_audit(
+            pool,
+            tenant_id,
+            ActorKind::System,
+            None,
+            None,
+            "session.expired",
+            Some("session"),
+            Some(session_id.into_uuid()),
+            AuditOutcome::Success,
+            None,
+            serde_json::json!({
+                "reason": "expired",
+            }),
+        )
+        .await;
+        session_ids.push(session_id);
+    }
+    Ok(session_ids)
 }
 
 /// Expiry loop: marks sessions past their expiry until the task is cancelled (FR-SES-005).

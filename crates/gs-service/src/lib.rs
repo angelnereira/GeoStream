@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod admin;
+pub mod audit;
 pub mod auth;
 pub mod idempotency;
 pub mod invitations;
@@ -18,6 +19,7 @@ pub mod migrate {
 pub use admin::{
     AdminError, CreatedApiKey, DEFAULT_APPLICATION_DEVICE_SCOPES, GeneratedSigningKeyFiles,
 };
+pub use audit::*;
 pub use auth::{
     ApplicationPrincipal, AuthError, VerifiedPrincipal, require_scope, verify_application_key,
     verify_application_principal, verify_device_token_principal,
@@ -44,8 +46,9 @@ pub use members::{
 };
 pub use sessions::{
     CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,
-    SessionUseCaseError, UpdateSessionRequest, close_session, create_session, expire_due_sessions,
-    get_session, list_sessions_for_application, list_sessions_for_subject, update_session,
+    SessionUseCaseError, UpdateSessionRequest, close_session, close_session_with_actor,
+    create_session, expire_due_sessions, get_session, list_sessions_for_application,
+    list_sessions_for_subject, update_session, update_session_with_actor,
     verify_device_active_member, verify_device_manage_capability,
 };
 pub use subjects::{

@@ -21,11 +21,13 @@ use gs_domain::session::{Actor, SessionStatus};
 use gs_ephemeral::{EphemeralError, EphemeralStore};
 use gs_store::PgPool;
 use gs_store::error::StoreError;
+use gs_store::models::{ActorKind, AuditOutcome};
 use gs_store::repos::{
     CreateInvitationOutcome, CreateInvitationParams, InvitationRepository, InvitationRow,
     RedeemOutcome, SessionRepository,
 };
 
+use crate::audit::record_audit;
 use crate::members::MemberResource;
 use crate::sessions::{ActorObject, SessionResource};
 
@@ -351,6 +353,41 @@ pub async fn create_invitation(
 
     match outcome {
         CreateInvitationOutcome::Created(row) => {
+            let (actor_kind, actor_id, sub_id) = match caller {
+                CreateInvitationCaller::Application => (ActorKind::Application, None, None),
+                CreateInvitationCaller::Device {
+                    device_id,
+                    subject_id,
+                    ..
+                } => (
+                    ActorKind::Device,
+                    Some(device_id.into_uuid()),
+                    Some(subject_id),
+                ),
+            };
+            let _ = record_audit(
+                pool,
+                tenant_id,
+                actor_kind,
+                actor_id,
+                sub_id,
+                "invitation.created",
+                Some("invitation"),
+                Some(invitation_id.into_uuid()),
+                AuditOutcome::Success,
+                None,
+                serde_json::json!({
+                    "session_id": session_id.to_string(),
+                    "max_uses": max_uses,
+                    "expires_at": format_rfc3339(expires_at),
+                    "grant_publish": effective_grants.publish,
+                    "grant_read": effective_grants.read,
+                    "grant_invite": effective_grants.invite,
+                    "grant_manage": effective_grants.manage,
+                }),
+            )
+            .await;
+
             let resource = InvitationResource::from_row(&row, now);
             Ok(InvitationCreatedResource {
                 invitation: resource,
@@ -484,6 +521,30 @@ pub async fn revoke_invitation(
     }
 
     InvitationRepository::revoke(pool, tenant_id, session_id, invitation_id, now).await?;
+
+    let (actor_kind, actor_id) = match caller {
+        RevokeInvitationCaller::Application => (ActorKind::Application, None),
+        RevokeInvitationCaller::Device { device_id, .. } => {
+            (ActorKind::Device, Some(device_id.into_uuid()))
+        }
+    };
+    let _ = record_audit(
+        pool,
+        tenant_id,
+        actor_kind,
+        actor_id,
+        None,
+        "invitation.revoked",
+        Some("invitation"),
+        Some(invitation_id.into_uuid()),
+        AuditOutcome::Success,
+        None,
+        serde_json::json!({
+            "session_id": session_id.to_string(),
+        }),
+    )
+    .await;
+
     Ok(())
 }
 
@@ -548,6 +609,28 @@ pub async fn redeem_invitation<E: EphemeralStore>(
             // Increment mver in ephemeral store
             let mver_key = format!("{key_prefix}:mver:{}", session.id);
             let _ = ephemeral.increment_membership_version(&mver_key).await;
+
+            let inv_id = match member.membership.joined_via {
+                gs_domain::membership::JoinedVia::Invitation(id) => Some(id.into_uuid()),
+                _ => None,
+            };
+            let _ = record_audit(
+                pool,
+                tenant_id,
+                ActorKind::Device,
+                Some(device_id.into_uuid()),
+                Some(subject_id),
+                "invitation.redeemed",
+                Some("invitation"),
+                inv_id,
+                AuditOutcome::Success,
+                None,
+                serde_json::json!({
+                    "session_id": session.id.to_string(),
+                    "member_id": member.membership.id.to_string(),
+                }),
+            )
+            .await;
 
             let session_res = SessionResource::from_session(&session);
             let member_res = MemberResource::from_member_with_subject(&member, false, None);

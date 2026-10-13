@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F3-09 — Auditoría de acciones sensibles | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-service`, `crates/gs-store`, `crates/gs-api` | FR-PRV-005, FR-SHR-005; leer `10` §8.3; depende de T-F3-04 |
+| T-F3-10 — Rate limits REST e invitaciones | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-api`, `crates/gs-ephemeral`, `crates/gs-service` | FR-API-004; leer `07` §8; depende de F2 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -47,6 +47,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F3-09 — Auditoría de acciones sensibles
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-PRV-005, FR-SHR-005.
+- Evidencia: Implementación integral del subsistema de auditoría de acciones sensibles en `gs-service::audit` y `gs-store::AuditRepository` para el ciclo de vida de sesiones, membresías, invitaciones, subjects y dispositivos según `docs/10` §8.2, §8.3 y `docs/11` §2. Registro normativo de acciones: `session.created|updated|closed|expired`, `member.added|updated|revoked|left`, `invitation.created|revoked|redeemed`, `sharing.started|stopped`, `subject.tokens_revoked` y `device.deactivated`. Cumplimiento estricto de `FR-PRV-005` (auditoría de acciones sensibles con actor_kind, actor_id, subject_id, target_kind, target_id, outcome, request_id y details estructurados) y `FR-SHR-005` (auditoría de inicio y cese de compartición con actor, membresía, publisher device id, valor booleano e instante, con total ausencia de campos de posición o coordenadas). Aplicación rigurosa de las reglas de privacidad de `docs/10` §8.2: total exclusión de campos de coordenadas/posición, tokens, tickets, API keys, secretos de autenticación, códigos de invitación en claro, metadata de sesión y `external_subject_id` sin anonimizar en los detalles JSON de auditoría. Garantía estricta de aislamiento por tenant (`INV-TEN-1`) con métodos de repositorio `list_by_action`, `list_by_target` y `count_by_tenant` filtrados por `tenant_id`. Suite exhaustiva de pruebas de integración en `crates/gs-service/tests/audit_test.rs` con 2 tests: `test_fr_prv_005_and_fr_shr_005_sensitive_actions_audited` (cubriendo exhaustivamente todas las acciones sensibles y verificando de forma recursiva con `assert_no_forbidden_fields` que ninguna clave prohibida exista en `details`) y `test_inv_ten_1_audit_strict_tenant_isolation` (verificando la estricta ausencia de filtraciones entre tenants en consultas de auditoría). Gates de calidad 100% verdes: `cargo fmt`, `cargo clippy` (`-D warnings`), `cargo test --workspace` (223 pruebas verdes), `cargo deny check`, `geostream-tools all`.
 
 ### 2026-10-13 — T-F3-08 — Deshabilitar/habilitar tenant y aplicación por CLI con invalidación de cachés
 - Autor/agente: Angel Nereira (con agente de código).

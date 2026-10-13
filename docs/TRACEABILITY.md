@@ -51,7 +51,7 @@ Reglas:
 | FR-SHR-002 | MUST | F3 | Activación solo por el propio subject | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-SHR-003 | MUST | F3 | Detener compartición | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-SHR-004 | MUST | F3 | Un único dispositivo publicador | `crates/gs-store/tests/constraints_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
-| FR-SHR-005 | MUST | F3 | Auditoría de compartición | — | pendiente |
+| FR-SHR-005 | MUST | F3 | Auditoría de compartición | `crates/gs-service/tests/audit_test.rs` | cumplido |
 | FR-LOC-001 | MUST | F4 | Modelo de muestra | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-002 | MUST | F4 | Validación de campos | `tests/location_vectors_test.rs` | en curso |
 | FR-LOC-003 | MUST | F4 | Orden y deduplicación | `tests/location_vectors_test.rs` | en curso |
@@ -115,7 +115,7 @@ Reglas:
 | FR-PRV-002 | MUST | F10 | Borrado y exportación de subject | — | pendiente |
 | FR-PRV-003 | MUST | F10 | Jobs de retención | — | pendiente |
 | FR-PRV-004 | MUST | F4 | Redacción de coordenadas | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/log_verifier.rs` | en curso |
-| FR-PRV-005 | MUST | F3 | Auditoría | `crates/gs-store/tests/repos_test.rs` | en curso |
+| FR-PRV-005 | MUST | F3 | Auditoría | `crates/gs-store/tests/repos_test.rs`, `crates/gs-service/tests/audit_test.rs` | cumplido |
 | FR-HIS-001 | COULD | F13 | Historial opt-in | — | pendiente |
 | FR-HIS-002 | COULD | F13 | Cola offline acumulada | — | pendiente |
 | FR-HIS-003 | COULD | F13 | Consulta de historial | — | pendiente |

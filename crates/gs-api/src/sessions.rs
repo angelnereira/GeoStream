@@ -26,9 +26,9 @@ use gs_service::idempotency::{
 use gs_service::migrate::PgPool;
 use gs_service::sessions::{
     CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,
-    SessionUseCaseError, UpdateSessionRequest, close_session, create_session, get_session,
-    list_sessions_for_application, list_sessions_for_subject, update_session,
-    verify_device_active_member, verify_device_manage_capability,
+    SessionUseCaseError, UpdateSessionRequest, close_session_with_actor, create_session,
+    get_session, list_sessions_for_application, list_sessions_for_subject,
+    update_session_with_actor, verify_device_active_member, verify_device_manage_capability,
 };
 
 use crate::pagination::parse_pagination_query;
@@ -614,14 +614,19 @@ pub async fn update_session_handler(
             .await
             .unwrap_or_default();
     let policy = SessionPolicy::from_policy(&tenant_policy);
+    let actor = match &caller {
+        CallerPrincipal::Device(dev) => Actor::Device(dev.device.id),
+        CallerPrincipal::Application(app) => Actor::Application(app.application.id),
+    };
 
-    match update_session(
+    match update_session_with_actor(
         &state.pool,
         tenant_id,
         session_id,
         Some(expected_version),
         &request,
         policy,
+        Some(actor),
     )
     .await
     {
@@ -671,7 +676,7 @@ pub async fn close_session_handler(
 
     let tenant_id = caller.tenant_id();
 
-    let reason = match &caller {
+    let (reason, actor) = match &caller {
         CallerPrincipal::Device(dev) => {
             if let Err(err) =
                 verify_device_manage_capability(&state.pool, tenant_id, session_id, dev.subject.id)
@@ -679,7 +684,7 @@ pub async fn close_session_handler(
             {
                 return session_error_to_response(err, &request_id);
             }
-            ClosedReason::ClosedByMember
+            (ClosedReason::ClosedByMember, Actor::Device(dev.device.id))
         }
         CallerPrincipal::Application(app) => {
             if !app.api_key.scopes.iter().any(|s| s == "sessions:write") {
@@ -689,11 +694,14 @@ pub async fn close_session_handler(
                 )
                 .into_response();
             }
-            ClosedReason::ClosedByApplication
+            (
+                ClosedReason::ClosedByApplication,
+                Actor::Application(app.application.id),
+            )
         }
     };
 
-    match close_session(&state.pool, tenant_id, session_id, reason).await {
+    match close_session_with_actor(&state.pool, tenant_id, session_id, reason, Some(actor)).await {
         Ok(session) => {
             let resource =
                 match SessionResource::from_session_with_counts(&state.pool, &session).await {

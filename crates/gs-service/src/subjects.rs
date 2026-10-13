@@ -5,9 +5,11 @@ use gs_bus::Bus;
 use gs_domain::error::{AsErrorCode, ErrorCode};
 use gs_domain::ids::{ApplicationId, DeviceId, ExternalSubjectId, SubjectId, TenantId};
 use gs_ephemeral::EphemeralStore;
-use gs_store::models::{Device, DeviceStatus, Subject, SubjectStatus};
+use gs_store::models::{ActorKind, AuditOutcome, Device, DeviceStatus, Subject, SubjectStatus};
 use gs_store::repos::{DeviceRepository, SubjectRepository};
 use gs_store::{PgPool, StoreError};
+
+use crate::audit::record_audit;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -146,7 +148,24 @@ pub async fn revoke_subject_tokens(
             StoreError::NotFound { .. } => SubjectUseCaseError::SubjectNotFound,
             other => SubjectUseCaseError::Store(other),
         })?;
-    Ok(subject_to_resource(subject))
+    let res = subject_to_resource(subject);
+    let _ = record_audit(
+        pool,
+        tenant_id,
+        ActorKind::Application,
+        None,
+        Some(subject_id),
+        "subject.tokens_revoked",
+        Some("subject"),
+        Some(subject_id.into_uuid()),
+        AuditOutcome::Success,
+        None,
+        serde_json::json!({
+            "token_epoch": res.token_epoch,
+        }),
+    )
+    .await;
+    Ok(res)
 }
 
 /// Fetches a device by identifier (`docs/07` §9.5, OpenAPI `getDevice`).
@@ -216,7 +235,47 @@ pub async fn deactivate_device<E: EphemeralStore, B: Bus>(
     let affected =
         DeviceRepository::deactivate_and_stop_publishing(pool, tenant_id, device_id, now).await?;
 
+    let (actor_kind, actor_id) = match caller_device_id {
+        Some(did) => (ActorKind::Device, Some(did.into_uuid())),
+        None => (ActorKind::Application, None),
+    };
+    let _ = record_audit(
+        pool,
+        tenant_id,
+        actor_kind,
+        actor_id,
+        Some(device.subject_id),
+        "device.deactivated",
+        Some("device"),
+        Some(device_id.into_uuid()),
+        AuditOutcome::Success,
+        None,
+        serde_json::json!({
+            "affected_sessions_count": affected.len(),
+        }),
+    )
+    .await;
+
     for (session_id, member_id) in affected {
+        let _ = record_audit(
+            pool,
+            tenant_id,
+            ActorKind::System,
+            None,
+            Some(device.subject_id),
+            "sharing.stopped",
+            Some("member"),
+            Some(member_id.into_uuid()),
+            AuditOutcome::Success,
+            None,
+            serde_json::json!({
+                "session_id": session_id.to_string(),
+                "sharing": false,
+                "reason": "device_deactivated",
+            }),
+        )
+        .await;
+
         // 1. Delete ephemeral snapshot (NFR-PRIV-002, retry up to 3 times)
         let snap_key = format!("{key_prefix}:snap:{session_id}:{member_id}");
         for attempt in 0..3 {

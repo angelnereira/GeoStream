@@ -94,6 +94,77 @@ impl AuditRepository {
         rows.into_iter().map(Self::map_row).collect()
     }
 
+    /// Lists audit events for a tenant filtered by action ordered by occurrence time descending.
+    pub async fn list_by_action(
+        pool: &PgPool,
+        tenant_id: TenantId,
+        action: &str,
+        limit: i64,
+    ) -> Result<Vec<AuditEvent>, StoreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, tenant_id, occurred_at, actor_kind, actor_id, subject_id,
+                   action, target_kind, target_id, outcome, request_id, details
+            FROM audit_events
+            WHERE tenant_id = $1 AND action = $2
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT $3;
+            "#,
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(action)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        rows.into_iter().map(Self::map_row).collect()
+    }
+
+    /// Lists audit events for a tenant filtered by target kind and target id.
+    pub async fn list_by_target(
+        pool: &PgPool,
+        tenant_id: TenantId,
+        target_kind: &str,
+        target_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<AuditEvent>, StoreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, tenant_id, occurred_at, actor_kind, actor_id, subject_id,
+                   action, target_kind, target_id, outcome, request_id, details
+            FROM audit_events
+            WHERE tenant_id = $1 AND target_kind = $2 AND target_id = $3
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT $4;
+            "#,
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(target_kind)
+        .bind(target_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        rows.into_iter().map(Self::map_row).collect()
+    }
+
+    /// Counts total audit events for a tenant (INV-TEN-1).
+    pub async fn count_by_tenant(pool: &PgPool, tenant_id: TenantId) -> Result<i64, StoreError> {
+        let count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM audit_events WHERE tenant_id = $1;
+            "#,
+        )
+        .bind(tenant_id.into_uuid())
+        .fetch_one(pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(count)
+    }
+
     fn map_row(row: sqlx::postgres::PgRow) -> Result<AuditEvent, StoreError> {
         let id_raw: Uuid = row.get("id");
         let tenant_id_raw: Uuid = row.get("tenant_id");

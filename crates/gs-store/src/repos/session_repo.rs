@@ -368,12 +368,12 @@ impl SessionRepository {
         row.map(Self::map_row).transpose()
     }
 
-    /// Marks expired sessions as `EXPIRED` (docs/05 §4.3, worker job).
-    pub async fn expire_due(
+    /// Marks expired sessions as `EXPIRED` returning pairs of (tenant_id, session_id) (docs/05 §4.3, worker job).
+    pub async fn expire_due_with_tenants(
         pool: &Pool,
         now: OffsetDateTime,
         batch_limit: i64,
-    ) -> Result<Vec<SessionId>, StoreError> {
+    ) -> Result<Vec<(TenantId, SessionId)>, StoreError> {
         let rows = sqlx::query(
             r#"
             UPDATE sessions
@@ -385,7 +385,7 @@ impl SessionRepository {
                 LIMIT $1
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id;
+            RETURNING tenant_id, id;
             "#,
         )
         .bind(batch_limit)
@@ -396,8 +396,23 @@ impl SessionRepository {
 
         Ok(rows
             .iter()
-            .map(|row| SessionId::from_uuid(row.get("id")))
+            .map(|row| {
+                (
+                    TenantId::from_uuid(row.get("tenant_id")),
+                    SessionId::from_uuid(row.get("id")),
+                )
+            })
             .collect())
+    }
+
+    /// Marks expired sessions as `EXPIRED` (docs/05 §4.3, worker job).
+    pub async fn expire_due(
+        pool: &Pool,
+        now: OffsetDateTime,
+        batch_limit: i64,
+    ) -> Result<Vec<SessionId>, StoreError> {
+        let pairs = Self::expire_due_with_tenants(pool, now, batch_limit).await?;
+        Ok(pairs.into_iter().map(|(_, id)| id).collect())
     }
 
     /// Counts the active memberships of a session (docs/05 §4.1 `max_members`).
