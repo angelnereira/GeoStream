@@ -25,7 +25,7 @@ Reglas:
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | pendiente |
 | FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs`, `crates/gs-api/tests/skeleton_test.rs` | en curso |
 | FR-API-002 | MUST | F3 | Idempotencia | `crates/gs-service/tests/idempotency_test.rs`, `crates/gs-auth/tests/crypto_test.rs` | en curso |
-| FR-API-003 | MUST | F3 | Paginación por cursor | — | pendiente |
+| FR-API-003 | MUST | F3 | Paginación por cursor | `crates/gs-domain/src/pagination.rs`, `crates/gs-api/src/pagination.rs` | en curso |
 | FR-API-004 | MUST | F3 | Rate limit REST | — | pendiente |
 | FR-API-005 | MUST | F3 | OpenAPI como fuente de verdad | — | pendiente |
 | FR-API-006 | MUST | F3 | No enumeración de recursos | — | pendiente |
