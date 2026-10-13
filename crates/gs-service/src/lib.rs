@@ -4,6 +4,7 @@
 pub mod admin;
 pub mod auth;
 pub mod idempotency;
+pub mod sessions;
 pub mod tokens;
 pub mod migrate {
     pub use gs_store::PgPool;
@@ -22,6 +23,12 @@ pub use idempotency::{
     IDEMPOTENCY_KEY_MAX_LEN, IdempotencyContext, IdempotencyDecision, IdempotencyError,
     StoredResponse, begin as idempotency_begin, canonical_json, discard as idempotency_discard,
     finish as idempotency_finish, request_fingerprint, run_idempotent,
+};
+pub use sessions::{
+    CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,
+    SessionUseCaseError, UpdateSessionRequest, close_session, create_session, expire_due_sessions,
+    get_session, list_sessions_for_application, list_sessions_for_subject, update_session,
+    verify_device_active_member, verify_device_manage_capability,
 };
 pub use tokens::{
     MintedToken, REQUIRED_SCOPE, TokenError, TokenRequest, TokenResponse, TokenTtlBounds,

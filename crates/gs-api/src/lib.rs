@@ -10,6 +10,7 @@ pub mod pagination;
 pub mod problem;
 pub mod router;
 pub mod security;
+pub mod sessions;
 pub mod tokens;
 
 // Storage access stays behind `gs-service` (docs/04 §4.1); these re-exports exist so the
@@ -33,4 +34,5 @@ pub use security::{
     CredentialKind, Principal, PrincipalError, extract_principal, principal_from_header,
     request_id_from,
 };
+pub use sessions::{SessionApiState, sessions_router};
 pub use tokens::{SigningKeyRef, TokenState, mint_token_handler, v1_router};

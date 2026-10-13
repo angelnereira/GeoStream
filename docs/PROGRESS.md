@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F2-08 — `POST /v1/tokens` con upsert de subject/dispositivo e INV-DEV-2 | Angel Nereira (con agente de código) | 2026-10-12 | `crates/gs-service`, `crates/gs-auth` | FR-AUTH-002; leer `06` §4 y OpenAPI `mintToken`; depende de T-F2-07 (cerrada) |
+| T-F3-04 — Miembros: alta, listado, consulta (`me`), cambio de capacidades/rol, revocación, salida, transferencia de propiedad, readmisión | Angel Nereira (con agente de código) | 2026-10-12 | `crates/gs-store`, `crates/gs-service`, `crates/gs-api` | FR-MEM-001..007, FR-SES-007; leer `05` §5 y `07` §9.3; depende de T-F3-03 (cerrada) |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -48,14 +48,12 @@
 
 Formato de cada entrada (más reciente arriba):
 
-```text
-### AAAA-MM-DD — T-Fx-NN — <título>
-- Autor/agente:
-- Resultado: completada | parcial | bloqueada
-- PR:
-- Requisitos: …
-- Evidencia: enlace a CI / informe
-```
+### 2026-10-12 — T-F3-03 — Sesiones: control plane REST, control de concurrencia y expiración
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- PR: main (commit incremental).
+- Requisitos: FR-SES-001, FR-SES-002, FR-SES-003, FR-SES-004, FR-SES-005, FR-SES-006.
+- Evidencia: Implementación completa del plano de control REST de sesiones (`POST /v1/sessions`, `GET /v1/sessions`, `GET /v1/sessions/{session_id}`, `PATCH /v1/sessions/{session_id}`, `POST /v1/sessions/{session_id}/close`) en `gs-store` (`SessionRepository`, `MembershipRepository`), `gs-service` (`sessions`) y `gs-api` (`sessions`). Soporta creación por aplicación (con o sin `owner_external_subject_id` e `initial_members`) y por dispositivo (propietario automático con las 4 capacidades, rechazo 422 de parámetros no permitidos), control de concurrencia optimista mediante `If-Match` y cabeceras `ETag`, listado paginado con cursor opaco y filtros (`status`, `external_subject_id` con rechazo 422 si los envía un dispositivo), lectura restringida a miembros activos para dispositivos (404 si no pertenece), cierre idempotente (INV-SES-3), verificación perezosa de expiración en lectura (INV-SES-2) y job de expiración en segundo plano (`expire_due_sessions`, `expiry_loop`). Pruebas de integración: 5 en `gs-service` y 5 en `gs-api` contra PostgreSQL real. Gates de calidad: `cargo fmt`, `cargo clippy`, `cargo test --workspace` (200 pruebas verdes), `cargo deny check` y `geostream-tools all` exitosos.
 
 ### 2026-10-12 — T-F2-07 — `gs-api` esqueleto: router, `X-Request-Id`, Problem Details, principal, límites, salud y métricas
 - Autor/agente: Angel Nereira (con agente de código).

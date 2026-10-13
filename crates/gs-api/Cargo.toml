@@ -17,6 +17,7 @@ metrics-exporter-prometheus.workspace = true
 serde_json.workspace = true
 time = { workspace = true, features = ["formatting"] }
 tracing.workspace = true
+uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

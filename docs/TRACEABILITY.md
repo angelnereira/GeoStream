@@ -29,12 +29,12 @@ Reglas:
 | FR-API-004 | MUST | F3 | Rate limit REST | — | pendiente |
 | FR-API-005 | MUST | F3 | OpenAPI como fuente de verdad | — | pendiente |
 | FR-API-006 | MUST | F3 | No enumeración de recursos | — | pendiente |
-| FR-SES-001 | MUST | F3 | Crear sesión | — | pendiente |
-| FR-SES-002 | MUST | F3 | Consultar y listar sesiones | — | pendiente |
-| FR-SES-003 | MUST | F3 | Actualizar sesión | — | pendiente |
-| FR-SES-004 | MUST | F3 | Cerrar sesión | — | pendiente |
-| FR-SES-005 | MUST | F3 | Expiración automática | — | pendiente |
-| FR-SES-006 | MUST | F3 | Modos de sesión | `tests/invariants_test.rs` | en curso |
+| FR-SES-001 | MUST | F3 | Crear sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
+| FR-SES-002 | MUST | F3 | Consultar y listar sesiones | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
+| FR-SES-003 | MUST | F3 | Actualizar sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
+| FR-SES-004 | MUST | F3 | Cerrar sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
+| FR-SES-005 | MUST | F3 | Expiración automática | `crates/gs-service/tests/sessions_test.rs` | cumplido |
+| FR-SES-006 | MUST | F3 | Modos de sesión | `tests/invariants_test.rs`, `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
 | FR-SES-007 | MUST | F3 | Salida del propietario | `tests/invariants_test.rs` | en curso |
 | FR-MEM-001 | MUST | F3 | Agregar miembros (aplicación) | — | pendiente |
 | FR-MEM-002 | MUST | F3 | Listar y consultar miembros | — | pendiente |

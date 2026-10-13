@@ -283,6 +283,13 @@ impl SigningKeySet {
         Ok(set)
     }
 
+    /// Registers a signing key and its verifying key in memory.
+    pub fn insert_signing_key(&mut self, kid: impl Into<String>, key: SigningKey) {
+        let kid = kid.into();
+        self.verifying.insert(kid.clone(), key.verifying_key());
+        self.signing.insert(kid, key);
+    }
+
     /// Selects the active signing key id (`GS_JWT_ACTIVE_KID`).
     pub fn set_active_kid(&mut self, kid: &str) -> Result<(), JwtError> {
         if !self.signing.contains_key(kid) {
