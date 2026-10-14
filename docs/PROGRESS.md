@@ -6,7 +6,7 @@
 
 | Campo | Valor |
 |---|---|
-| Fase activa | **F3 — Plano de control REST** (siguiente) |
+| Fase activa | **F4 — Stream en nodo único** (M1) |
 | Último hito alcanzado | Cierre de Fase F0 (Bootstrap del repositorio y CI) — 2026-10-12 |
 | Paquete documental | v0.2.0 (2026-10-11) |
 | Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11). DR-20261012-03 (resolución de tenant en `geostream admin`, `16` §3 vs `05` §3 INV-TEN-1) — implementado con la lectura de operador, pendiente de confirmación del propietario. DR-20261012-04 (`gs-observability` inalcanzable desde `geostream` según `tools/check_crate_deps`, frente a la frase de `04` §4.1 que lo permite) — bloquea cablear los logs JSON en `serve` |
@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| _ninguna_ | | | | Fase F3 completa; siguiente: T-F4-01 |
+| T-F4-01 — Tickets: `POST /v1/stream/tickets` y canje atómico en el upgrade | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-auth`, `crates/gs-service`, `crates/gs-api` | FR-AUTH-006; leer `06` §5, `08` §3, `11` §3 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
