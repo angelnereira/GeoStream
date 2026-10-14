@@ -62,7 +62,7 @@ Reglas:
 | FR-LOC-008 | MUST | F4 | Sequence floor | — | pendiente |
 | FR-LOC-009 | MUST | F8 | Ingesta HTTP por lotes | — | pendiente |
 | FR-STR-001 | MUST | F4 | Endpoint y handshake | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-api/src/stream.rs` | cumplido |
-| FR-STR-002 | MUST | F4 | Suscripción | — | pendiente |
+| FR-STR-002 | MUST | F4 | Suscripción | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-003 | MUST | F4 | Distribución autorizada | — | pendiente |
 | FR-STR-004 | MUST | F4 | Acks de publicación | — | pendiente |
 | FR-STR-005 | MUST | F4 | Heartbeat, inactividad y cierre | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-stream/src/close_codes.rs` | cumplido |
@@ -72,10 +72,10 @@ Reglas:
 | FR-STR-009 | MUST | F6 | Fan-out multi-instancia | — | pendiente |
 | FR-STR-010 | MUST | F6 | Drenaje controlado | — | pendiente |
 | FR-STR-011 | MUST | F4 | Eventos de sesión y miembros | — | pendiente |
-| FR-PRS-001 | MUST | F4 | Estado de miembro | — | pendiente |
+| FR-PRS-001 | MUST | F4 | Estado de miembro | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/src/subscription.rs` | cumplido |
 | FR-PRS-002 | MUST | F4 | Gracia de desconexión | — | pendiente |
 | FR-PRS-003 | MUST | F6 | Presencia multi-instancia | — | pendiente |
-| FR-PRS-004 | MUST | F4 | Minimización de presencia | — | pendiente |
+| FR-PRS-004 | MUST | F4 | Minimización de presencia | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/src/subscription.rs` | cumplido |
 | FR-SDK-001 | MUST | F5 | Fachada pública | — | pendiente |
 | FR-SDK-002 | MUST | F5 | Proveedor de credenciales | — | pendiente |
 | FR-SDK-003 | MUST | F5 | Permisos y servicio de ubicación | — | pendiente |

@@ -11,6 +11,7 @@ pub mod close_codes;
 pub mod codec;
 pub mod config;
 pub mod connection;
+pub mod subscription;
 
 pub use close_codes::{CLOSE_AUTH_EXPIRED, CloseCode, reason_of};
 pub use codec::{FrameCodec, FrameError};
@@ -18,4 +19,7 @@ pub use config::{StreamConfig, StreamConfigError, StreamLimits, TenantStreamLimi
 pub use connection::{
     AcceptedSession, Connection, ConnectionOutcome, ConnectionState, MAX_PROTOCOL_MINOR,
     StreamState, run_session,
+};
+pub use subscription::{
+    Subscription, SubscriptionSet, SubscriptionState, subscribe_ack, unsubscribe_ack,
 };

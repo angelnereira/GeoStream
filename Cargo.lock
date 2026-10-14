@@ -1773,6 +1773,8 @@ dependencies = [
  "gs-protocol",
  "gs-store",
  "metrics",
+ "pbjson-types",
+ "prost",
  "serde",
  "serde_json",
  "sqlx",

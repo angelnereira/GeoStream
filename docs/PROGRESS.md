@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| _ninguna_ | | | | T-F4-01, T-F4-02 y T-F4-03 completadas; siguiente: T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus`) |
+| T-F4-04 — Suscripción sin huecos, snapshot y `MemberStatus` con minimización | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-service`, `crates/gs-stream` | FR-STR-002, FR-PRS-001, FR-PRS-004; leer `08` §6.3, `05` §8 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -35,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres) y T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) y T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -48,6 +48,14 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F4-04 — Suscripción sin huecos, snapshot y `MemberStatus` con minimización
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Rama: `feat/T-F4-04-subscription`.
+- Requisitos: FR-STR-002, FR-PRS-001, FR-PRS-004.
+- Evidencia: `gs-service::subscriptions` autoriza antes de leer (membresía `ACTIVE` + `read` para dispositivos, `locations:read` para aplicaciones) y devuelve `SessionInfo`, el `MemberStatus` de todos los miembros activos y el snapshot limitado a quienes comparten y tienen snapshot vigente en `{p}:snap:{session}:{member}`; el estado de sesión aplica INV-SES-1/2 (`SESSION_CLOSED` / `SESSION_EXPIRED`) y un no miembro recibe 404 sin revelar la sesión (FR-API-006). Minimización de presencia (INV-PRS-1): `sharing=false` → `connectivity=UNSPECIFIED` y sin `last_location_at`, aunque existan presencia y snapshot; `sharing=true` → `ONLINE` si existe `{p}:presence:{device}`. `gs-stream::subscription` implementa el algoritmo sin huecos de `08` §6.3 (suscripción `PENDING` → lectura → `SubscribeAck` encolado → `ACTIVE`) con cola de eventos de control acotada por `GS_STREAM_PENDING_EVENTS_MAX` y coalescencia de ubicaciones por (sesión, miembro) liberando solo las más nuevas que el snapshot; `Subscribe` repetido es idempotente, `Unsubscribe` responde siempre, el límite efectivo por conexión responde `TOO_MANY_SUBSCRIPTIONS` y un ID malformado `VALIDATION_FAILED`. Pruebas: 7 de integración contra PostgreSQL real (`crates/gs-service/tests/subscriptions_test.rs`) y 6 de extremo a extremo con WebSocket real (`crates/gs-stream/tests/connection_test.rs`: ack con sesión y miembros, no miembro → `NOT_FOUND`, miembro sin `read` → `PERMISSION_DENIED`, aplicación sin `locations:read` → `PERMISSION_DENIED`, sesión cerrada → `SESSION_CLOSED`, límite de suscripciones → `TOO_MANY_SUBSCRIPTIONS`), más 6 unitarias de la cola y la coalescencia. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (364 pruebas, 0 fallos; base en `main`: 345 → +19), `cargo run -p geostream-tools -- all`: todos OK.
+- Notas: el fan-out que entrega `LocationUpdate` y los eventos de control a las suscripciones activas es T-F4-06; la cola pendiente ya está en su sitio para que ese cableado no pierda eventos. La presencia todavía no la escribe nadie (T-F4-08), por lo que un publicador aparece `OFFLINE` hasta entonces.
 
 ### 2026-10-13 — T-F4-03 — `AuthzCache` con `mver`, invalidación por bus y revalidación del principal
 - Autor/agente: Angel Nereira (con agente de código).

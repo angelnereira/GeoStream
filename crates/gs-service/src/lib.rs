@@ -10,6 +10,7 @@ pub mod invitations;
 pub mod members;
 pub mod sessions;
 pub mod subjects;
+pub mod subscriptions;
 pub mod tickets;
 pub mod tokens;
 pub mod migrate {
@@ -62,6 +63,10 @@ pub use subjects::{
     SubjectUseCaseError, deactivate_device, find_subject_by_external_id, get_device, get_subject,
     revoke_subject_tokens,
 };
+pub use subscriptions::{
+    LOCATIONS_READ_SCOPE, MemberStatusView, SessionInfoView, SubscribeError, SubscribeParams,
+    SubscribePrincipal, SubscribeView, subscribe,
+};
 pub use tickets::{
     IssuedTicket, STREAM_CONNECT_SCOPE, TicketCaller, TicketConfig, TicketError, TicketGrant,
     TicketPrincipalKind, grant_has_scope, issue_stream_ticket, redeem_stream_ticket, ticket_key,
@@ -81,3 +86,4 @@ pub use gs_domain;
 pub use gs_ephemeral;
 pub use gs_protocol;
 pub use gs_store;
+pub use pbjson_types;

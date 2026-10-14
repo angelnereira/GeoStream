@@ -53,7 +53,43 @@ struct World {
     connections: ConnectionCounter,
     _server: tokio::task::JoinHandle<()>,
     key_with_scope: String,
+    key_without_scope: String,
     device_token: MintedToken,
+    other_device_token: MintedToken,
+    reader_device_token: MintedToken,
+}
+
+/// Parses a session id printed by the fixture.
+fn session_id_from(session_id: &str) -> gs_service::gs_domain::ids::SessionId {
+    use std::str::FromStr;
+    gs_service::gs_domain::ids::SessionId::from_str(session_id).expect("session id")
+}
+
+/// Session owned by the device of the fixture.
+async fn session_of(world: &World) -> String {
+    let session = gs_service::sessions::create_session(
+        &world.pool,
+        world.tenant_id,
+        gs_service::gs_domain::session::Actor::Device(
+            world
+                .device_token
+                .response
+                .device_id
+                .parse()
+                .expect("device id"),
+        ),
+        &serde_json::from_value::<gs_service::sessions::CreateSessionRequest>(serde_json::json!({
+            "mode": "MANY_TO_MANY",
+            "max_members": 10
+        }))
+        .expect("request"),
+        gs_service::sessions::SessionPolicy::from_policy(
+            &gs_service::gs_auth::TenantPolicy::default(),
+        ),
+    )
+    .await
+    .expect("create session");
+    session.id.to_string()
 }
 
 async fn setup(suffix: &str, config: StreamConfig) -> World {
@@ -81,6 +117,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         Some(vec![
             "tokens:mint".to_string(),
             "stream:connect".to_string(),
+            "locations:read".to_string(),
         ]),
         Some("stream"),
         None,
@@ -94,30 +131,71 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
     let mut keyset = DeviceTokenKeys::default();
     keyset.insert_signing_key(&kid, signing.clone());
 
-    let credential = key_with_scope.credential.to_string();
-    let device_token = mint_device_token(
+    let key_without_scope = create_api_key(
         &pool,
-        credential.as_str(),
-        &TokenRequest {
-            external_subject_id: format!("stream-{suffix}"),
-            installation_id: INSTALLATION.to_string(),
-            platform: "ANDROID".to_string(),
-            app_version: None,
-            sdk_version: None,
-            scopes: Some(vec!["stream:connect".to_string()]),
-            ttl_seconds: Some(900),
-        },
-        TokenTtlBounds {
-            min_seconds: 300,
-            default_seconds: 900,
-            max_seconds: 3600,
-        },
-        ISSUER,
-        &signing,
-        &kid,
+        &application.id.to_string(),
+        Some(vec![
+            "tokens:mint".to_string(),
+            "stream:connect".to_string(),
+        ]),
+        Some("no-locations"),
+        None,
     )
     .await
-    .expect("mint token");
+    .expect("api key without locations:read");
+
+    let credential = key_with_scope.credential.to_string();
+    let mint = |credential: String, external: String, scopes: Vec<String>| {
+        let pool = pool.clone();
+        let signing = signing.clone();
+        let kid = kid.clone();
+        async move {
+            mint_device_token(
+                &pool,
+                credential.as_str(),
+                &TokenRequest {
+                    external_subject_id: external,
+                    installation_id: INSTALLATION.to_string(),
+                    platform: "ANDROID".to_string(),
+                    app_version: None,
+                    sdk_version: None,
+                    scopes: Some(scopes),
+                    ttl_seconds: Some(900),
+                },
+                TokenTtlBounds {
+                    min_seconds: 300,
+                    default_seconds: 900,
+                    max_seconds: 3600,
+                },
+                ISSUER,
+                &signing,
+                &kid,
+            )
+            .await
+            .expect("mint token")
+        }
+    };
+
+    let device_token = mint(
+        credential.clone(),
+        format!("stream-{suffix}"),
+        vec!["stream:connect".to_string()],
+    )
+    .await;
+    // A device of the same tenant that is not a member of the session.
+    let other_device_token = mint(
+        credential.clone(),
+        format!("stream-other-{suffix}"),
+        vec!["stream:connect".to_string()],
+    )
+    .await;
+    // A device that the tests add as a member without the `read` capability.
+    let reader_device_token = mint(
+        credential,
+        format!("stream-reader-{suffix}"),
+        vec!["stream:connect".to_string()],
+    )
+    .await;
 
     let ephemeral = InMemoryEphemeralStore::new();
     let bus = InMemoryBus::new();
@@ -200,7 +278,10 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         connections,
         _server: server,
         key_with_scope: key_with_scope.credential.to_string(),
+        key_without_scope: key_without_scope.credential.to_string(),
         device_token,
+        other_device_token,
+        reader_device_token,
     }
 }
 
@@ -573,48 +654,328 @@ async fn test_wrong_frame_type_closes_with_4000() {
     assert_eq!(read_close_code(&mut socket).await, 4000);
 }
 
-#[tokio::test]
-async fn test_ready_connection_answers_unimplemented_operations_with_a_protocol_error() {
-    // covers: FR-STR-005, docs/08 §4
-    let world = setup("unknown-op", StreamConfig::default()).await;
-    let ticket = world
-        .ticket(&world.device_token.response.access_token)
-        .await;
-
-    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
-    hello(&mut socket, Subprotocol::Proto).await;
-
-    // `Subscribe` belongs to T-F4-04: until it lands the client gets an explicit error and
-    // the connection continues (docs/08 §4).
-    let subscribe = gs_service::gs_protocol::ClientMessage {
-        request_id: 3,
+/// Subscribes to a session and returns the `SubscribeAck`.
+async fn subscribe(
+    socket: &mut Socket,
+    session_id: &str,
+    subprotocol: Subprotocol,
+    skip_snapshot: bool,
+) -> gs_service::gs_protocol::SubscribeAck {
+    let request = gs_service::gs_protocol::ClientMessage {
+        request_id: 11,
         body: Some(gs_service::gs_protocol::client_message::Body::Subscribe(
             gs_service::gs_protocol::Subscribe {
-                session_id: "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a".to_string(),
+                session_id: session_id.to_string(),
+                skip_snapshot,
+            },
+        )),
+    };
+    socket
+        .send(frame_of(encode_client(&request, subprotocol), subprotocol))
+        .await
+        .expect("send subscribe");
+    let bytes = read_binary(socket).await;
+    let server = decode_server(&bytes, subprotocol);
+    assert_eq!(server.request_id, 11, "the request id is echoed");
+    match server.body {
+        Some(gs_service::gs_protocol::server_message::Body::SubscribeAck(ack)) => ack,
+        other => panic!("expected SubscribeAck, got {other:?}"),
+    }
+}
+
+/// Unsubscribes and returns the `UnsubscribeAck`.
+async fn unsubscribe(
+    socket: &mut Socket,
+    session_id: &str,
+    subprotocol: Subprotocol,
+) -> gs_service::gs_protocol::UnsubscribeAck {
+    let request = gs_service::gs_protocol::ClientMessage {
+        request_id: 12,
+        body: Some(gs_service::gs_protocol::client_message::Body::Unsubscribe(
+            gs_service::gs_protocol::Unsubscribe {
+                session_id: session_id.to_string(),
+            },
+        )),
+    };
+    socket
+        .send(frame_of(encode_client(&request, subprotocol), subprotocol))
+        .await
+        .expect("send unsubscribe");
+    let bytes = read_binary(socket).await;
+    let server = decode_server(&bytes, subprotocol);
+    assert_eq!(server.request_id, 12);
+    match server.body {
+        Some(gs_service::gs_protocol::server_message::Body::UnsubscribeAck(ack)) => ack,
+        other => panic!("expected UnsubscribeAck, got {other:?}"),
+    }
+}
+
+/// Subscribes expecting a `StreamError`, and returns it.
+async fn subscribe_expecting_error(
+    socket: &mut Socket,
+    session_id: &str,
+    subprotocol: Subprotocol,
+) -> gs_service::gs_protocol::StreamError {
+    let request = gs_service::gs_protocol::ClientMessage {
+        request_id: 13,
+        body: Some(gs_service::gs_protocol::client_message::Body::Subscribe(
+            gs_service::gs_protocol::Subscribe {
+                session_id: session_id.to_string(),
                 skip_snapshot: false,
             },
         )),
     };
     socket
-        .send(frame_of(
-            encode_client(&subscribe, Subprotocol::Proto),
-            Subprotocol::Proto,
-        ))
+        .send(frame_of(encode_client(&request, subprotocol), subprotocol))
         .await
         .expect("send subscribe");
-
-    let bytes = read_binary(&mut socket).await;
-    let server = decode_server(&bytes, Subprotocol::Proto);
-    assert_eq!(server.request_id, 3);
+    let bytes = read_binary(socket).await;
+    let server = decode_server(&bytes, subprotocol);
+    assert_eq!(server.request_id, 13);
     match server.body {
-        Some(gs_service::gs_protocol::server_message::Body::Error(error)) => {
-            assert_eq!(
-                error.code,
-                gs_service::gs_protocol::ErrorCode::ProtocolError as i32
-            );
-        }
+        Some(gs_service::gs_protocol::server_message::Body::Error(error)) => error,
         other => panic!("expected StreamError, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn test_subscription_answers_session_members_and_snapshot() {
+    // covers: FR-STR-002, docs/08 §6.3, docs/05 §8
+    let world = setup("subscribe", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let session_id = session_of(&world).await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    let ack = subscribe(&mut socket, &session_id, Subprotocol::Proto, false).await;
+    let session = ack.session.expect("session info");
+    assert_eq!(session.session_id, session_id);
+    assert_eq!(
+        session.mode,
+        gs_service::gs_protocol::SessionMode::ManyToMany as i32
+    );
+    assert_eq!(
+        session.status,
+        gs_service::gs_protocol::SessionStatus::Active as i32
+    );
+    assert_eq!(session.max_members, 10);
+    assert_eq!(
+        ack.members.len(),
+        1,
+        "the owner is the only member of the session"
+    );
+    let member = &ack.members[0];
+    assert!(member.member_id.starts_with("mem_"), "typed member id");
+    assert!(member.external_subject_id.starts_with("stream-subscribe"));
+    assert!(member.capabilities.is_some());
+    assert!(!member.sharing, "sharing is off by default (FR-SHR-001)");
+    assert_eq!(
+        member.connectivity,
+        gs_service::gs_protocol::Connectivity::Unspecified as i32,
+        "a member that does not share never reveals connectivity (FR-PRS-004)"
+    );
+    assert!(
+        member.last_location_at.is_none(),
+        "no last_location_at without sharing and snapshot (FR-PRS-004)"
+    );
+    // Nothing is stored yet: the snapshot is empty.
+    assert!(ack.snapshot.is_empty());
+
+    // A second subscribe to the same session is idempotent (docs/08 §6.3).
+    let again = subscribe(&mut socket, &session_id, Subprotocol::Proto, true).await;
+    assert_eq!(again.session.expect("session").session_id, session_id);
+    assert!(again.snapshot.is_empty());
+
+    // Unsubscribing always answers.
+    let unsub = unsubscribe(&mut socket, &session_id, Subprotocol::Proto).await;
+    assert_eq!(unsub.session_id, session_id);
+    // And it is idempotent.
+    let again = unsubscribe(&mut socket, &session_id, Subprotocol::Proto).await;
+    assert_eq!(again.session_id, session_id);
+}
+
+#[tokio::test]
+async fn test_a_non_member_gets_not_found() {
+    // covers: FR-STR-002, FR-API-006, docs/08 §6.3
+    let world = setup("non-member", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+
+    // The device that owns the ticket is the only member; another subject is not.
+    let other = world
+        .ticket(&world.other_device_token.response.access_token)
+        .await;
+    let mut socket = world.connect(&other, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    let error = subscribe_expecting_error(&mut socket, &session_id, Subprotocol::Proto).await;
+    assert_eq!(
+        error.code,
+        gs_service::gs_protocol::ErrorCode::NotFound as i32,
+        "a non member is not told the session exists"
+    );
+}
+
+#[tokio::test]
+async fn test_a_member_without_read_gets_permission_denied() {
+    // covers: FR-STR-002, docs/08 §6.3
+    let world = setup("no-read", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+    // Add the reader device as a member without the `read` capability.
+    gs_service::members::add_member(
+        &world.pool,
+        world.tenant_id,
+        session_id_from(&session_id),
+        &gs_service::members::AddMemberRequest {
+            external_subject_id: world
+                .reader_device_token
+                .subject
+                .external_subject_id
+                .clone()
+                .expect("external id"),
+            role: None,
+            capabilities: Some(gs_service::gs_domain::membership::Capabilities::none()),
+        },
+    )
+    .await
+    .expect("add member");
+
+    // The reader device is the subject added without `read`.
+
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // The owner can read.
+    let ack = subscribe(&mut socket, &session_id, Subprotocol::Proto, true).await;
+    assert_eq!(ack.session.expect("session").session_id, session_id);
+    assert!(
+        ack.members.iter().any(|member| member.external_subject_id
+            == world
+                .reader_device_token
+                .subject
+                .external_subject_id
+                .clone()
+                .unwrap_or_default()),
+        "the reader is a member"
+    );
+
+    // A member without `read` cannot.
+    let member_token = world
+        .ticket(&world.reader_device_token.response.access_token)
+        .await;
+    let mut reader = world.connect(&member_token, "gs.v1.proto").await;
+    hello(&mut reader, Subprotocol::Proto).await;
+    let error = subscribe_expecting_error(&mut reader, &session_id, Subprotocol::Proto).await;
+    assert_eq!(
+        error.code,
+        gs_service::gs_protocol::ErrorCode::PermissionDenied as i32
+    );
+}
+
+#[tokio::test]
+async fn test_an_application_without_locations_read_is_denied() {
+    // covers: FR-STR-002, docs/06 §8.3
+    let world = setup("app-scope", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+
+    let ticket = world.ticket(&world.key_with_scope).await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // The application key of the fixture carries `locations:read`.
+    let ack = subscribe(&mut socket, &session_id, Subprotocol::Proto, true).await;
+    assert_eq!(ack.session.expect("session").session_id, session_id);
+
+    // A key without the scope is denied.
+    let scoped = world.ticket(&world.key_without_scope).await;
+    let mut other = world.connect(&scoped, "gs.v1.proto").await;
+    hello(&mut other, Subprotocol::Proto).await;
+    let error = subscribe_expecting_error(&mut other, &session_id, Subprotocol::Proto).await;
+    assert_eq!(
+        error.code,
+        gs_service::gs_protocol::ErrorCode::PermissionDenied as i32
+    );
+}
+
+#[tokio::test]
+async fn test_a_closed_session_answers_session_closed() {
+    // covers: FR-STR-002, INV-SES-1, docs/08 §6.3
+    let world = setup("closed", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+    gs_service::sessions::close_session(
+        &world.pool,
+        world.tenant_id,
+        session_id_from(&session_id),
+        gs_service::gs_domain::session::ClosedReason::ClosedByMember,
+    )
+    .await
+    .expect("close session");
+
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    let error = subscribe_expecting_error(&mut socket, &session_id, Subprotocol::Proto).await;
+    assert_eq!(
+        error.code,
+        gs_service::gs_protocol::ErrorCode::SessionClosed as i32
+    );
+}
+
+#[tokio::test]
+async fn test_the_subscription_limit_answers_too_many_subscriptions() {
+    // covers: FR-STR-002, docs/08 §6.3 (TOO_MANY_SUBSCRIPTIONS)
+    let config = StreamConfig {
+        max_subscriptions: 1,
+        ..StreamConfig::default()
+    };
+    let world = setup("limit-subs", config).await;
+    let first = session_of(&world).await;
+    let second = gs_service::sessions::create_session(
+        &world.pool,
+        world.tenant_id,
+        gs_service::gs_domain::session::Actor::Device(
+            world
+                .device_token
+                .response
+                .device_id
+                .parse()
+                .expect("device id"),
+        ),
+        &serde_json::from_value::<gs_service::sessions::CreateSessionRequest>(serde_json::json!({
+            "mode": "MANY_TO_MANY",
+            "max_members": 10
+        }))
+        .expect("request"),
+        gs_service::sessions::SessionPolicy::from_policy(
+            &gs_service::gs_auth::TenantPolicy::default(),
+        ),
+    )
+    .await
+    .expect("second session");
+
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    let ack = subscribe(&mut socket, &first, Subprotocol::Proto, true).await;
+    assert_eq!(ack.session.expect("session").session_id, first);
+
+    let error =
+        subscribe_expecting_error(&mut socket, &second.id.to_string(), Subprotocol::Proto).await;
+    assert_eq!(
+        error.code,
+        gs_service::gs_protocol::ErrorCode::TooManySubscriptions as i32
+    );
 }
 
 #[tokio::test]

@@ -22,7 +22,7 @@ use gs_service::authz::{AuthzCache, PrincipalIdentity};
 use gs_service::gs_auth::TenantPolicy;
 use gs_service::gs_domain::Subprotocol;
 use gs_service::gs_domain::error::{AsErrorCode, ErrorCode};
-use gs_service::gs_domain::ids::ConnectionId;
+use gs_service::gs_domain::ids::{ConnectionId, SessionId};
 use gs_service::gs_ephemeral::EphemeralStore;
 use gs_service::gs_protocol::ErrorCode as ProtoErrorCode;
 use gs_service::gs_protocol::client_message::Body as ClientBody;
@@ -31,10 +31,13 @@ use gs_service::gs_protocol::{
     ClientHello, ClientMessage, Heartbeat, HeartbeatAck, PrincipalKind, ServerHello, ServerMessage,
     StreamError,
 };
+use gs_service::gs_protocol::{Subscribe, Unsubscribe};
 use gs_service::gs_store::PgPool;
+use gs_service::subscriptions::{SubscribeError, SubscribeParams, SubscribePrincipal};
 use gs_service::tickets::{TicketGrant, TicketPrincipalKind};
 use gs_service::{InMemoryBus, InMemoryEphemeralStore};
 use pbjson_types::Timestamp;
+use std::str::FromStr;
 use time::OffsetDateTime;
 use tokio::time::Instant;
 
@@ -45,6 +48,7 @@ use crate::close_codes::{
 };
 use crate::codec::{FrameCodec, FrameError};
 use crate::config::{StreamConfig, StreamLimits as EffectiveLimits};
+use crate::subscription::{SubscriptionSet, snapshot_sequences, subscribe_ack, unsubscribe_ack};
 
 /// Metric of open connections (docs/16 §4.2).
 const METRIC_STREAM_CONNECTIONS: &str = "gs_stream_connections";
@@ -143,6 +147,8 @@ pub struct Connection {
     inbound_window_started: Instant,
     /// Identity whose state is revalidated by TTL (docs/06 §7, ADR-0009).
     principal: PrincipalIdentity,
+    /// Subscriptions of this connection (docs/08 §6.3).
+    subscriptions: SubscriptionSet,
 }
 
 impl Connection {
@@ -183,6 +189,7 @@ impl Connection {
             inbound_window_count: 0,
             inbound_window_started: Instant::now(),
             principal,
+            subscriptions: SubscriptionSet::new(),
         })
     }
 
@@ -395,13 +402,17 @@ impl Connection {
                 }
                 self.handle_heartbeat(socket, request_id, heartbeat).await;
             }
-            // Subscriptions, publishing and `AuthRefresh` belong to T-F4-04, T-F4-05 and
-            // T-F4-09; until they land the client gets an explicit protocol error
-            // (docs/08 §4).
-            Some(ClientBody::Subscribe(_))
-            | Some(ClientBody::Unsubscribe(_))
-            | Some(ClientBody::PublishLocation(_))
-            | Some(ClientBody::AuthRefresh(_)) => {
+            Some(ClientBody::Subscribe(subscribe)) => {
+                self.handle_subscribe(socket, state, request_id, subscribe)
+                    .await;
+            }
+            Some(ClientBody::Unsubscribe(unsubscribe)) => {
+                self.handle_unsubscribe(socket, request_id, unsubscribe)
+                    .await;
+            }
+            // Publishing and `AuthRefresh` belong to T-F4-05 and T-F4-09; until they land
+            // the client gets an explicit protocol error (docs/08 §4).
+            Some(ClientBody::PublishLocation(_)) | Some(ClientBody::AuthRefresh(_)) => {
                 self.reply_protocol_error(
                     socket,
                     request_id,
@@ -629,6 +640,197 @@ impl Connection {
                 })
             }
         }
+    }
+
+    /// Subscribes to a session with the gap-free algorithm of docs/08 §6.3.
+    ///
+    /// A second `Subscribe` to the same session is idempotent: it answers a new
+    /// `SubscribeAck` without creating a second subscription.
+    async fn handle_subscribe(
+        &mut self,
+        socket: &mut WebSocket,
+        state: &StreamState,
+        request_id: u64,
+        subscribe: Subscribe,
+    ) {
+        let session_id = match SessionId::from_str(&subscribe.session_id) {
+            Ok(session_id) => session_id,
+            Err(_) => {
+                self.reply_stream_error(
+                    socket,
+                    request_id,
+                    ProtoErrorCode::ValidationFailed,
+                    String::new(),
+                    "malformed session id",
+                )
+                .await;
+                return;
+            }
+        };
+
+        // Already subscribed: the answer is rebuilt, nothing changes (docs/08 §6.3).
+        if self.subscriptions.contains(session_id) {
+            match self.subscribe_view(state, session_id).await {
+                Ok(view) => {
+                    let message = ServerMessage {
+                        request_id,
+                        body: Some(ServerBody::SubscribeAck(subscribe_ack(&view))),
+                    };
+                    if !self.send(socket, &message).await {
+                        self.close(CLOSE_SLOW_CONSUMER);
+                    }
+                }
+                Err(error) => self.reply_subscribe_error(socket, request_id, error).await,
+            }
+            return;
+        }
+
+        let max = if self.is_application() {
+            self.config.max_subscriptions_app
+        } else {
+            self.config.max_subscriptions
+        };
+        if !self.subscriptions.insert(session_id, max) {
+            self.reply_stream_error(
+                socket,
+                request_id,
+                ProtoErrorCode::TooManySubscriptions,
+                subscribe.session_id.clone(),
+                "too many subscriptions",
+            )
+            .await;
+            return;
+        }
+
+        // The subscription is registered as PENDING before reading, so that nothing that
+        // happens meanwhile is lost (docs/08 §6.3).
+        match self.subscribe_view(state, session_id).await {
+            Ok(view) => {
+                if let Some(subscription) = self.subscriptions.get_mut(session_id) {
+                    subscription.activate(&snapshot_sequences(&view));
+                }
+                let message = ServerMessage {
+                    request_id,
+                    body: Some(ServerBody::SubscribeAck(subscribe_ack(&view))),
+                };
+                if !self.send(socket, &message).await {
+                    self.close(CLOSE_SLOW_CONSUMER);
+                }
+            }
+            Err(error) => {
+                self.subscriptions.remove(session_id);
+                self.reply_subscribe_error(socket, request_id, error).await;
+            }
+        }
+    }
+
+    /// Reads the session, the member statuses and the snapshot of a subscription.
+    async fn subscribe_view(
+        &self,
+        state: &StreamState,
+        session_id: SessionId,
+    ) -> Result<gs_service::subscriptions::SubscribeView, SubscribeError> {
+        let principal = match self.grant.principal_kind {
+            TicketPrincipalKind::Application => SubscribePrincipal::Application {
+                application_id: self.grant.application_id,
+                scopes: &self.grant.scopes,
+            },
+            TicketPrincipalKind::Device => SubscribePrincipal::Device {
+                subject_id: self
+                    .grant
+                    .subject_id
+                    .ok_or(SubscribeError::PermissionDenied("subject"))?,
+                device_id: self
+                    .grant
+                    .device_id
+                    .ok_or(SubscribeError::PermissionDenied("device"))?,
+            },
+        };
+        gs_service::subscriptions::subscribe(SubscribeParams {
+            pool: &state.pool,
+            ephemeral: state.ephemeral.as_ref(),
+            key_prefix: &state.redis_key_prefix,
+            tenant_id: self.grant.tenant_id,
+            session_id,
+            principal,
+            now: OffsetDateTime::now_utc(),
+        })
+        .await
+    }
+
+    /// Unsubscribes from a session, always answering `UnsubscribeAck` (docs/08 §6.3).
+    async fn handle_unsubscribe(
+        &mut self,
+        socket: &mut WebSocket,
+        request_id: u64,
+        unsubscribe: Unsubscribe,
+    ) {
+        let session_id = match SessionId::from_str(&unsubscribe.session_id) {
+            Ok(session_id) => session_id,
+            Err(_) => {
+                self.reply_stream_error(
+                    socket,
+                    request_id,
+                    ProtoErrorCode::ValidationFailed,
+                    String::new(),
+                    "malformed session id",
+                )
+                .await;
+                return;
+            }
+        };
+        // Idempotent: unsubscribing from something not subscribed still answers
+        // `UnsubscribeAck` (docs/08 §6.3).
+        self.subscriptions.remove(session_id);
+        let message = ServerMessage {
+            request_id,
+            body: Some(ServerBody::UnsubscribeAck(unsubscribe_ack(session_id))),
+        };
+        if !self.send(socket, &message).await {
+            self.close(CLOSE_SLOW_CONSUMER);
+        }
+    }
+
+    /// Renders a subscription error as a `StreamError` (docs/08 §6.3).
+    async fn reply_subscribe_error(
+        &mut self,
+        socket: &mut WebSocket,
+        request_id: u64,
+        error: SubscribeError,
+    ) {
+        let code = match error.error_code() {
+            ErrorCode::NotFound => ProtoErrorCode::NotFound,
+            ErrorCode::PermissionDenied => ProtoErrorCode::PermissionDenied,
+            ErrorCode::SessionClosed => ProtoErrorCode::SessionClosed,
+            ErrorCode::SessionExpired => ProtoErrorCode::SessionExpired,
+            ErrorCode::ValidationFailed => ProtoErrorCode::ValidationFailed,
+            _ => ProtoErrorCode::Internal,
+        };
+        self.reply_stream_error(socket, request_id, code, String::new(), &error.to_string())
+            .await;
+    }
+
+    /// Answers a `StreamError`, echoing the request id (docs/08 §4).
+    async fn reply_stream_error(
+        &mut self,
+        socket: &mut WebSocket,
+        request_id: u64,
+        code: ProtoErrorCode,
+        session_id: String,
+        message: &str,
+    ) {
+        let error = StreamError {
+            code: code as i32,
+            message: message.to_string(),
+            retry_after_ms: 0,
+            field: String::new(),
+            session_id,
+        };
+        let reply = ServerMessage {
+            request_id,
+            body: Some(ServerBody::Error(error)),
+        };
+        self.send(socket, &reply).await;
     }
 
     /// Marks the connection closed with a code (docs/08 §5).

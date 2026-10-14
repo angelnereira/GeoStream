@@ -13,6 +13,8 @@ gs-domain.workspace = true
 gs-ephemeral.workspace = true
 gs-bus.workspace = true
 gs-protocol.workspace = true
+prost.workspace = true
+pbjson-types.workspace = true
 dashmap.workspace = true
 serde = { workspace = true, features = ["derive"] }
 base64.workspace = true
