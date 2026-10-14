@@ -7,16 +7,16 @@
 | Campo | Valor |
 |---|---|
 | Fase activa | **F4 — Stream en nodo único** (M1) |
-| Último hito alcanzado | Cierre de Fase F0 (Bootstrap del repositorio y CI) — 2026-10-12 |
+| Último hito alcanzado | Cierre de Fase F3 (plano de control REST) — 2026-10-13 |
 | Paquete documental | v0.2.0 (2026-10-11) |
-| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11). DR-20261012-03 (resolución de tenant en `geostream admin`, `16` §3 vs `05` §3 INV-TEN-1) — implementado con la lectura de operador, pendiente de confirmación del propietario. DR-20261012-04 (`gs-observability` inalcanzable desde `geostream` según `tools/check_crate_deps`, frente a la frase de `04` §4.1 que lo permite) — bloquea cablear los logs JSON en `serve` |
+| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11). DR-20261012-03 (resolución de tenant en `geostream admin`, `16` §3 vs `05` §3 INV-TEN-1) — implementado con la lectura de operador, pendiente de confirmación del propietario. DR-20261012-04 (`gs-observability` inalcanzable desde `geostream` según `tools/check_crate_deps`, frente a la frase de `04` §4.1 que lo permite) — bloquea cablear los logs JSON en `serve`. **DR-20261013-01** (cómo obtiene `geostream serve` su configuración: `04` §5 documenta `--config path.toml`, pero el diagrama de `04` §4.1 que codifica `tools/check_crate_deps` no permite que `geostream` dependa de `gs-config`) — bloquea montar `/v1` y `/v1/stream` en el binario |
 | Disponibilidad de nombres | crates.io (`geostream`, `gs-protocol`, `geostream-sdk`, `geostream-server`) y pub.dev (`geostream`, `geostream_flutter`): todos disponibles (verificado 2026-10-12) |
 
 ## Tareas en curso
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| _ninguna_ | | | | T-F4-01 completada; siguiente: T-F4-02 (upgrade WebSocket, que consume `redeem_stream_ticket`) |
+| _ninguna_ | | | | T-F4-01 y T-F4-02 completadas; siguiente: T-F4-03 (AuthzCache con `mver`) |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -25,6 +25,7 @@
 | DR-20261012-02 | T-F2-02 | `05` §11 solo admite pruebas de invariantes en `gs-domain` o `gs-service`; las cuatro invariantes de persistencia (`INV-TEN-1`, `INV-SUB-1`, `INV-DEV-1`, `INV-DEV-2`) las hace cumplir el esquema y se prueban en `gs-store`. Pendiente de amendar `05` §11 | 2026-10-12 |
 | DR-20261012-03 | T-F2-03 | `16` §3 documenta `app disable --app`, `key create/list --app` y `key revoke --key` sin `--tenant`, mientras INV-TEN-1 exige filtrar por `tenant_id`. Implementado con resolución de tenant desde la entidad (operador) y mutaciones acotadas al tenant resuelto; pendiente de confirmación | 2026-10-12 |
 | DR-20261012-04 | T-F2-06 | El diagrama de `04` §4.1 (que codifica `tools/check_crate_deps`) impide que `geostream` dependa de `gs-observability`, pero la frase siguiente del mismo §4.1 dice que «puede ser usado por cualquier crate excepto `gs-domain`». Los logs JSON quedan implementados y probados en el crate, sin cablear en `serve` | 2026-10-12 |
+| DR-20261013-01 | T-F4-02 | `04` §5 documenta `geostream serve --config path.toml` y el montaje de `/v1/stream` según el rol activo, pero el diagrama de `04` §4.1 (codificado en `tools/check_crate_deps`) no permite que `geostream` dependa de `gs-config`, que es donde vive `ServerConfig`. Opciones: permitir `geostream` → `gs-config` (recomendada), mover la carga a `gs-api`, o parsear entorno ad hoc en `main.rs` duplicando `17` §2. Bloquea montar el router REST y el de stream en el binario | 2026-10-13 |
 
 ## Fases
 
@@ -34,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets de stream) completada; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets) y T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -47,6 +48,14 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F4-02 — Conexión de stream: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada (el montaje del router en `geostream serve` queda bloqueado por DR-20261013-01).
+- Rama: `feat/T-F4-02-stream-connection`.
+- Requisitos: FR-STR-001, FR-STR-005.
+- Evidencia: `gs-api::stream` publica `GET /v1/stream` con las comprobaciones previas al upgrade de `08` §3 en orden subprotocolo (400) → rate limit de upgrades por IP (429 con `Retry-After`) → límite de conexiones por instancia (503 con `Retry-After`) → canje atómico del ticket (401) → estado de tenant y aplicación (403), todas como `application/problem+json` y sin consumir ticket cuando se rechaza. La negociación de subprotocolo vive en `gs-domain` (regla pura compartida) y el codec en `gs-stream` (Prost binario, JSON canónico proto3 en texto). `gs-stream::connection` implementa la máquina de estados `AWAITING_HELLO → READY → CLOSED`: `ClientHello` validado (minor negociado, cadenas imprimibles acotadas) y `ServerHello` con `connection_id`, `server_time`, `auth_expires_at`, `sequence_floor` leído de `{p}:devseq:{device}` (0 para aplicaciones), límites efectivos de `17` §2.6 combinados con la política del tenant e IDs del principal; heartbeat con `HeartbeatAck`; cierres 4002 (sin hello), 4001 (minor no soportado), 4000 (trama de tipo incorrecto, mensaje no válido antes del hello o presupuesto de errores de protocolo agotado), 1009 (trama grande), 4429 (abuso sostenido), 4408 (inactividad), 4401 (ventana de autenticación vencida) y 4500 (interno), con el nombre del código como razón. Métricas de `16` §4.2 emitidas. `gs-ephemeral` añade `get_counter` con caso en la suite común (la implementación Redis/Valkey de T-F6-01 debe ejecutarla). Pruebas: 16 de integración extremo a extremo en `crates/gs-stream/tests/connection_test.rs` contra un listener real con `tokio-tungstenite`, más unitarias de negociación, codec, configuración, cierres y contador de conexiones. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (332 pruebas, 0 fallos; base en `main`: 299 → +33), `cargo run -p geostream-tools -- all`: todos OK.
+- Notas: se abre **DR-20261013-01** porque montar el router en `geostream serve` exige que el binario cargue `ServerConfig` y `04` §4.1 (codificado en `tools/check_crate_deps`) no le permite depender de `gs-config`. El comportamiento queda completo y probado a nivel de librería, que es exactamente lo que `serve` montará. `gs-api` se usa como dev-dependency de `gs-stream` solo en la suite de integración (el checker gobierna dependencias normales, igual que `gs-service` usa `sqlx` para probar).
 
 ### 2026-10-13 — T-F4-01 — Tickets de stream: `POST /v1/stream/tickets` y canje atómico
 - Autor/agente: Angel Nereira (con agente de código).

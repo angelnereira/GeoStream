@@ -11,5 +11,22 @@ gs-service.workspace = true
 gs-geo.workspace = true
 axum.workspace = true
 futures.workspace = true
+pbjson-types.workspace = true
+prost.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time = { workspace = true, features = ["formatting"] }
 tokio.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true
+metrics.workspace = true
+
+[dev-dependencies]
+# Test-only: `gs-api` is the router the connection hangs from, and the dependency checker of
+# tools/ only governs normal dependencies (docs/04 §4.1 stays intact: gs-stream never depends
+# on gs-api in production code, exactly as gs-service's suite uses sqlx only to test).
+gs-api.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio-tungstenite.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true

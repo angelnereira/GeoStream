@@ -61,11 +61,11 @@ Reglas:
 | FR-LOC-007 | MUST | F4 | Rate limit de publicación | — | pendiente |
 | FR-LOC-008 | MUST | F4 | Sequence floor | — | pendiente |
 | FR-LOC-009 | MUST | F8 | Ingesta HTTP por lotes | — | pendiente |
-| FR-STR-001 | MUST | F4 | Endpoint y handshake | — | pendiente |
+| FR-STR-001 | MUST | F4 | Endpoint y handshake | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-api/src/stream.rs` | cumplido |
 | FR-STR-002 | MUST | F4 | Suscripción | — | pendiente |
 | FR-STR-003 | MUST | F4 | Distribución autorizada | — | pendiente |
 | FR-STR-004 | MUST | F4 | Acks de publicación | — | pendiente |
-| FR-STR-005 | MUST | F4 | Heartbeat, inactividad y cierre | — | pendiente |
+| FR-STR-005 | MUST | F4 | Heartbeat, inactividad y cierre | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-stream/src/close_codes.rs` | cumplido |
 | FR-STR-006 | MUST | F4 | Backpressure | — | pendiente |
 | FR-STR-007 | MUST | F4 | Una conexión por dispositivo | — | pendiente |
 | FR-STR-008 | MUST | F4 | Revocación en vivo | — | pendiente |

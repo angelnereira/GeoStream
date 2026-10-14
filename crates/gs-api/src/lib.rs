@@ -14,6 +14,7 @@ pub mod rate_limit;
 pub mod router;
 pub mod security;
 pub mod sessions;
+pub mod stream;
 pub mod stream_tickets;
 pub mod subjects;
 pub mod tokens;
@@ -48,6 +49,10 @@ pub use security::{
     request_id_from,
 };
 pub use sessions::{SessionApiState, StreamTicketConfig, sessions_router};
+pub use stream::{
+    AcceptedWebSocket, ConnectionCounter, SessionFuture, SessionRunner, StreamApiState,
+    TICKET_PARAM, stream_route, stream_upgrade_handler,
+};
 pub use stream_tickets::{
     StreamTicketResponse, create_stream_ticket_handler, stream_tickets_routes,
 };

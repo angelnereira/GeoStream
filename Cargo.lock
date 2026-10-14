@@ -1805,10 +1805,20 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "futures",
+ "gs-api",
  "gs-geo",
  "gs-service",
+ "metrics",
+ "pbjson-types",
+ "prost",
+ "reqwest",
+ "serde_json",
+ "thiserror",
+ "time",
  "tokio",
+ "tokio-tungstenite 0.30.0",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]

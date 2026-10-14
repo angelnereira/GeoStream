@@ -8,6 +8,7 @@ pub mod location;
 pub mod membership;
 pub mod pagination;
 pub mod session;
+pub mod subprotocol;
 
 pub use error::*;
 pub use ids::*;
@@ -19,3 +20,6 @@ pub use pagination::{
     filters_fingerprint, next_cursor_for, resolve_cursor, validate_limit,
 };
 pub use session::*;
+pub use subprotocol::{
+    SUBPROTOCOL_JSON, SUBPROTOCOL_PROTO, Subprotocol, negotiate as negotiate_subprotocol,
+};

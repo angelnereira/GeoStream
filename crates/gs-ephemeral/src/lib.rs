@@ -88,6 +88,12 @@ pub trait EphemeralStore: Send + Sync {
     /// Reads the membership version of a session.
     async fn get_membership_version(&self, key: &str) -> Result<Option<u64>, EphemeralError>;
 
+    /// Reads a decimal counter key, returning `None` when absent or expired.
+    ///
+    /// Used for `{p}:devseq:{device}` (the sequence floor of `docs/08` §6.2) and for any
+    /// counter of `docs/11` §3 that must be read without being modified.
+    async fn get_counter(&self, key: &str) -> Result<Option<u64>, EphemeralError>;
+
     /// Increments the membership version of a session and returns the new value.
     async fn increment_membership_version(&self, key: &str) -> Result<u64, EphemeralError>;
 
@@ -343,6 +349,15 @@ impl EphemeralStore for InMemoryEphemeralStore {
         }
     }
 
+    async fn get_counter(&self, key: &str) -> Result<Option<u64>, EphemeralError> {
+        let now = OffsetDateTime::now_utc();
+        self.remove_if_expired(key, now);
+        match self.entries.get(key) {
+            Some(entry) => Ok(Some(parse_counter(entry.bytes.as_slice())?)),
+            None => Ok(None),
+        }
+    }
+
     async fn increment_membership_version(&self, key: &str) -> Result<u64, EphemeralError> {
         let now = OffsetDateTime::now_utc();
         self.remove_if_expired(key, now);
@@ -499,6 +514,10 @@ impl<T: EphemeralStore + ?Sized> EphemeralStore for Arc<T> {
 
     async fn increment_membership_version(&self, key: &str) -> Result<u64, EphemeralError> {
         (**self).increment_membership_version(key).await
+    }
+
+    async fn get_counter(&self, key: &str) -> Result<Option<u64>, EphemeralError> {
+        (**self).get_counter(key).await
     }
 
     async fn set_ticket(

@@ -14,6 +14,7 @@ async fn suite<S: EphemeralStore>(store: &S) {
     presence_ownership(store).await;
     single_use_ticket(store).await;
     membership_version(store).await;
+    counter_read(store).await;
     rate_limit_counter(store).await;
 }
 
@@ -150,6 +151,34 @@ async fn membership_version<S: EphemeralStore>(store: &S) {
             .await
             .expect("get"),
         Some(2)
+    );
+}
+
+async fn counter_read<S: EphemeralStore>(store: &S) {
+    // covers: docs/08 §6.2 (`sequence_floor`), docs/11 §3
+    assert_eq!(
+        store.get_counter("suite:devseq").await.expect("get empty"),
+        None
+    );
+    assert_eq!(
+        store.set_if_greater("suite:devseq", 41).await.expect("set"),
+        41
+    );
+    assert_eq!(
+        store.get_counter("suite:devseq").await.expect("get"),
+        Some(41)
+    );
+    // Reading must not modify the value.
+    assert_eq!(
+        store.get_counter("suite:devseq").await.expect("get again"),
+        Some(41)
+    );
+    assert_eq!(
+        store
+            .get_counter("suite:devseq")
+            .await
+            .expect("get once more"),
+        Some(41)
     );
 }
 

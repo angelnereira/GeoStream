@@ -74,4 +74,5 @@ pub use gs_auth;
 pub use gs_bus;
 pub use gs_domain;
 pub use gs_ephemeral;
+pub use gs_protocol;
 pub use gs_store;
