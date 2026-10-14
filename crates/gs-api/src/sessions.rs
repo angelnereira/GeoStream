@@ -64,8 +64,33 @@ pub struct SessionApiState {
     pub bus: Arc<InMemoryBus>,
     /// Ephemeral key prefix (`GS_REDIS_KEY_PREFIX`, default `gs`).
     pub redis_key_prefix: String,
+    /// Stream ticket parameters (docs/06 §5, docs/17 §2.4 and §2.6).
+    pub stream_ticket: StreamTicketConfig,
     /// Rate limit configuration (docs/07 §8, docs/17 §2.5).
     pub rate_limit_config: RateLimitConfig,
+}
+
+/// Stream ticket configuration: ticket TTL, application connection age and the public
+/// base URL that builds `stream_url` (docs/06 §5, docs/17 §2.4 and §2.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamTicketConfig {
+    /// Life of a ticket (`GS_TICKET_TTL_S`).
+    pub ttl: Duration,
+    /// Maximum life of an application connection (`GS_STREAM_APP_MAX_CONNECTION_AGE_S`).
+    pub app_max_connection_age: Duration,
+    /// Public base URL of the deployment (`GS_PUBLIC_BASE_URL`).
+    pub public_base_url: String,
+}
+
+impl Default for StreamTicketConfig {
+    /// Defaults of `docs/17` §2.4 and §2.6.
+    fn default() -> Self {
+        Self {
+            ttl: Duration::from_secs(30),
+            app_max_connection_age: Duration::from_secs(3600),
+            public_base_url: "http://localhost:8080".to_string(),
+        }
+    }
 }
 
 /// Principal authenticated for a session request.
@@ -245,6 +270,7 @@ pub fn sessions_router(state: SessionApiState) -> axum::Router {
         .merge(crate::members::members_routes())
         .merge(crate::invitations::invitations_routes())
         .merge(crate::subjects::subjects_routes())
+        .merge(crate::stream_tickets::stream_tickets_routes())
         .with_state(state)
 }
 

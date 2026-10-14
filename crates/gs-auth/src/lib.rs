@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod jwt;
 pub mod scopes;
 pub mod signing_key;
+pub mod ticket;
 
 pub use api_key::{
     ApiKeyError, CREDENTIAL_PREFIX, KEY_ID_HEX_LEN, SECRET_BYTES, SECRET_LEN, format_credential,
@@ -27,6 +28,10 @@ pub use scopes::{
 pub use signing_key::{
     GeneratedSigningKey, PRIVATE_KEY_MODE, PRIVATE_KEY_SUFFIX, PUBLIC_KEY_SUFFIX, SigningKeyError,
     generate as generate_signing_key, parse_private_pem, parse_public_pem, validate_kid,
+};
+pub use ticket::{
+    TICKET_LEN, TICKET_PREFIX, TICKET_SECRET_BYTES, TICKET_SECRET_LEN, TicketError,
+    generate_ticket, hash_ticket, hash_ticket_hex, validate_ticket,
 };
 
 // Effective tenant limits (docs/17_CONFIGURATION.md §4) are enforced by this crate when

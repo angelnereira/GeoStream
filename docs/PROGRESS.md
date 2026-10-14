@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F4-01 — Tickets: `POST /v1/stream/tickets` y canje atómico en el upgrade | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-auth`, `crates/gs-service`, `crates/gs-api` | FR-AUTH-006; leer `06` §5, `08` §3, `11` §3 |
+| _ninguna_ | | | | T-F4-01 completada; siguiente: T-F4-02 (upgrade WebSocket, que consume `redeem_stream_ticket`) |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -33,8 +33,8 @@
 | F0 | completada | 2026-10-12 | CI verde (etapas 1–5), geostream version, gs-protocol roundtrip, geostream-tools (Rust puro), deploy dev, nombres verificados |
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
-| F3 | pendiente | | |
-| F4 (M1) | pendiente | | |
+| F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
+| F4 (M1) | en curso | | T-F4-01 (tickets de stream) completada; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -47,6 +47,14 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F4-01 — Tickets de stream: `POST /v1/stream/tickets` y canje atómico
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada (el cableado del handler de upgrade al WebSocket es T-F4-02).
+- Rama: `feat/T-F4-01-stream-tickets`.
+- Requisitos: FR-AUTH-006.
+- Evidencia: `gs-auth::ticket` genera y valida el formato `^gst_[A-Za-z0-9_-]{43}$` (32 bytes de CSPRNG en base64url sin padding) y expone el digest SHA-256; `gs-service::tickets` emite el ticket guardándolo **solo** como digest en `{p}:ticket:{sha256_hex}` con TTL `GS_TICKET_TTL_S`, construye el `TicketGrant` (`principal_kind`, `tenant_id`, `application_id`, `subject_id`/`device_id` o `api_key_id`, scopes, `auth_expires_at` = `exp` del token de dispositivo o `now + GS_STREAM_APP_MAX_CONNECTION_AGE_S` para aplicación) y lo canjea con get-and-delete atómico; `verify_ticket_principal_state` revalida tenant y aplicación `ACTIVE` (403 `ACCOUNT_DISABLED`, `08` §3). `gs-api::stream_tickets` publica `POST /v1/stream/tickets` → 201 `StreamTicketResponse` (`ticket`, `expires_at`, `stream_url` desde `GS_PUBLIC_BASE_URL`) con `Cache-Control: no-store`, `X-Request-Id` y exigencia del scope `stream:connect` para ambos principales. Pruebas: 5 unitarias en `gs-auth`, 9 de integración contra PostgreSQL real en `crates/gs-service/tests/tickets_test.rs` (uso único, expiración por TTL con espera real, ventana de autenticación vencida, ticket desconocido o malformado, tenant/aplicación deshabilitados, clave por digest, roundtrip del grant) y 4 HTTP en `crates/gs-api/tests/stream_ticket_test.rs` con validación de todas las respuestas contra el contrato OpenAPI. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (299 pruebas, 0 fallos), `cargo run -p geostream-tools -- all`: todos OK. Refactor sin cambio de comportamiento: el cargador del contrato OpenAPI de `conformance_test.rs` se extrajo a `tests/common/spec.rs` para reutilizarlo desde la suite nueva (`docs/18` §5).
+- Notas: `redeem_stream_ticket` + `verify_ticket_principal_state` son la pieza que consume el upgrade; su cableado en el handler WebSocket (negociación de subprotocolo, límites, códigos de cierre) pertenece a T-F4-02. Sigue pendiente el montaje del router REST completo en `geostream serve` (hoy solo se sirven `/health/*`), necesario para los escenarios de F4.
 
 ### 2026-10-13 — T-F3-11 — Conformidad OpenAPI, matriz de autorización y aislamiento de tenants
 - Autor/agente: Angel Nereira (con agente de código).

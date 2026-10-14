@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::http::header;
-use gs_api::{RateLimitConfig, SessionApiState, sessions_router};
+use gs_api::{RateLimitConfig, SessionApiState, StreamTicketConfig, sessions_router};
 use gs_service::admin::{create_api_key, create_application, create_tenant};
 use gs_service::auth::DeviceTokenKeys;
 use gs_service::gs_auth::crypto::{CryptoRotator, DataCipher};
@@ -157,6 +157,7 @@ async fn setup_fixture(rate_limit_config: RateLimitConfig) -> RateLimitFixture {
         ephemeral: gs_service::InMemoryEphemeralStore::new(),
         bus: gs_service::InMemoryBus::new(),
         redis_key_prefix: format!("gs:rl:{}", uuid::Uuid::new_v4().simple()),
+        stream_ticket: StreamTicketConfig::default(),
         rate_limit_config,
     };
 

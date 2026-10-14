@@ -7,172 +7,26 @@
 //! converted to JSON by `redocly bundle` (docs/19 §6).
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+mod common;
+
+use std::collections::BTreeSet;
 use std::net::TcpListener;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gs_api::{RateLimitConfig, SessionApiState, sessions_router};
+use common::spec::{Spec, load_spec};
+use gs_api::{RateLimitConfig, SessionApiState, StreamTicketConfig, sessions_router};
 use gs_service::admin::{create_api_key, create_application, create_tenant};
 use gs_service::auth::DeviceTokenKeys;
 use gs_service::gs_auth::crypto::{CryptoRotator, DataCipher};
 use gs_service::gs_auth::{generate_signing_key, parse_private_pem};
 use gs_service::migrate::{connect_pool, run_migrations};
 use gs_service::tokens::{MintedToken, TokenRequest, TokenTtlBounds, mint_device_token};
-use jsonschema::Validator;
 use serde_json::{Value, json};
-
-// ---------------------------------------------------------------------------
-// OpenAPI specification
-// ---------------------------------------------------------------------------
 
 /// Operations served by the router under test (the `mintToken` router and the
 /// stream operations are covered by their own suites).
 const OUT_OF_ROUTER: &[&str] = &["mintToken", "healthLive", "healthReady"];
-
-struct Spec {
-    doc: Value,
-    /// `operationId` → (`METHOD`, path template).
-    ops: BTreeMap<String, (String, String)>,
-    validators: Mutex<HashMap<String, Arc<Validator>>>,
-}
-
-fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("workspace root")
-}
-
-/// Converts the YAML contract to JSON with Redocly when the bundle is missing
-/// or older than the contract (docs/19 §6: tests read JSON, no YAML parser).
-fn load_spec() -> &'static Spec {
-    static SPEC: OnceLock<Spec> = OnceLock::new();
-    SPEC.get_or_init(|| {
-        let root = workspace_root();
-        let yaml = root.join("contracts/openapi/geostream.v1.yaml");
-        let json_path = std::env::var("GS_OPENAPI_JSON")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| root.join("target/openapi/geostream.v1.json"));
-        let stale = match (std::fs::metadata(&json_path), std::fs::metadata(&yaml)) {
-            (Ok(j), Ok(y)) => j.modified().expect("mtime") < y.modified().expect("mtime"),
-            _ => true,
-        };
-        if stale {
-            std::fs::create_dir_all(json_path.parent().expect("parent")).expect("mkdir");
-            let status = std::process::Command::new("npx")
-                .args(["--yes", "@redocly/cli@2.62.1", "bundle"])
-                .arg(&yaml)
-                .args(["--ext", "json", "-o"])
-                .arg(&json_path)
-                .current_dir(&root)
-                .status()
-                .expect("run `npx @redocly/cli bundle` (requires Node.js)");
-            assert!(status.success(), "redocly bundle failed");
-        }
-        let doc: Value =
-            serde_json::from_slice(&std::fs::read(&json_path).expect("read openapi json"))
-                .expect("openapi json");
-        let mut ops = BTreeMap::new();
-        for (path, item) in doc["paths"].as_object().expect("paths") {
-            for (method, op) in item.as_object().expect("path item") {
-                if let Some(id) = op.get("operationId").and_then(Value::as_str) {
-                    ops.insert(id.to_string(), (method.to_uppercase(), path.clone()));
-                }
-            }
-        }
-        Spec {
-            doc,
-            ops,
-            validators: Mutex::new(HashMap::new()),
-        }
-    })
-}
-
-impl Spec {
-    fn operation(&self, id: &str) -> &Value {
-        let (method, path) = self
-            .ops
-            .get(id)
-            .unwrap_or_else(|| panic!("unknown op {id}"));
-        &self.doc["paths"][path][method.to_lowercase()]
-    }
-
-    /// Follows `$ref` chains inside the document.
-    fn resolve<'a>(&'a self, value: &'a Value) -> &'a Value {
-        let mut current = value;
-        while let Some(r) = current.get("$ref").and_then(Value::as_str) {
-            let pointer = r.strip_prefix('#').expect("local ref");
-            current = self
-                .doc
-                .pointer(pointer)
-                .unwrap_or_else(|| panic!("dangling $ref {r}"));
-        }
-        current
-    }
-
-    fn validator(&self, schema: &Value) -> Arc<Validator> {
-        let mut root = schema.clone();
-        root.as_object_mut()
-            .expect("schema object")
-            .insert("components".into(), self.doc["components"].clone());
-        let key = serde_json::to_string(schema).expect("schema json");
-        let mut cache = self.validators.lock().expect("lock");
-        cache
-            .entry(key)
-            .or_insert_with(|| Arc::new(jsonschema::validator_for(&root).expect("schema")))
-            .clone()
-    }
-
-    fn assert_valid(&self, schema: &Value, instance: &Value, what: &str) {
-        let validator = self.validator(schema);
-        let errors: Vec<String> = validator
-            .iter_errors(instance)
-            .map(|e| format!("{e} (at {})", e.instance_path()))
-            .collect();
-        assert!(
-            errors.is_empty(),
-            "{what} does not conform to OpenAPI: {errors:?}\nbody: {instance}"
-        );
-    }
-
-    fn check_request(&self, op_id: &str, body: &Value) {
-        let body_spec = self
-            .resolve(&self.operation(op_id)["requestBody"])
-            .get("content")
-            .and_then(|c| c.get("application/json"))
-            .and_then(|c| c.get("schema"))
-            .unwrap_or_else(|| panic!("{op_id} has no JSON request body"));
-        self.assert_valid(body_spec, body, &format!("request of {op_id}"));
-    }
-
-    fn check_response(&self, op_id: &str, status: u16, content_type: &str, body: &Value) {
-        let responses = &self.operation(op_id)["responses"];
-        let spec = responses
-            .get(status.to_string())
-            .or_else(|| responses.get("default"))
-            .unwrap_or_else(|| panic!("{op_id}: status {status} is not documented in OpenAPI"));
-        let spec = self.resolve(spec);
-        let Some(content) = spec.get("content").and_then(Value::as_object) else {
-            assert!(
-                body.is_null(),
-                "{op_id} {status}: body but no content in spec"
-            );
-            return;
-        };
-        let (media, media_spec) = content
-            .iter()
-            .find(|(media, _)| content_type.starts_with(media.as_str()))
-            .unwrap_or_else(|| {
-                panic!("{op_id} {status}: content-type '{content_type}' not in spec {content:?}")
-            });
-        let schema = media_spec
-            .get("schema")
-            .unwrap_or_else(|| panic!("{op_id} {status} {media}: no schema"));
-        self.assert_valid(schema, body, &format!("response {status} of {op_id}"));
-    }
-}
 
 // ---------------------------------------------------------------------------
 // HTTP driver with contract validation and coverage tracking
@@ -207,7 +61,7 @@ impl Api {
         body: Option<Value>,
         headers: &[(&str, &str)],
     ) -> Reply {
-        let (method, template) = self.spec.ops.get(op_id).expect("op").clone();
+        let (method, template) = self.spec.operations().get(op_id).expect("op").clone();
         let mut path = template;
         for (name, value) in params {
             path = path.replace(&format!("{{{name}}}"), value);
@@ -484,6 +338,7 @@ async fn new_world() -> World {
         ephemeral: gs_service::InMemoryEphemeralStore::new(),
         bus: gs_service::InMemoryBus::new(),
         redis_key_prefix: format!("gs:conf:{suffix}"),
+        stream_ticket: StreamTicketConfig::default(),
         rate_limit_config: RateLimitConfig {
             device_rpm: 1_000_000,
             app_rpm: 1_000_000,
@@ -2172,7 +2027,7 @@ async fn world_victim(w: &World) -> MintedToken {
 fn assert_operation_coverage(api: &Api) {
     let covered = api.covered.lock().expect("lock").clone();
     let mut missing = Vec::new();
-    for op_id in api.spec.ops.keys() {
+    for op_id in api.spec.operations().keys() {
         let phase = api.spec.operation(op_id)["x-gs-phase"]
             .as_str()
             .unwrap_or("");
@@ -2453,7 +2308,7 @@ async fn test_nfr_sec_004_cross_tenant_matrix_covers_every_operation() {
     exercised.insert("createSession");
     let expected: BTreeSet<&str> = api
         .spec
-        .ops
+        .operations()
         .keys()
         .filter(|id| {
             matches!(api.spec.operation(id)["x-gs-phase"].as_str(), Some("F3"))

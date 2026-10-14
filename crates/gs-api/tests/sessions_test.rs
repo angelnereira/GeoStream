@@ -5,7 +5,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gs_api::{REQUEST_ID_HEADER, SessionApiState, sessions_router};
+use gs_api::{REQUEST_ID_HEADER, SessionApiState, StreamTicketConfig, sessions_router};
 use gs_service::admin::{create_api_key, create_application, create_tenant};
 use gs_service::auth::DeviceTokenKeys;
 use gs_service::gs_auth::crypto::{CryptoRotator, DataCipher};
@@ -155,6 +155,7 @@ async fn setup_fixture() -> TestFixture {
         ephemeral: gs_service::InMemoryEphemeralStore::new(),
         bus: gs_service::InMemoryBus::new(),
         redis_key_prefix: "gs".to_string(),
+        stream_ticket: StreamTicketConfig::default(),
         rate_limit_config: gs_api::RateLimitConfig::default(),
     };
 

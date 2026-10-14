@@ -9,6 +9,7 @@ pub mod invitations;
 pub mod members;
 pub mod sessions;
 pub mod subjects;
+pub mod tickets;
 pub mod tokens;
 pub mod migrate {
     pub use gs_store::PgPool;
@@ -55,6 +56,11 @@ pub use subjects::{
     DeactivateDeviceParams, DeviceResource, SubjectListResource, SubjectResource,
     SubjectUseCaseError, deactivate_device, find_subject_by_external_id, get_device, get_subject,
     revoke_subject_tokens,
+};
+pub use tickets::{
+    IssuedTicket, STREAM_CONNECT_SCOPE, TicketCaller, TicketConfig, TicketError, TicketGrant,
+    TicketPrincipalKind, grant_has_scope, issue_stream_ticket, redeem_stream_ticket, ticket_key,
+    verify_ticket_principal_state,
 };
 pub use tokens::{
     MintedToken, REQUIRED_SCOPE, TokenError, TokenRequest, TokenResponse, TokenTtlBounds,

@@ -5,7 +5,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gs_api::{SessionApiState, sessions_router};
+use gs_api::{SessionApiState, StreamTicketConfig, sessions_router};
 use gs_service::admin::{
     create_api_key, create_application, create_tenant, set_application_enabled_with_bus,
     set_tenant_enabled_with_bus,
@@ -146,6 +146,7 @@ async fn setup_fixture() -> ApiFixture {
         ephemeral,
         bus: bus.clone(),
         redis_key_prefix: "gs".into(),
+        stream_ticket: StreamTicketConfig::default(),
         rate_limit_config: gs_api::RateLimitConfig::default(),
     };
 
