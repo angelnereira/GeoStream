@@ -323,6 +323,9 @@ async fn member_status<E: EphemeralStore + ?Sized>(
 }
 
 /// Reads `{p}:snap:{session}:{member}`, the live snapshot of a member (docs/11 §3).
+///
+/// The stored value is the update that was accepted live; it is delivered as
+/// `DELIVERY_KIND_SNAPSHOT` because that is what it is when read (docs/11 §3).
 async fn read_snapshot<E: EphemeralStore + ?Sized>(
     ephemeral: &E,
     key_prefix: &str,
@@ -331,7 +334,9 @@ async fn read_snapshot<E: EphemeralStore + ?Sized>(
 ) -> Option<LocationUpdate> {
     let key = format!("{key_prefix}:snap:{session_id}:{member_id}");
     let bytes = ephemeral.get_snapshot(&key).await.ok().flatten()?;
-    gs_protocol::LocationUpdate::decode(bytes.as_slice()).ok()
+    let mut update = gs_protocol::LocationUpdate::decode(bytes.as_slice()).ok()?;
+    update.delivery = gs_protocol::DeliveryKind::Snapshot as i32;
+    Some(update)
 }
 
 /// Returns true when the capabilities allow reading a session (docs/06 §8.3).

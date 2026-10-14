@@ -28,11 +28,13 @@ use gs_service::gs_protocol::ErrorCode as ProtoErrorCode;
 use gs_service::gs_protocol::client_message::Body as ClientBody;
 use gs_service::gs_protocol::server_message::Body as ServerBody;
 use gs_service::gs_protocol::{
-    ClientHello, ClientMessage, Heartbeat, HeartbeatAck, PrincipalKind, ServerHello, ServerMessage,
-    StreamError,
+    ClientHello, ClientMessage, Heartbeat, HeartbeatAck, LocationUpdate, PrincipalKind, PublishAck,
+    PublishLocation, ServerHello, ServerMessage, StreamError, Subscribe, Unsubscribe,
 };
-use gs_service::gs_protocol::{Subscribe, Unsubscribe};
 use gs_service::gs_store::PgPool;
+use gs_service::publishing::{
+    PublishCaller, PublishError, PublishParams, PublishThrottle, publish_ack_for,
+};
 use gs_service::subscriptions::{SubscribeError, SubscribeParams, SubscribePrincipal};
 use gs_service::tickets::{TicketGrant, TicketPrincipalKind};
 use gs_service::{InMemoryBus, InMemoryEphemeralStore};
@@ -149,6 +151,8 @@ pub struct Connection {
     principal: PrincipalIdentity,
     /// Subscriptions of this connection (docs/08 §6.3).
     subscriptions: SubscriptionSet,
+    /// Publish token buckets per (connection, session) (docs/08 §7.4).
+    throttles: std::collections::HashMap<SessionId, PublishThrottle>,
 }
 
 impl Connection {
@@ -190,6 +194,7 @@ impl Connection {
             inbound_window_started: Instant::now(),
             principal,
             subscriptions: SubscriptionSet::new(),
+            throttles: std::collections::HashMap::new(),
         })
     }
 
@@ -410,9 +415,13 @@ impl Connection {
                 self.handle_unsubscribe(socket, request_id, unsubscribe)
                     .await;
             }
-            // Publishing and `AuthRefresh` belong to T-F4-05 and T-F4-09; until they land
-            // the client gets an explicit protocol error (docs/08 §4).
-            Some(ClientBody::PublishLocation(_)) | Some(ClientBody::AuthRefresh(_)) => {
+            Some(ClientBody::PublishLocation(publish)) => {
+                self.handle_publish(socket, state, request_id, publish)
+                    .await;
+            }
+            // `AuthRefresh` belongs to T-F4-09; until it lands the client gets an explicit
+            // protocol error (docs/08 §4).
+            Some(ClientBody::AuthRefresh(_)) => {
                 self.reply_protocol_error(
                     socket,
                     request_id,
@@ -831,6 +840,234 @@ impl Connection {
             body: Some(ServerBody::Error(error)),
         };
         self.send(socket, &reply).await;
+    }
+
+    /// Publishes a batch of samples with the preconditions and the per-sample algorithm of
+    /// docs/08 §6.4 and docs/09 §4.
+    ///
+    /// The connection owns the token bucket of (connection, session), so the rate limit of
+    /// docs/08 §7.4 is enforced per connection and not per process.
+    async fn handle_publish(
+        &mut self,
+        socket: &mut WebSocket,
+        state: &StreamState,
+        request_id: u64,
+        publish: PublishLocation,
+    ) {
+        let session_id = match SessionId::from_str(&publish.session_id) {
+            Ok(session_id) => session_id,
+            Err(_) => {
+                self.reply_publish_error(
+                    socket,
+                    request_id,
+                    &publish.session_id,
+                    ProtoErrorCode::ValidationFailed,
+                    0,
+                    "malformed session id",
+                )
+                .await;
+                return;
+            }
+        };
+
+        // An application principal may not publish (docs/06 §8.3).
+        if self.is_application() {
+            self.reply_publish_error(
+                socket,
+                request_id,
+                &publish.session_id,
+                ProtoErrorCode::PermissionDenied,
+                0,
+                "application principals cannot publish",
+            )
+            .await;
+            return;
+        }
+
+        let (subject_id, device_id) = match (self.grant.subject_id, self.grant.device_id) {
+            (Some(subject_id), Some(device_id)) => (subject_id, device_id),
+            _ => {
+                self.reply_publish_error(
+                    socket,
+                    request_id,
+                    &publish.session_id,
+                    ProtoErrorCode::PermissionDenied,
+                    0,
+                    "device credentials required",
+                )
+                .await;
+                return;
+            }
+        };
+
+        let (policy, publish_burst, publish_interval) = self.location_policy(state).await;
+        let throttle = self.throttles.entry(session_id).or_insert_with(|| {
+            PublishThrottle::new(publish_burst, publish_interval, OffsetDateTime::now_utc())
+        });
+
+        match gs_service::publishing::publish_batch(PublishParams {
+            pool: &state.pool,
+            ephemeral: state.ephemeral.as_ref(),
+            key_prefix: &state.redis_key_prefix,
+            tenant_id: self.grant.tenant_id,
+            session_id,
+            caller: PublishCaller {
+                subject_id,
+                device_id,
+            },
+            samples: &publish.samples,
+            policy,
+            throttle,
+            now: OffsetDateTime::now_utc(),
+        })
+        .await
+        {
+            Ok(outcome) => {
+                // The request is answered first; the accepted updates follow in the order they
+                // were enqueued (docs/08 §7.6).
+                let message = ServerMessage {
+                    request_id,
+                    body: Some(ServerBody::PublishAck(publish_ack_for(
+                        &publish.session_id,
+                        &outcome,
+                    ))),
+                };
+                if !self.send(socket, &message).await {
+                    self.close(CLOSE_SLOW_CONSUMER);
+                    return;
+                }
+                self.deliver_accepted(socket, session_id, &outcome.accepted)
+                    .await;
+            }
+            Err(error) => {
+                let code = match error.error_code() {
+                    ErrorCode::ValidationFailed => ProtoErrorCode::ValidationFailed,
+                    ErrorCode::PayloadTooLarge => ProtoErrorCode::PayloadTooLarge,
+                    ErrorCode::PermissionDenied => ProtoErrorCode::PermissionDenied,
+                    ErrorCode::RateLimited => ProtoErrorCode::RateLimited,
+                    ErrorCode::NotFound => ProtoErrorCode::NotFound,
+                    ErrorCode::MemberRevoked => ProtoErrorCode::MemberRevoked,
+                    ErrorCode::NotPublisher => ProtoErrorCode::NotPublisher,
+                    ErrorCode::NotSharing => ProtoErrorCode::NotSharing,
+                    ErrorCode::SessionClosed => ProtoErrorCode::SessionClosed,
+                    ErrorCode::SessionExpired => ProtoErrorCode::SessionExpired,
+                    ErrorCode::TemporarilyUnavailable => ProtoErrorCode::TemporarilyUnavailable,
+                    _ => ProtoErrorCode::Internal,
+                };
+                let retry_after_ms = match &error {
+                    PublishError::RateLimited { retry_after_ms }
+                    | PublishError::TemporarilyUnavailable { retry_after_ms } => *retry_after_ms,
+                    _ => 0,
+                };
+                self.reply_publish_error(
+                    socket,
+                    request_id,
+                    &publish.session_id,
+                    code,
+                    retry_after_ms,
+                    &error.to_string(),
+                )
+                .await;
+            }
+        }
+    }
+
+    /// Reads the tenant policy that shapes the limits of publication (docs/17 §4).
+    ///
+    /// Returns the location policy of the pure validation and the two throttle parameters
+    /// (`publish_burst` and `min_publish_interval_ms`), which live outside the location policy
+    /// because they belong to the connection and not to the sample.
+    async fn location_policy(
+        &self,
+        state: &StreamState,
+    ) -> (
+        gs_service::gs_domain::location::LocationPolicy,
+        u32,
+        Duration,
+    ) {
+        let tenant = gs_service::gs_store::repos::TenantRepository::get_by_id(
+            &state.pool,
+            self.grant.tenant_id,
+        )
+        .await;
+        let policy = match tenant {
+            Ok(Some(tenant)) => {
+                gs_service::gs_auth::TenantPolicy::from_json_value(tenant.policy).ok()
+            }
+            _ => None,
+        };
+        let policy = policy.unwrap_or_default();
+        let location = gs_service::gs_domain::location::LocationPolicy {
+            max_horizontal_accuracy_m: policy.max_horizontal_accuracy_m,
+            reject_null_island: policy.reject_null_island,
+            // `GS_LOCATION_MAX_FUTURE_SKEW_MS` and `GS_LOCATION_MAX_EVENT_AGE_MS` are server
+            // parameters; the connection reports them in `limits` (docs/08 §6.1).
+            max_future_skew_ms: self.config.max_future_skew_ms,
+            max_event_age_ms: self.config.max_event_age.as_millis() as i64,
+            max_samples_per_publish: policy.max_samples_per_publish,
+        };
+        (
+            location,
+            policy.publish_burst,
+            Duration::from_millis(policy.min_publish_interval_ms),
+        )
+    }
+
+    /// Delivers the accepted updates to the subscriptions of this connection, including the
+    /// one of the publisher itself (docs/08 §7.3).
+    ///
+    /// The fan-out to the other connections of the session is T-F4-06; a publisher subscribed
+    /// to its own session already sees its samples as everybody else does.
+    async fn deliver_accepted(
+        &mut self,
+        socket: &mut WebSocket,
+        session_id: SessionId,
+        accepted: &[LocationUpdate],
+    ) {
+        if accepted.is_empty() {
+            return;
+        }
+        let subscribed = self
+            .subscriptions
+            .get(session_id)
+            .is_some_and(|subscription| subscription.is_active());
+        if !subscribed {
+            return;
+        }
+        for update in accepted {
+            let message = ServerMessage {
+                request_id: 0,
+                body: Some(ServerBody::LocationUpdate(update.clone())),
+            };
+            if !self.send(socket, &message).await {
+                self.close(CLOSE_SLOW_CONSUMER);
+                return;
+            }
+        }
+    }
+
+    /// Answers a publication error as a `PublishAck` with `request_error` (docs/08 §6.4).
+    async fn reply_publish_error(
+        &mut self,
+        socket: &mut WebSocket,
+        request_id: u64,
+        session_id: &str,
+        code: ProtoErrorCode,
+        retry_after_ms: u32,
+        message: &str,
+    ) {
+        let ack = PublishAck {
+            session_id: session_id.to_string(),
+            request_error: code as i32,
+            results: Vec::new(),
+            retry_after_ms,
+        };
+        let reply = ServerMessage {
+            request_id,
+            body: Some(ServerBody::PublishAck(ack)),
+        };
+        self.send(socket, &reply).await;
+        let _ = message;
     }
 
     /// Marks the connection closed with a code (docs/08 §5).

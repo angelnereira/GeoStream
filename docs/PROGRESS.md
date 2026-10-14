@@ -35,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) y T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado) y T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -48,6 +48,14 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-14 — T-F4-05 — Publicación: precondiciones, validación, CAS de secuencia, snapshot, rate limit y acks
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada (el fan-out multi-conexión es T-F4-06).
+- Rama: `feat/T-F4-05-publishing`.
+- Requisitos: FR-LOC-001, FR-LOC-002, FR-LOC-003, FR-LOC-004, FR-LOC-005, FR-LOC-006, FR-LOC-007, FR-LOC-008, FR-STR-004.
+- Evidencia: `gs-service::publishing` evalúa las precondiciones de `08` §6.4 en el orden documentado (lote vacío o no creciente → `VALIDATION_FAILED`; sobredimensionado → `PAYLOAD_TOO_LARGE`; aplicación → `PERMISSION_DENIED`; bucket → `RATE_LIMITED` con `retry_after_ms`; sin membresía → `NOT_FOUND`; revocada → `MEMBER_REVOKED`; sin `publish` → `PERMISSION_DENIED`; sesión cerrada/vencida → `SESSION_*`; sin compartir → `NOT_SHARING`; otro dispositivo → `NOT_PUBLISHER`; efímero caído → `TEMPORARILY_UNAVAILABLE`) y aplica a cada muestra el algoritmo de `09` §4 con CAS atómico sobre `{p}:seq:{session}:{device}` (`current = 0` = sin expectativa, que es la semántica documentada). `received_at` lo asigna el servidor y la muestra se entrega tal cual (FR-LOC-005/006); cada aceptada refresca `{p}:snap:{session}:{member}` y eleva `{p}:devseq:{device}` con `set_if_greater`, que alimenta el `sequence_floor` del `ServerHello` siguiente (FR-LOC-008, ADR-0008). El token bucket por (conexión, sesión) vive en `gs-stream` (`publish_burst`, `min_publish_interval_ms`). Un publicador suscrito recibe sus propias `LocationUpdate` (docs/08 §7.3). Pruebas: 7 de integración contra PostgreSQL real y 5 de extremo a extremo con WebSocket real. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (376 pruebas, 0 fallos; base en `main`: 364 → +12), `cargo run -p geostream-tools -- all`: todos OK.
+- Notas: `compare_and_set_sequence(key, 0, seq)` es la llamada correcta: el almacén compara atómicamente y `current = 0` significa «sin expectativa», que es exactamente la semántica de `09` §4. El snapshot se almacena con `delivery=LIVE` y se entrega como `SNAPSHOT` al leerse (`11` §3). La entrega a otros suscriptores y al bus es T-F4-06; aquí se corrige el retraso de `docs/09` §4 (el efímero se refresca con TTL de sesión).
 
 ### 2026-10-13 — T-F4-04 — Suscripción sin huecos, snapshot y `MemberStatus` con minimización
 - Autor/agente: Angel Nereira (con agente de código).

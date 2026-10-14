@@ -52,19 +52,19 @@ Reglas:
 | FR-SHR-003 | MUST | F3 | Detener compartición | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-SHR-004 | MUST | F3 | Un único dispositivo publicador | `crates/gs-store/tests/constraints_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-SHR-005 | MUST | F3 | Auditoría de compartición | `crates/gs-service/tests/audit_test.rs` | cumplido |
-| FR-LOC-001 | MUST | F4 | Modelo de muestra | `tests/location_vectors_test.rs` | en curso |
+| FR-LOC-001 | MUST | F4 | Modelo de muestra | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-LOC-002 | MUST | F4 | Validación de campos | `tests/location_vectors_test.rs` | en curso |
-| FR-LOC-003 | MUST | F4 | Orden y deduplicación | `tests/location_vectors_test.rs` | en curso |
-| FR-LOC-004 | MUST | F4 | Validación temporal | `tests/location_vectors_test.rs` | en curso |
-| FR-LOC-005 | MUST | F4 | Tiempo de recepción del servidor | — | pendiente |
+| FR-LOC-003 | MUST | F4 | Orden y deduplicación | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
+| FR-LOC-004 | MUST | F4 | Validación temporal | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
+| FR-LOC-005 | MUST | F4 | Tiempo de recepción del servidor | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-LOC-006 | MUST | F4 | Calidad y tipo de dato | `tests/location_vectors_test.rs` | en curso |
-| FR-LOC-007 | MUST | F4 | Rate limit de publicación | — | pendiente |
-| FR-LOC-008 | MUST | F4 | Sequence floor | — | pendiente |
+| FR-LOC-007 | MUST | F4 | Rate limit de publicación | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
+| FR-LOC-008 | MUST | F4 | Sequence floor | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-LOC-009 | MUST | F8 | Ingesta HTTP por lotes | — | pendiente |
 | FR-STR-001 | MUST | F4 | Endpoint y handshake | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-api/src/stream.rs` | cumplido |
 | FR-STR-002 | MUST | F4 | Suscripción | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-003 | MUST | F4 | Distribución autorizada | — | pendiente |
-| FR-STR-004 | MUST | F4 | Acks de publicación | — | pendiente |
+| FR-STR-004 | MUST | F4 | Acks de publicación | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-005 | MUST | F4 | Heartbeat, inactividad y cierre | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-stream/src/close_codes.rs` | cumplido |
 | FR-STR-006 | MUST | F4 | Backpressure | — | pendiente |
 | FR-STR-007 | MUST | F4 | Una conexión por dispositivo | — | pendiente |

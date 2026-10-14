@@ -8,6 +8,7 @@ pub mod authz;
 pub mod idempotency;
 pub mod invitations;
 pub mod members;
+pub mod publishing;
 pub mod sessions;
 pub mod subjects;
 pub mod subscriptions;
@@ -50,6 +51,10 @@ pub use members::{
     SetSharingContext, SharingRequest, UpdateCaller, UpdateMemberRequest, add_member, get_member,
     get_member_for_device_me, leave_session, list_members, revoke_member, set_sharing,
     update_member,
+};
+pub use publishing::{
+    PublishCaller, PublishError, PublishOutcome, PublishParams, PublishThrottle, publish_ack_for,
+    publish_batch,
 };
 pub use sessions::{
     CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,

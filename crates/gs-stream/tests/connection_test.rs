@@ -1187,3 +1187,348 @@ fn heartbeat_message(request_id: u64) -> gs_service::gs_protocol::ClientMessage 
         )),
     }
 }
+
+/// Publishes a batch and returns the `PublishAck`.
+async fn publish(
+    socket: &mut Socket,
+    session_id: &str,
+    samples: Vec<gs_service::gs_protocol::LocationSample>,
+    subprotocol: Subprotocol,
+) -> gs_service::gs_protocol::PublishAck {
+    let request = gs_service::gs_protocol::ClientMessage {
+        request_id: 21,
+        body: Some(
+            gs_service::gs_protocol::client_message::Body::PublishLocation(
+                gs_service::gs_protocol::PublishLocation {
+                    session_id: session_id.to_string(),
+                    samples,
+                },
+            ),
+        ),
+    };
+    socket
+        .send(frame_of(encode_client(&request, subprotocol), subprotocol))
+        .await
+        .expect("send publish");
+    let bytes = read_binary(socket).await;
+    let server = decode_server(&bytes, subprotocol);
+    assert_eq!(server.request_id, 21);
+    match server.body {
+        Some(gs_service::gs_protocol::server_message::Body::PublishAck(ack)) => ack,
+        other => panic!("expected PublishAck, got {other:?}"),
+    }
+}
+
+/// A valid sample for the synthetic coordinates of the vectors.
+fn sample(sequence: u64) -> gs_service::gs_protocol::LocationSample {
+    gs_service::gs_protocol::LocationSample {
+        sequence,
+        captured_at: Some(gs_service::pbjson_types::Timestamp {
+            seconds: time::OffsetDateTime::now_utc().unix_timestamp() - 1,
+            nanos: 0,
+        }),
+        position: Some(gs_service::gs_protocol::Position {
+            latitude: 8.9824,
+            longitude: -79.5199,
+            horizontal_accuracy_m: 8.5,
+            altitude_m: None,
+            vertical_accuracy_m: None,
+            speed_mps: Some(4.2),
+            speed_accuracy_mps: None,
+            heading_deg: Some(91.0),
+            heading_accuracy_deg: None,
+        }),
+        quality: Some(gs_service::gs_protocol::LocationQuality {
+            source: gs_service::gs_protocol::LocationSource::Gnss as i32,
+            kind: gs_service::gs_protocol::LocationKind::Measured as i32,
+            is_mock: Some(false),
+            motion: gs_service::gs_protocol::MotionActivity::Automotive as i32,
+        }),
+    }
+}
+
+/// Sequence floor reported in a `ServerHello` (`uint64` travels as a string, docs/08 §12).
+fn sequence_floor_of(hello: &serde_json::Value) -> String {
+    hello
+        .get("sequenceFloor")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("0")
+        .to_string()
+}
+
+/// Starts sharing from the device of the fixture so it can publish.
+async fn start_sharing(world: &World, session_id: &str) {
+    let session_id = session_id_from(session_id);
+    let membership =
+        gs_service::gs_store::repos::MembershipRepository::find_active_by_session_and_subject(
+            &world.pool,
+            world.tenant_id,
+            session_id,
+            world
+                .device_token
+                .response
+                .subject_id
+                .parse()
+                .expect("subject id"),
+        )
+        .await
+        .expect("query")
+        .expect("membership");
+    gs_service::members::set_sharing(
+        &world.pool,
+        world.tenant_id,
+        session_id,
+        membership.id,
+        true,
+        gs_service::members::SetSharingContext {
+            ephemeral: world.ephemeral.as_ref(),
+            bus: &gs_service::InMemoryBus::new(),
+            key_prefix: "gs:stream:publish",
+            caller: gs_service::members::SetSharingCaller {
+                is_app: false,
+                subject_id: Some(
+                    world
+                        .device_token
+                        .response
+                        .subject_id
+                        .parse()
+                        .expect("subject id"),
+                ),
+                device_id: Some(
+                    world
+                        .device_token
+                        .response
+                        .device_id
+                        .parse()
+                        .expect("device id"),
+                ),
+                has_manage: true,
+            },
+        },
+    )
+    .await
+    .expect("start sharing");
+}
+
+#[tokio::test]
+async fn test_fr_loc_003_publication_is_ordered_deduplicated_and_acked() {
+    // covers: FR-LOC-003, FR-LOC-005, FR-STR-004, docs/08 §6.4, docs/09 §4, ADR-0008
+    let world = setup("publish", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let session_id = session_of(&world).await;
+    start_sharing(&world, &session_id).await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    let hello_message = hello(&mut socket, Subprotocol::Proto).await;
+    assert_eq!(sequence_floor_of(&hello_message), "0");
+
+    // The tenant policy of the fixture allows one sample per publish (docs/17 §4).
+    let ack = publish(
+        &mut socket,
+        &session_id,
+        vec![sample(1)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(ack.session_id, session_id);
+    assert_eq!(ack.request_error, 0, "the batch was processed");
+    assert_eq!(ack.results.len(), 1, "one result per sample (FR-STR-004)");
+    assert_eq!(
+        ack.results[0].status,
+        gs_service::gs_protocol::SampleStatus::Accepted as i32
+    );
+    assert_eq!(ack.results[0].sequence, 1);
+
+    // A batch above the policy limit is refused before touching any sample.
+    let too_big = publish(
+        &mut socket,
+        &session_id,
+        vec![sample(3), sample(4)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(
+        too_big.request_error,
+        gs_service::gs_protocol::ErrorCode::PayloadTooLarge as i32
+    );
+    assert!(too_big.results.is_empty());
+
+    // A repeated sequence is a duplicate; an older one is stale (docs/09 §4).
+    let again = publish(
+        &mut socket,
+        &session_id,
+        vec![sample(1)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(
+        again.results[0].status,
+        gs_service::gs_protocol::SampleStatus::IgnoredDuplicate as i32
+    );
+    let stale = publish(
+        &mut socket,
+        &session_id,
+        vec![sample(1)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(
+        stale.results[0].status,
+        gs_service::gs_protocol::SampleStatus::IgnoredDuplicate as i32
+    );
+
+    // The next connection sees the sequence floor of ADR-0008.
+    drop(socket);
+    let next_ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut next = world.connect(&next_ticket, "gs.v1.proto").await;
+    let hello_message = hello(&mut next, Subprotocol::Proto).await;
+    assert_eq!(
+        sequence_floor_of(&hello_message),
+        "1",
+        "the device floor informs the next connection (FR-LOC-008)"
+    );
+}
+
+#[tokio::test]
+async fn test_fr_loc_001_an_invalid_sample_is_rejected_with_its_field() {
+    // covers: FR-LOC-001, FR-LOC-002, docs/09 §3.1
+    let world = setup("invalid-publish", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let session_id = session_of(&world).await;
+    start_sharing(&world, &session_id).await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    let mut broken = sample(5);
+    if let Some(position) = broken.position.as_mut() {
+        position.latitude = 91.0;
+    }
+    let ack = publish(&mut socket, &session_id, vec![broken], Subprotocol::Proto).await;
+    assert_eq!(ack.results.len(), 1);
+    assert_eq!(
+        ack.results[0].status,
+        gs_service::gs_protocol::SampleStatus::Rejected as i32
+    );
+    assert_eq!(
+        ack.results[0].error_code,
+        gs_service::gs_protocol::ErrorCode::InvalidLocation as i32
+    );
+    assert_eq!(ack.results[0].field, "position.latitude");
+}
+
+#[tokio::test]
+async fn test_publication_without_sharing_is_refused() {
+    // covers: FR-SHR-001, docs/08 §6.4
+    let world = setup("no-sharing", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let session_id = session_of(&world).await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    let ack = publish(
+        &mut socket,
+        &session_id,
+        vec![sample(1)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(
+        ack.request_error,
+        gs_service::gs_protocol::ErrorCode::NotSharing as i32,
+        "publishing without sharing is refused (FR-SHR-001)"
+    );
+    assert!(ack.results.is_empty(), "no sample is applied");
+}
+
+#[tokio::test]
+async fn test_an_application_cannot_publish() {
+    // covers: docs/06 §8.3, docs/08 §6.4
+    let world = setup("app-publish", StreamConfig::default()).await;
+    let ticket = world.ticket(&world.key_with_scope).await;
+    let session_id = session_of(&world).await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    let ack = publish(
+        &mut socket,
+        &session_id,
+        vec![sample(1)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(
+        ack.request_error,
+        gs_service::gs_protocol::ErrorCode::PermissionDenied as i32
+    );
+}
+
+#[tokio::test]
+async fn test_a_subscribed_publisher_receives_its_own_updates() {
+    // covers: FR-STR-002, docs/08 §7.3
+    let world = setup("self-delivery", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let session_id = session_of(&world).await;
+    start_sharing(&world, &session_id).await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+    let ack = subscribe(&mut socket, &session_id, Subprotocol::Proto, true).await;
+    assert_eq!(ack.session.expect("session").session_id, session_id);
+
+    let published = publish(
+        &mut socket,
+        &session_id,
+        vec![sample(64)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(published.results.len(), 1);
+
+    // The publisher sees its own sample as everybody else does (docs/08 §7.3).
+    use futures::StreamExt;
+    let update = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Binary(bytes))) => {
+                    let server = decode_server(&bytes, Subprotocol::Proto);
+                    if let Some(gs_service::gs_protocol::server_message::Body::LocationUpdate(
+                        update,
+                    )) = server.body
+                    {
+                        return update;
+                    }
+                }
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("the publisher receives its own update");
+    assert_eq!(update.session_id, session_id);
+    assert_eq!(
+        update.sample.as_ref().map(|s| s.sequence),
+        Some(64),
+        "the sample is delivered untouched"
+    );
+    assert_eq!(
+        update.delivery,
+        gs_service::gs_protocol::DeliveryKind::Live as i32
+    );
+    assert!(
+        update.received_at.is_some(),
+        "the server assigns received_at (FR-LOC-005)"
+    );
+}
