@@ -276,7 +276,7 @@ CREATE INDEX geofences_session_idx ON geofences (session_id) WHERE session_id IS
 | `{p}:devseq:{device}` | string | mayor `sequence` aceptada del dispositivo | 30 días, renovado | stream, api | stream (hello) |
 | `{p}:presence:{device}` | hash | `connection_id`, `instance_id`, `connected_at` | `GS_PRESENCE_TTL_S`, renovado | stream | stream, api |
 | `{p}:mver:{session}` | string | versión de membresías (entero) | vida de la sesión + 1 día | api, worker, stream | stream |
-| `{p}:ticket:{sha256}` | string | `TicketGrant` (JSON compacto) | `GS_TICKET_TTL_S` | api | stream (get-and-delete) |
+| `{p}:ticket:{sha256}` | string | `TicketGrant` (JSON compacto: `principal_kind`, `tenant_id`, `application_id`, `subject_id`/`device_id`/`api_key_id`, `scopes`, `token_epoch` y `auth_expires_at`, `06` §5) | `GS_TICKET_TTL_S` | api | stream (get-and-delete) |
 | `{p}:rl:{scope}:{key}:{window}` | string | contador | 120 s | api, stream | api, stream |
 | `{p}:geo:{geofence}:{member}` (F11) | string | estado de histéresis | vida de la sesión | stream | stream |
 

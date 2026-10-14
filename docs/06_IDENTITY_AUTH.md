@@ -124,7 +124,8 @@ No se añaden otros claims. Los tokens no contienen datos personales.
 
 - `POST /v1/stream/tickets` con aplicación (`stream:connect`) o dispositivo (`stream:connect`).
 - Ticket: `gst_` + 32 bytes de CSPRNG en base64url (43 caracteres). Regex `^gst_[A-Za-z0-9_-]{43}$`.
-- Se guarda en el almacén efímero como `{p}:ticket:{sha256_hex(ticket)}` → `TicketGrant { principal_kind, tenant_id, application_id, subject_id?, device_id?, api_key_id?, scopes, auth_expires_at }` con TTL `GS_TICKET_TTL_S`.
+- Se guarda en el almacén efímero como `{p}:ticket:{sha256_hex(ticket)}` → `TicketGrant { principal_kind, tenant_id, application_id, subject_id?, device_id?, api_key_id?, scopes, token_epoch?, auth_expires_at }` con TTL `GS_TICKET_TTL_S`.
+  - `token_epoch?`: época del subject (`sep`) del token con el que se pidió el ticket; solo para principales de dispositivo. Viaja en el grant para que la conexión pueda detectar que los tokens de su subject fueron revocados sin conservar el token (`06` §7, ADR-0009).
 - `auth_expires_at`: para dispositivo = `exp` del token usado; para aplicación = `now + GS_STREAM_APP_MAX_CONNECTION_AGE_S`.
 - Canje en el upgrade con operación atómica *get-and-delete*. Ticket inexistente, expirado o ya usado → HTTP 401 sin upgrade.
 - Respuesta: `{ ticket, expires_at, stream_url }`. El cliente conecta a `stream_url + "?ticket=" + ticket`.

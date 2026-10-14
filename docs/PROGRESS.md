@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F4-03 — `AuthzCache` con `mver`, invalidación por bus y revalidación del principal | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-service`, `crates/gs-stream` | NFR-SEC-002; leer `04` §6.2, ADR-0009, `06` §7 |
+| _ninguna_ | | | | T-F4-01, T-F4-02 y T-F4-03 completadas; siguiente: T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus`) |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -35,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets) y T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres) y T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -48,6 +48,14 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-13 — T-F4-03 — `AuthzCache` con `mver`, invalidación por bus y revalidación del principal
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Rama: `feat/T-F4-03-authz-cache`.
+- Requisitos: NFR-SEC-002 (plazo de revocación).
+- Evidencia: `gs-service::authz` implementa la caché por instancia de `04` §6.2 con entradas `(session_id, subject_id)` para dispositivos y `(session_id, application_id)` para aplicaciones, TTL `GS_AUTHZ_CACHE_TTL_MS`, revalidación por `{p}:mver:{session}` (renueva si no cambió, recarga si cambió), `invalidate_session` como acelerador del bus, `note_global_bus_event` para los eventos de `{p}:bus:global`, `flush` al reconectar y `revalidate_principal` con el mismo TTL. La conexión de `gs-stream` revalida su principal al procesar mensajes o por temporizador: token revocado o dispositivo desactivado → cierre 4401; tenant o aplicación deshabilitados → 4403. Para detectar la revocación de tokens sin conservar el token, el `TicketGrant` añade el campo opcional `token_epoch` (documentado en `06` §5 y `11` §3 en el mismo PR, `00` §1.2). Métrica `gs_authz_cache_events_total{event}` con `hit`/`miss`/`revalidate`/`reload`/`flush`. Pruebas: 7 de integración contra PostgreSQL real (`crates/gs-service/tests/authz_test.rs`) y 2 de extremo a extremo con WebSocket real (`crates/gs-stream/tests/connection_test.rs`), más 4 unitarias de invalidación. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (345 pruebas, 0 fallos; base en `main`: 332 → +13), `cargo run -p geostream-tools -- all`: todos OK.
+- Notas: `gs-ephemeral::get_counter` (añadida en T-F4-02) es la lectura que usa `sequence_floor`; aquí se reutiliza `get_membership_version` para `mver`. El cableado de `{p}:bus:ctl:{session_id}` a `invalidate_session` llega con las suscripciones de T-F4-04.
 
 ### 2026-10-13 — T-F4-02 — Conexión de stream: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres
 - Autor/agente: Angel Nereira (con agente de código).

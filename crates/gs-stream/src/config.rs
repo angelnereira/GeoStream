@@ -33,6 +33,8 @@ pub const DEFAULT_ABUSE_WINDOW_S: u64 = 10;
 pub const DEFAULT_UPGRADE_RPM_PER_IP: u32 = 120;
 /// Default of `GS_LOCATION_MAX_EVENT_AGE_MS` (docs/17 §2.7).
 pub const DEFAULT_MAX_EVENT_AGE_MS: u64 = 120_000;
+/// Default of `GS_AUTHZ_CACHE_TTL_MS` (docs/17 §2.2, ADR-0009).
+pub const DEFAULT_AUTHZ_CACHE_TTL_MS: u64 = 5_000;
 /// Default of `min_publish_interval_ms` (docs/17 §4).
 pub const DEFAULT_MIN_PUBLISH_INTERVAL_MS: u32 = 1_000;
 
@@ -64,8 +66,10 @@ pub struct StreamConfig {
     pub max_inbound_msgs_per_s: u32,
     /// Sustained excess that triggers 4429 (`GS_STREAM_ABUSE_WINDOW_S`).
     pub abuse_window: Duration,
-    /// Maximum accepted age of `captured_at` (`GS_LOCATION_MAX_EVENT_AGE_MS`).
+    /// Maximum age of an accepted `captured_at` (`GS_LOCATION_MAX_EVENT_AGE_MS`).
     pub max_event_age: Duration,
+    /// Maximum age of a cached authorization decision (`GS_AUTHZ_CACHE_TTL_MS`, ADR-0009).
+    pub authz_cache_ttl: Duration,
 }
 
 impl Default for StreamConfig {
@@ -84,6 +88,7 @@ impl Default for StreamConfig {
             max_inbound_msgs_per_s: DEFAULT_MAX_INBOUND_MSGS_PER_S,
             abuse_window: Duration::from_secs(DEFAULT_ABUSE_WINDOW_S),
             max_event_age: Duration::from_millis(DEFAULT_MAX_EVENT_AGE_MS),
+            authz_cache_ttl: Duration::from_millis(DEFAULT_AUTHZ_CACHE_TTL_MS),
         }
     }
 }
@@ -208,6 +213,7 @@ mod tests {
         assert_eq!(config.max_subscriptions_app, 1_000);
         assert_eq!(config.max_protocol_errors, 10);
         assert_eq!(config.max_event_age, Duration::from_millis(120_000));
+        assert_eq!(config.authz_cache_ttl, Duration::from_millis(5_000));
     }
 
     #[test]

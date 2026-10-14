@@ -138,7 +138,7 @@ Reglas:
 | NFR-SCALE-002 | MUST | F6 | Tormenta de reconexión | — | pendiente |
 | NFR-AVAIL-001 | SHOULD | F12 | Objetivo de disponibilidad | — | pendiente |
 | NFR-SEC-001 | MUST | F2 | Transporte cifrado | deploy/caddy/Caddyfile, deploy/nginx/geostream.conf, docs/templates/RELEASE_TEMPLATE.md | implementado |
-| NFR-SEC-002 | MUST | F4 | Plazo de revocación | — | pendiente |
+| NFR-SEC-002 | MUST | F4 | Plazo de revocación | `crates/gs-service/tests/authz_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | NFR-SEC-003 | MUST | F2 | Secretos fuera de registros | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/redacted.rs` | en curso |
 | NFR-SEC-004 | MUST | F3 | Aislamiento de tenant | `crates/gs-api/tests/conformance_test.rs` (REST; mensajes de stream en F4) | en curso |
 | NFR-SEC-005 | MUST | F10 | Fuzzing | — | pendiente |

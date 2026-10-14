@@ -1772,6 +1772,7 @@ dependencies = [
  "gs-ephemeral",
  "gs-protocol",
  "gs-store",
+ "metrics",
  "serde",
  "serde_json",
  "sqlx",

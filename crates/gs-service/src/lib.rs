@@ -4,6 +4,7 @@
 pub mod admin;
 pub mod audit;
 pub mod auth;
+pub mod authz;
 pub mod idempotency;
 pub mod invitations;
 pub mod members;
@@ -24,6 +25,10 @@ pub use audit::*;
 pub use auth::{
     ApplicationPrincipal, AuthError, VerifiedPrincipal, require_scope, verify_application_key,
     verify_application_principal, verify_device_token_principal,
+};
+pub use authz::{
+    ApplicationView, AuthzCache, AuthzError, AuthzKey, CachedDecision, DEFAULT_AUTHZ_CACHE_TTL,
+    DeviceMembershipView, PrincipalIdentity, verify_principal_state,
 };
 pub use gs_bus::{Bus, BusError, BusMessage, InMemoryBus};
 pub use gs_ephemeral::{EphemeralError, EphemeralStore, InMemoryEphemeralStore};

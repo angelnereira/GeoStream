@@ -18,15 +18,18 @@ use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures::StreamExt;
+use gs_service::authz::{AuthzCache, PrincipalIdentity};
 use gs_service::gs_auth::TenantPolicy;
 use gs_service::gs_domain::Subprotocol;
+use gs_service::gs_domain::error::{AsErrorCode, ErrorCode};
 use gs_service::gs_domain::ids::ConnectionId;
 use gs_service::gs_ephemeral::EphemeralStore;
+use gs_service::gs_protocol::ErrorCode as ProtoErrorCode;
 use gs_service::gs_protocol::client_message::Body as ClientBody;
 use gs_service::gs_protocol::server_message::Body as ServerBody;
 use gs_service::gs_protocol::{
-    ClientHello, ClientMessage, ErrorCode, Heartbeat, HeartbeatAck, PrincipalKind, ServerHello,
-    ServerMessage, StreamError,
+    ClientHello, ClientMessage, Heartbeat, HeartbeatAck, PrincipalKind, ServerHello, ServerMessage,
+    StreamError,
 };
 use gs_service::gs_store::PgPool;
 use gs_service::tickets::{TicketGrant, TicketPrincipalKind};
@@ -78,6 +81,8 @@ pub struct StreamState {
     pub ephemeral: Arc<InMemoryEphemeralStore>,
     /// Bus for control events (used from T-F4-06 onwards).
     pub bus: Arc<InMemoryBus>,
+    /// Per instance authorization cache (ADR-0009, docs/04 §6.2).
+    pub authz: Arc<AuthzCache>,
     /// Ephemeral key prefix (`GS_REDIS_KEY_PREFIX`, default `gs`).
     pub redis_key_prefix: String,
     /// Stream configuration (docs/17 §2.6).
@@ -89,6 +94,7 @@ impl std::fmt::Debug for StreamState {
         f.debug_struct("StreamState")
             .field("pool", &"<pg pool>")
             .field("bus", &"<bus>")
+            .field("authz", &"<authz cache>")
             .field("redis_key_prefix", &self.redis_key_prefix)
             .field("config", &self.config)
             .finish()
@@ -135,6 +141,8 @@ pub struct Connection {
     inbound_window_count: u32,
     /// Start of the current one second window.
     inbound_window_started: Instant,
+    /// Identity whose state is revalidated by TTL (docs/06 §7, ADR-0009).
+    principal: PrincipalIdentity,
 }
 
 impl Connection {
@@ -153,6 +161,13 @@ impl Connection {
             &time::format_description::well_known::Rfc3339,
         )
         .map_err(|error| format!("auth_expires_at: {error}"))?;
+        let principal = PrincipalIdentity {
+            tenant_id: grant.tenant_id,
+            application_id: grant.application_id,
+            subject_id: grant.subject_id,
+            device_id: grant.device_id,
+            token_epoch: grant.token_epoch,
+        };
 
         Ok(Self {
             connection_id,
@@ -167,6 +182,7 @@ impl Connection {
             abuse_started_at: None,
             inbound_window_count: 0,
             inbound_window_started: Instant::now(),
+            principal,
         })
     }
 
@@ -210,34 +226,46 @@ impl Connection {
         let started = Instant::now();
         let hello_deadline = started + self.config.hello_timeout;
         let mut idle_deadline = started + self.config.idle_timeout;
+        // The state was checked at the upgrade, so the first revalidation comes after one full
+        // TTL of the cache (docs/06 §7).
+        let mut authz_deadline = started + state.authz.ttl();
 
         loop {
             if self.auth_expires_at <= OffsetDateTime::now_utc() {
                 // The window closed without a refresh (docs/08 §6.6, T-F4-09).
-                return ConnectionOutcome {
-                    code: CLOSE_AUTH_EXPIRED,
-                };
+                self.close(CLOSE_AUTH_EXPIRED);
+                return self.outcome();
             }
 
-            let frame = match self.state {
-                ConnectionState::AwaitingHello => {
-                    match tokio::time::timeout_at(hello_deadline, socket.next()).await {
-                        // No `ClientHello` in time (docs/08 §6.1).
-                        Err(_elapsed) => {
-                            self.close(crate::close_codes::CLOSE_HELLO_TIMEOUT);
-                            return self.outcome();
-                        }
-                        Ok(frame) => frame,
-                    }
-                }
-                _ => match tokio::time::timeout_at(idle_deadline, socket.next()).await {
-                    // No frame at all during `idle_timeout` (docs/08 §6.5).
-                    Err(_elapsed) => {
-                        self.close(CLOSE_IDLE_TIMEOUT);
+            // The principal is revalidated at most every `GS_AUTHZ_CACHE_TTL_MS`, and a bus
+            // event can drop the cached entry earlier (docs/06 §7, ADR-0009).
+            if matches!(self.state, ConnectionState::Ready) && Instant::now() >= authz_deadline {
+                match self.revalidate_principal(state).await {
+                    Ok(()) => authz_deadline = Instant::now() + state.authz.ttl(),
+                    Err(code) => {
+                        self.close(code);
                         return self.outcome();
                     }
-                    Ok(frame) => frame,
-                },
+                }
+            }
+
+            let frame = tokio::select! {
+                frame = socket.next() => frame,
+                // The state machine of docs/08 §5: no hello in time closes with 4002, no frame
+                // at all during `idle_timeout` closes with 4408.
+                _ = tokio::time::sleep_until(match self.state {
+                    ConnectionState::AwaitingHello => hello_deadline,
+                    _ => idle_deadline,
+                }) => {
+                    self.close(match self.state {
+                        ConnectionState::AwaitingHello => crate::close_codes::CLOSE_HELLO_TIMEOUT,
+                        _ => CLOSE_IDLE_TIMEOUT,
+                    });
+                    return self.outcome();
+                }
+                // Wakes the loop up to revalidate the principal when the TTL lapses.
+                _ = tokio::time::sleep_until(authz_deadline),
+                    if matches!(self.state, ConnectionState::Ready) => continue,
             };
 
             let Some(frame) = frame else {
@@ -315,8 +343,13 @@ impl Connection {
                     self.close(CLOSE_PROTOCOL_ERROR);
                     return;
                 }
-                self.reply_protocol_error(socket, 0, ErrorCode::ProtocolError, "malformed message")
-                    .await;
+                self.reply_protocol_error(
+                    socket,
+                    0,
+                    ProtoErrorCode::ProtocolError,
+                    "malformed message",
+                )
+                .await;
                 return;
             }
         };
@@ -341,7 +374,7 @@ impl Connection {
                     self.reply_protocol_error(
                         socket,
                         request_id,
-                        ErrorCode::ProtocolError,
+                        ProtoErrorCode::ProtocolError,
                         "hello already processed",
                     )
                     .await;
@@ -354,7 +387,7 @@ impl Connection {
                     self.reply_protocol_error(
                         socket,
                         request_id,
-                        ErrorCode::ProtocolError,
+                        ProtoErrorCode::ProtocolError,
                         "hello must be the first message",
                     )
                     .await;
@@ -372,7 +405,7 @@ impl Connection {
                 self.reply_protocol_error(
                     socket,
                     request_id,
-                    ErrorCode::ProtocolError,
+                    ProtoErrorCode::ProtocolError,
                     "operation not supported yet",
                 )
                 .await;
@@ -381,7 +414,7 @@ impl Connection {
                 self.reply_protocol_error(
                     socket,
                     request_id,
-                    ErrorCode::ProtocolError,
+                    ProtoErrorCode::ProtocolError,
                     "missing message body",
                 )
                 .await;
@@ -534,7 +567,7 @@ impl Connection {
         &mut self,
         socket: &mut WebSocket,
         request_id: u64,
-        code: ErrorCode,
+        code: ProtoErrorCode,
         message: &str,
     ) {
         let error = StreamError {
@@ -569,6 +602,33 @@ impl Connection {
         metrics::counter!(METRIC_STREAM_MESSAGES_OUT_TOTAL, "type" => message_type(message))
             .increment(1);
         socket.send(frame).await.is_ok()
+    }
+
+    /// Retries the principal state of this connection against PostgreSQL (docs/06 §7).
+    ///
+    /// The cache answers inside its TTL, so the query runs at most once per
+    /// `GS_AUTHZ_CACHE_TTL_MS` per connection. A revoked token or a deactivated device closes
+    /// with 4401, and a disabled tenant or application with 4403 (docs/06 §7).
+    async fn revalidate_principal(&mut self, state: &StreamState) -> Result<(), u16> {
+        match state
+            .authz
+            .revalidate_principal(&state.pool, &self.principal)
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                tracing::debug!(
+                    connection_id = %self.connection_id,
+                    code = %error.error_code(),
+                    "stream principal is no longer valid"
+                );
+                Err(match error.error_code() {
+                    ErrorCode::Unauthenticated => CLOSE_AUTH_EXPIRED,
+                    ErrorCode::AccountDisabled => crate::close_codes::CLOSE_FORBIDDEN,
+                    _ => CLOSE_INTERNAL,
+                })
+            }
+        }
     }
 
     /// Marks the connection closed with a code (docs/08 §5).
@@ -800,6 +860,7 @@ mod tests {
             device_id: None,
             api_key_id: None,
             scopes: vec!["stream:connect".to_string()],
+            token_epoch: Some(1),
             auth_expires_at: "2026-10-13T12:00:00Z".to_string(),
         };
         let connection = Connection::new(

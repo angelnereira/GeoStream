@@ -20,9 +20,10 @@ use gs_service::admin::{create_api_key, create_application, create_tenant};
 use gs_service::auth::DeviceTokenKeys;
 use gs_service::gs_auth::{generate_signing_key, parse_private_pem};
 use gs_service::gs_domain::Subprotocol;
+
 use gs_service::migrate::{connect_pool, run_migrations};
 use gs_service::tokens::{MintedToken, TokenRequest, TokenTtlBounds, mint_device_token};
-use gs_service::{InMemoryBus, InMemoryEphemeralStore};
+use gs_service::{AuthzCache, InMemoryBus, InMemoryEphemeralStore};
 use gs_stream::{StreamConfig, StreamState, run_session};
 use serde_json::{Value, json};
 use tokio_tungstenite::MaybeTlsStream;
@@ -46,6 +47,8 @@ fn test_database_url() -> String {
 struct World {
     http_base: String,
     ws_base: String,
+    pool: gs_service::gs_store::PgPool,
+    tenant_id: gs_service::gs_domain::ids::TenantId,
     ephemeral: Arc<InMemoryEphemeralStore>,
     connections: ConnectionCounter,
     _server: tokio::task::JoinHandle<()>,
@@ -125,6 +128,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         pool: pool.clone(),
         ephemeral: ephemeral.clone(),
         bus: bus.clone(),
+        authz: Arc::new(AuthzCache::new(config.authz_cache_ttl)),
         redis_key_prefix: prefix.clone(),
         config: config.clone(),
     });
@@ -190,6 +194,8 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
     World {
         http_base: format!("http://127.0.0.1:{port}"),
         ws_base: format!("ws://127.0.0.1:{port}"),
+        pool: pool.clone(),
+        tenant_id: tenant.id,
         ephemeral,
         connections,
         _server: server,
@@ -737,4 +743,86 @@ async fn test_sequence_floor_comes_from_the_ephemeral_store() {
     let mut socket = world.connect(&ticket, "gs.v1.proto").await;
     let hello = hello(&mut socket, Subprotocol::Proto).await;
     assert_eq!(hello["sequenceFloor"], json!("41"));
+}
+
+#[tokio::test]
+async fn test_a_revoked_subject_token_closes_the_connection_with_4401() {
+    // covers: NFR-SEC-002, FR-AUTH-003, docs/06 §7, ADR-0009
+    // A cache TTL of zero revalidates the principal on every message.
+    let config = StreamConfig {
+        authz_cache_ttl: Duration::from_millis(0),
+        ..StreamConfig::default()
+    };
+    let world = setup("revoke-tokens", config).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // The subject tokens are revoked: the next revalidation fails and the connection closes.
+    let subject_id = world
+        .device_token
+        .response
+        .subject_id
+        .parse()
+        .expect("subject id");
+    gs_service::gs_store::repos::SubjectRepository::increment_token_epoch(
+        &world.pool,
+        world.tenant_id,
+        subject_id,
+        time::OffsetDateTime::now_utc(),
+    )
+    .await
+    .expect("bump epoch");
+
+    // A heartbeat forces the connection to process a message, which triggers the check.
+    socket
+        .send(frame_of(
+            encode_client(&heartbeat_message(9), Subprotocol::Proto),
+            Subprotocol::Proto,
+        ))
+        .await
+        .expect("send heartbeat");
+    assert_eq!(read_close_code(&mut socket).await, 4401);
+}
+
+#[tokio::test]
+async fn test_a_disabled_tenant_closes_the_connection_with_4403() {
+    // covers: NFR-SEC-002, FR-ADM-003, docs/06 §7, ADR-0009
+    let config = StreamConfig {
+        authz_cache_ttl: Duration::from_millis(0),
+        ..StreamConfig::default()
+    };
+    let world = setup("disable-tenant", config).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    gs_service::admin::set_tenant_enabled(&world.pool, &world.tenant_id.to_string(), false)
+        .await
+        .expect("disable tenant");
+
+    socket
+        .send(frame_of(
+            encode_client(&heartbeat_message(9), Subprotocol::Proto),
+            Subprotocol::Proto,
+        ))
+        .await
+        .expect("send heartbeat");
+    assert_eq!(read_close_code(&mut socket).await, 4403);
+}
+
+/// A heartbeat with the given request id.
+fn heartbeat_message(request_id: u64) -> gs_service::gs_protocol::ClientMessage {
+    gs_service::gs_protocol::ClientMessage {
+        request_id,
+        body: Some(gs_service::gs_protocol::client_message::Body::Heartbeat(
+            gs_service::gs_protocol::Heartbeat { client_time: None },
+        )),
+    }
 }

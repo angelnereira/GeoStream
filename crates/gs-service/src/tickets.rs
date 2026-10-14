@@ -62,6 +62,12 @@ pub struct TicketGrant {
     pub api_key_id: Option<ApiKeyId>,
     /// Scopes granted to the connection.
     pub scopes: Vec<String>,
+    /// Subject token epoch the credential was issued with (`sep`, docs/06 §4.2).
+    ///
+    /// Carried by the grant so that a connection can detect that the tokens of its subject
+    /// were revoked without holding the token itself (docs/06 §7, ADR-0009).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_epoch: Option<u32>,
     /// End of the authentication window, RFC 3339 (docs/06 §5).
     pub auth_expires_at: String,
 }
@@ -160,6 +166,7 @@ pub async fn issue_stream_ticket<E: EphemeralStore + ?Sized>(
             device_id: None,
             api_key_id: Some(principal.api_key.id),
             scopes: principal.api_key.scopes.clone(),
+            token_epoch: None,
             auth_expires_at: format_rfc3339(now + config.app_max_connection_age),
         },
         TicketCaller::Device(principal) => {
@@ -173,6 +180,7 @@ pub async fn issue_stream_ticket<E: EphemeralStore + ?Sized>(
                 device_id: Some(principal.device.id),
                 api_key_id: None,
                 scopes: principal.claims.scp.clone(),
+                token_epoch: Some(principal.claims.sep),
                 auth_expires_at: format_rfc3339(auth_expires_at),
             }
         }
