@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| _ninguna_ | | | | T-F4-01 y T-F4-02 completadas; siguiente: T-F4-03 (AuthzCache con `mver`) |
+| T-F4-03 — `AuthzCache` con `mver`, invalidación por bus y revalidación del principal | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-service`, `crates/gs-stream` | NFR-SEC-002; leer `04` §6.2, ADR-0009, `06` §7 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
