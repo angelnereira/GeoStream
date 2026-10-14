@@ -35,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado) y T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado) T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks) y T-F4-06 (fan-out por bus con coalescencia y backpressure) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -48,6 +48,14 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-14 — T-F4-06 — Fan-out por bus (ruta única), coalescencia y backpressure
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Rama: `feat/T-F4-06-fanout`.
+- Requisitos: FR-STR-003, FR-STR-006.
+- Evidencia: la conexión se parte en tarea lectora y tarea escritora (`04` §8); la escritora es la única dueña del sink y prioriza la cola de control acotada (`GS_STREAM_OUTBOUND_CONTROL_QUEUE`, llena → cierre 4005) sobre las ubicaciones coalescidas por (sesión, miembro), de modo que el cliente siempre recibe la más reciente (FR-STR-006, `08` §10). `gs-stream::fanout` mantiene `DashMap<SessionId, Vec<ConnHandle>>` con el subprotocolo de cada conexión para codificar cada trama con el negociado; el primer suscriptor local de una sesión suscribe a `{p}:bus:loc:{session_id}` **antes** de devolver el control (un bus de difusión pierde lo publicado antes de la suscripción) y arranca la única tarea del tema, que envuelve cada `LocationUpdate` del bus en `ServerMessage{request_id=0}` y lo deposita en `latest`; el último suscriptor libera la suscripción (refcount de `04` §6.1). Publicar recorre el mismo camino (`publish_to_bus`), así que un publicador suscrito recibe sus propias muestras. El cierre se coordina para que la escritora escriba el último frame: se le envía el `CloseFrame`, se cierra el emisor y solo entonces se cancela su token (se detectó y corrigió una carrera de `select!` entre el frame de cierre y la cancelación). Pruebas: 2 de extremo a extremo (actualización publicada que llega a un segundo suscriptor; dos publicaciones seguidas entregan la más nueva y en orden) y 6 unitarias. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (383 pruebas, 0 fallos; base en `main`: 376 → +7), `cargo run -p geostream-tools -- all`: todos OK.
+- Notas: la entrega entre instancias reales llega con la implementación Redis/Valkey de T-F6-01; con el bus en memoria la ruta única ya es la misma. Pendiente de T-F4-08: presencia y `Supersede`, que hoy hacen que un publicador aparezca `OFFLINE`.
 
 ### 2026-10-14 — T-F4-05 — Publicación: precondiciones, validación, CAS de secuencia, snapshot, rate limit y acks
 - Autor/agente: Angel Nereira (con agente de código).

@@ -1807,6 +1807,7 @@ name = "gs-stream"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "dashmap",
  "futures",
  "gs-api",
  "gs-geo",

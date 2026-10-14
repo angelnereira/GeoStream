@@ -37,6 +37,8 @@ pub const DEFAULT_MAX_EVENT_AGE_MS: u64 = 120_000;
 pub const DEFAULT_AUTHZ_CACHE_TTL_MS: u64 = 5_000;
 /// Default of `GS_LOCATION_MAX_FUTURE_SKEW_MS` (docs/17 §2.7).
 pub const DEFAULT_MAX_FUTURE_SKEW_MS: i64 = 5_000;
+/// Default of `GS_STREAM_OUTBOUND_CONTROL_QUEUE` (docs/17 §2.6).
+pub const DEFAULT_OUTBOUND_CONTROL_QUEUE: usize = 1_024;
 /// Default of `min_publish_interval_ms` (docs/17 §4).
 pub const DEFAULT_MIN_PUBLISH_INTERVAL_MS: u32 = 1_000;
 
@@ -74,6 +76,8 @@ pub struct StreamConfig {
     pub max_future_skew_ms: i64,
     /// Maximum age of a cached authorization decision (`GS_AUTHZ_CACHE_TTL_MS`, ADR-0009).
     pub authz_cache_ttl: Duration,
+    /// Bounded control queue per connection (`GS_STREAM_OUTBOUND_CONTROL_QUEUE`, docs/08 §10).
+    pub outbound_control_queue: usize,
 }
 
 impl Default for StreamConfig {
@@ -94,6 +98,7 @@ impl Default for StreamConfig {
             max_event_age: Duration::from_millis(DEFAULT_MAX_EVENT_AGE_MS),
             max_future_skew_ms: DEFAULT_MAX_FUTURE_SKEW_MS,
             authz_cache_ttl: Duration::from_millis(DEFAULT_AUTHZ_CACHE_TTL_MS),
+            outbound_control_queue: DEFAULT_OUTBOUND_CONTROL_QUEUE,
         }
     }
 }

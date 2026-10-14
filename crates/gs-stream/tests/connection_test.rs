@@ -207,6 +207,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         ephemeral: ephemeral.clone(),
         bus: bus.clone(),
         authz: Arc::new(AuthzCache::new(config.authz_cache_ttl)),
+        fanout: Arc::new(gs_stream::Fanout::new(bus.clone(), prefix.clone())),
         redis_key_prefix: prefix.clone(),
         config: config.clone(),
     });
@@ -1188,6 +1189,45 @@ fn heartbeat_message(request_id: u64) -> gs_service::gs_protocol::ClientMessage 
     }
 }
 
+/// Publishes a batch, collecting the updates that interleave with the ack.
+///
+/// The fan-out may deliver an update between the ack of one publish and the next, so the
+/// helper skips those frames and returns them to the caller.
+async fn publish_collecting(
+    socket: &mut Socket,
+    session_id: &str,
+    samples: Vec<gs_service::gs_protocol::LocationSample>,
+    subprotocol: Subprotocol,
+    updates: &mut Vec<u64>,
+) -> gs_service::gs_protocol::PublishAck {
+    let request = gs_service::gs_protocol::ClientMessage {
+        request_id: 21,
+        body: Some(
+            gs_service::gs_protocol::client_message::Body::PublishLocation(
+                gs_service::gs_protocol::PublishLocation {
+                    session_id: session_id.to_string(),
+                    samples,
+                },
+            ),
+        ),
+    };
+    socket
+        .send(frame_of(encode_client(&request, subprotocol), subprotocol))
+        .await
+        .expect("send publish");
+    loop {
+        let bytes = read_binary(socket).await;
+        let server = decode_server(&bytes, subprotocol);
+        match server.body {
+            Some(gs_service::gs_protocol::server_message::Body::PublishAck(ack)) => return ack,
+            Some(gs_service::gs_protocol::server_message::Body::LocationUpdate(update)) => {
+                updates.push(update.sample.as_ref().map(|s| s.sequence).unwrap_or(0));
+            }
+            other => panic!("unexpected frame while publishing: {other:?}"),
+        }
+    }
+}
+
 /// Publishes a batch and returns the `PublishAck`.
 async fn publish(
     socket: &mut Socket,
@@ -1530,5 +1570,158 @@ async fn test_a_subscribed_publisher_receives_its_own_updates() {
     assert!(
         update.received_at.is_some(),
         "the server assigns received_at (FR-LOC-005)"
+    );
+}
+
+#[tokio::test]
+async fn test_fr_str_003_the_update_reaches_every_subscriber_of_the_session() {
+    // covers: FR-STR-003, docs/08 §7.3, docs/04 §8
+    let world = setup("fanout", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+    start_sharing(&world, &session_id).await;
+
+    // A reader of the same tenant, added as a member with the `read` capability.
+    gs_service::members::add_member(
+        &world.pool,
+        world.tenant_id,
+        session_id_from(&session_id),
+        &gs_service::members::AddMemberRequest {
+            external_subject_id: world
+                .other_device_token
+                .subject
+                .external_subject_id
+                .clone()
+                .expect("external id"),
+            role: None,
+            capabilities: Some(gs_service::gs_domain::membership::Capabilities::read_only()),
+        },
+    )
+    .await
+    .expect("add reader");
+
+    let reader_ticket = world
+        .ticket(&world.other_device_token.response.access_token)
+        .await;
+    let mut reader = world.connect(&reader_ticket, "gs.v1.proto").await;
+    hello(&mut reader, Subprotocol::Proto).await;
+    let ack = subscribe(&mut reader, &session_id, Subprotocol::Proto, true).await;
+    assert_eq!(ack.session.expect("session").session_id, session_id);
+
+    // The publisher publishes one sample.
+    let publisher_ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut publisher = world.connect(&publisher_ticket, "gs.v1.proto").await;
+    hello(&mut publisher, Subprotocol::Proto).await;
+    let published = publish(
+        &mut publisher,
+        &session_id,
+        vec![sample(101)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(published.results.len(), 1);
+
+    // The reader receives the update through the fan-out (single path, docs/04 §8).
+    use futures::StreamExt;
+    let update = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match reader.next().await {
+                Some(Ok(Message::Binary(bytes))) => {
+                    let server = decode_server(&bytes, Subprotocol::Proto);
+                    if let Some(gs_service::gs_protocol::server_message::Body::LocationUpdate(
+                        update,
+                    )) = server.body
+                    {
+                        return update;
+                    }
+                }
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("the reader receives the published update");
+    assert_eq!(update.session_id, session_id);
+    assert_eq!(
+        update.sample.as_ref().map(|sample| sample.sequence),
+        Some(101)
+    );
+    assert_eq!(
+        update.delivery,
+        gs_service::gs_protocol::DeliveryKind::Live as i32
+    );
+    assert!(
+        update.received_at.is_some(),
+        "the server assigns received_at (FR-LOC-005)"
+    );
+    // No coordinates of the sample are ever logged or echoed in the ack.
+    assert_eq!(
+        update
+            .sample
+            .as_ref()
+            .and_then(|sample| sample.position.as_ref())
+            .map(|position| position.latitude),
+        Some(8.9824)
+    );
+}
+
+#[tokio::test]
+async fn test_fr_str_006_only_the_newest_location_per_member_is_delivered() {
+    // covers: FR-STR-006, docs/08 §10 (coalescencia)
+    let world = setup("coalescing", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let session_id = session_of(&world).await;
+    start_sharing(&world, &session_id).await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+    let ack = subscribe(&mut socket, &session_id, Subprotocol::Proto, true).await;
+    assert_eq!(ack.session.expect("session").session_id, session_id);
+
+    // Two accepted publishes in a row: the client must receive the newest one (docs/08 §10).
+    let mut sequences = Vec::new();
+    publish_collecting(
+        &mut socket,
+        &session_id,
+        vec![sample(201)],
+        Subprotocol::Proto,
+        &mut sequences,
+    )
+    .await;
+    publish_collecting(
+        &mut socket,
+        &session_id,
+        vec![sample(202)],
+        Subprotocol::Proto,
+        &mut sequences,
+    )
+    .await;
+
+    use futures::StreamExt;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(400), socket.next()).await {
+            Ok(Some(Ok(Message::Binary(bytes)))) => {
+                let server = decode_server(&bytes, Subprotocol::Proto);
+                if let Some(gs_service::gs_protocol::server_message::Body::LocationUpdate(update)) =
+                    server.body
+                {
+                    sequences.push(update.sample.as_ref().map(|s| s.sequence).unwrap_or(0));
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            _ => break,
+        }
+    }
+    assert!(
+        sequences.contains(&202),
+        "the newest location must be delivered: {sequences:?}"
+    );
+    assert!(
+        sequences.windows(2).all(|pair| pair[1] > pair[0]),
+        "locations of a member arrive in order: {sequences:?}"
     );
 }

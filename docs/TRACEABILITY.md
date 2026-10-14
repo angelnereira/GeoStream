@@ -63,10 +63,10 @@ Reglas:
 | FR-LOC-009 | MUST | F8 | Ingesta HTTP por lotes | — | pendiente |
 | FR-STR-001 | MUST | F4 | Endpoint y handshake | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-api/src/stream.rs` | cumplido |
 | FR-STR-002 | MUST | F4 | Suscripción | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
-| FR-STR-003 | MUST | F4 | Distribución autorizada | — | pendiente |
+| FR-STR-003 | MUST | F4 | Distribución autorizada | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-stream/src/fanout.rs` | cumplido |
 | FR-STR-004 | MUST | F4 | Acks de publicación | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-005 | MUST | F4 | Heartbeat, inactividad y cierre | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-stream/src/close_codes.rs` | cumplido |
-| FR-STR-006 | MUST | F4 | Backpressure | — | pendiente |
+| FR-STR-006 | MUST | F4 | Backpressure | `crates/gs-stream/src/fanout.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-007 | MUST | F4 | Una conexión por dispositivo | — | pendiente |
 | FR-STR-008 | MUST | F4 | Revocación en vivo | — | pendiente |
 | FR-STR-009 | MUST | F6 | Fan-out multi-instancia | — | pendiente |
