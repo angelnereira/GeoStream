@@ -1682,6 +1682,26 @@ dependencies = [
 [[package]]
 name = "gs-devclient"
 version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "gs-auth",
+ "gs-domain",
+ "gs-protocol",
+ "gs-service",
+ "gs-testkit",
+ "prost",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
 
 [[package]]
 name = "gs-domain"
