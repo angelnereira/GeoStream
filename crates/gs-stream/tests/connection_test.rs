@@ -111,6 +111,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         Some(vec![
             "sessions:create".to_string(),
             "stream:connect".to_string(),
+            "sharing:write".to_string(),
         ]),
         None,
     )
@@ -188,7 +189,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
     let device_token = mint(
         credential.clone(),
         format!("stream-{suffix}"),
-        vec!["stream:connect".to_string()],
+        vec!["stream:connect".to_string(), "sharing:write".to_string()],
     )
     .await;
     // A device of the same tenant that is not a member of the session.
@@ -259,7 +260,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         ephemeral: ephemeral.clone(),
         redis_key_prefix: prefix.clone(),
         upgrade_rpm_per_ip: 120,
-        max_connections: 2,
+        max_connections: config.max_connections,
         max_frame_bytes: 16_384,
         connections: connections.clone(),
         json_subprotocol_enabled: config.json_subprotocol_enabled,
@@ -723,6 +724,29 @@ async fn unsubscribe(
     }
 }
 
+/// Sends a heartbeat and verifies HeartbeatAck.
+async fn heartbeat(socket: &mut Socket, subprotocol: Subprotocol) {
+    let request = gs_service::gs_protocol::ClientMessage {
+        request_id: 42,
+        body: Some(gs_service::gs_protocol::client_message::Body::Heartbeat(
+            gs_service::gs_protocol::Heartbeat { client_time: None },
+        )),
+    };
+    socket
+        .send(frame_of(encode_client(&request, subprotocol), subprotocol))
+        .await
+        .expect("send heartbeat");
+    let bytes = read_binary(socket).await;
+    let server = decode_server(&bytes, subprotocol);
+    assert_eq!(server.request_id, 42);
+    assert!(matches!(
+        server.body,
+        Some(gs_service::gs_protocol::server_message::Body::HeartbeatAck(
+            _
+        ))
+    ));
+}
+
 /// Subscribes expecting a `StreamError`, and returns it.
 async fn subscribe_expecting_error(
     socket: &mut Socket,
@@ -1057,7 +1081,11 @@ async fn test_heartbeat_is_answered_with_the_server_clock() {
 #[tokio::test]
 async fn test_connection_limit_is_enforced_with_503() {
     // covers: FR-STR-001, docs/08 §3 (GS_STREAM_MAX_CONNECTIONS)
-    let world = setup("limit", StreamConfig::default()).await;
+    let config = StreamConfig {
+        max_connections: 2,
+        ..StreamConfig::default()
+    };
+    let world = setup("limit", config).await;
     let first = world
         .ticket(&world.device_token.response.access_token)
         .await;
@@ -2204,4 +2232,355 @@ async fn test_fr_str_011_live_application_disabled_closes_connection_with_4403()
 
     // The connection must close with 4403 immediately in real time
     assert_eq!(read_close_code(&mut socket).await, 4403);
+}
+
+#[tokio::test]
+async fn test_fr_str_007_supersede_closes_previous_device_connection_with_4409() {
+    // covers: FR-STR-007, SCN-008, docs/04 §6.3, docs/08 §6.7
+    let world = setup("supersede-dev", StreamConfig::default()).await;
+    let token = &world.device_token.response.access_token;
+    let device_id = &world.device_token.response.device_id;
+    let ticket_1 = world.ticket(token).await;
+    let ticket_2 = world.ticket(token).await;
+
+    let mut socket_1 = world.connect(&ticket_1, "gs.v1.proto").await;
+    let hello_1 = hello(&mut socket_1, Subprotocol::Proto).await;
+    let conn_1 = hello_1["connectionId"].as_str().unwrap().to_string();
+
+    // Check presence key in ephemeral store
+    let presence_key = format!("{}:presence:{}", world.prefix, device_id);
+    let presence = world
+        .ephemeral
+        .get_presence(&presence_key)
+        .await
+        .unwrap()
+        .expect("presence exists");
+    assert!(
+        presence
+            .iter()
+            .any(|(k, v)| k == "connection_id" && v == &conn_1)
+    );
+
+    // Same device connects with socket 2
+    let mut socket_2 = world.connect(&ticket_2, "gs.v1.proto").await;
+    let hello_2 = hello(&mut socket_2, Subprotocol::Proto).await;
+    let conn_2 = hello_2["connectionId"].as_str().unwrap().to_string();
+    assert_ne!(conn_1, conn_2);
+
+    // Socket 1 must close immediately with code 4409 (SUPERSEDED)
+    assert_eq!(read_close_code(&mut socket_1).await, 4409);
+
+    // Presence now points to connection 2
+    let presence_2 = world
+        .ephemeral
+        .get_presence(&presence_key)
+        .await
+        .unwrap()
+        .expect("presence exists");
+    assert!(
+        presence_2
+            .iter()
+            .any(|(k, v)| k == "connection_id" && v == &conn_2)
+    );
+
+    // Socket 2 is alive and can exchange heartbeats
+    heartbeat(&mut socket_2, Subprotocol::Proto).await;
+}
+
+#[tokio::test]
+async fn test_fr_str_007_application_connections_do_not_supersede() {
+    // covers: FR-STR-007, docs/08 §6.7
+    let config = StreamConfig {
+        max_connections: 10,
+        ..StreamConfig::default()
+    };
+    let world = setup("no-supersede-app", config).await;
+    let ticket_1 = world.ticket(&world.key_with_scope).await;
+    let ticket_2 = world.ticket(&world.key_with_scope).await;
+
+    let mut socket_1 = world.connect(&ticket_1, "gs.v1.proto").await;
+    hello(&mut socket_1, Subprotocol::Proto).await;
+
+    let mut socket_2 = world.connect(&ticket_2, "gs.v1.proto").await;
+    hello(&mut socket_2, Subprotocol::Proto).await;
+
+    // Both sockets are alive; neither was superseded
+    heartbeat(&mut socket_1, Subprotocol::Proto).await;
+    heartbeat(&mut socket_2, Subprotocol::Proto).await;
+}
+
+#[tokio::test]
+async fn test_fr_prs_002_reconnection_within_grace_suppresses_offline_event() {
+    // covers: FR-PRS-002, docs/04 §6.3, docs/05 §8 (reconexión dentro de la gracia no emite OFFLINE)
+    let config = StreamConfig {
+        max_connections: 10,
+        offline_grace: Duration::from_millis(600),
+        ..StreamConfig::default()
+    };
+    let world = setup("grace-reconnect", config).await;
+    let session_id = session_of(&world).await;
+
+    // Add reader as member with read=true, publish=false
+    add_member(
+        &world,
+        &session_id,
+        "stream-reader-grace-reconnect",
+        "MEMBER",
+        true,
+        false,
+    )
+    .await;
+
+    // Reader device connects and subscribes
+    let reader_ticket = world
+        .ticket(&world.reader_device_token.response.access_token)
+        .await;
+    let mut reader_socket = world.connect(&reader_ticket, "gs.v1.proto").await;
+    hello(&mut reader_socket, Subprotocol::Proto).await;
+    subscribe(&mut reader_socket, &session_id, Subprotocol::Proto, true).await;
+
+    // Activate sharing for publisher (owner)
+    let client = reqwest::Client::new();
+    let resp = client
+        .put(format!(
+            "{}/v1/sessions/{session_id}/members/me/sharing",
+            world.http_base
+        ))
+        .bearer_auth(&world.device_token.response.access_token)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "sharing": true }).to_string())
+        .send()
+        .await
+        .expect("enable sharing");
+    assert_eq!(resp.status(), 200);
+
+    // Drain the SharingStarted control event that reader received
+    let _ = next_server_message_timeout(
+        &mut reader_socket,
+        Subprotocol::Proto,
+        Duration::from_secs(3),
+    )
+    .await;
+
+    // Publisher connects: reader receives MemberStatus with ONLINE
+    let pub_ticket_1 = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut pub_socket_1 = world.connect(&pub_ticket_1, "gs.v1.proto").await;
+    hello(&mut pub_socket_1, Subprotocol::Proto).await;
+
+    let msg = next_server_message_timeout(
+        &mut reader_socket,
+        Subprotocol::Proto,
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("MemberStatus ONLINE");
+    match msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::MemberStatus(status)) => {
+            assert_eq!(
+                status.connectivity,
+                gs_service::gs_protocol::Connectivity::Online as i32
+            );
+            assert!(status.sharing);
+        }
+        other => panic!("expected MemberStatus, got {other:?}"),
+    }
+
+    // Publisher disconnects
+    drop(pub_socket_1);
+
+    // Reconnect within grace period (after 100ms, well before 600ms grace)
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let pub_ticket_2 = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut pub_socket_2 = world.connect(&pub_ticket_2, "gs.v1.proto").await;
+    hello(&mut pub_socket_2, Subprotocol::Proto).await;
+
+    // Wait until after the 600ms grace period would have elapsed
+    tokio::time::sleep(Duration::from_millis(700)).await;
+
+    // Reader must NOT have received any OFFLINE event
+    let msg_after = next_server_message_timeout(
+        &mut reader_socket,
+        Subprotocol::Proto,
+        Duration::from_millis(100),
+    )
+    .await;
+    if let Some(m) = msg_after
+        && let Some(gs_service::gs_protocol::server_message::Body::MemberStatus(s)) = m.body
+    {
+        assert_ne!(
+            s.connectivity,
+            gs_service::gs_protocol::Connectivity::Offline as i32,
+            "must not emit OFFLINE if reconnected"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_fr_prs_002_expiry_of_grace_emits_offline_event() {
+    // covers: FR-PRS-002, docs/04 §6.3, docs/05 §8 (expiración de gracia emite OFFLINE)
+    let config = StreamConfig {
+        max_connections: 10,
+        offline_grace: Duration::from_millis(200),
+        ..StreamConfig::default()
+    };
+    let world = setup("grace-expire", config).await;
+    let session_id = session_of(&world).await;
+
+    // Add reader as member with read=true, publish=false
+    add_member(
+        &world,
+        &session_id,
+        "stream-reader-grace-expire",
+        "MEMBER",
+        true,
+        false,
+    )
+    .await;
+
+    // Reader device connects and subscribes
+    let reader_ticket = world
+        .ticket(&world.reader_device_token.response.access_token)
+        .await;
+    let mut reader_socket = world.connect(&reader_ticket, "gs.v1.proto").await;
+    hello(&mut reader_socket, Subprotocol::Proto).await;
+    subscribe(&mut reader_socket, &session_id, Subprotocol::Proto, true).await;
+
+    // Activate sharing for publisher (owner)
+    let client = reqwest::Client::new();
+    let resp = client
+        .put(format!(
+            "{}/v1/sessions/{session_id}/members/me/sharing",
+            world.http_base
+        ))
+        .bearer_auth(&world.device_token.response.access_token)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "sharing": true }).to_string())
+        .send()
+        .await
+        .expect("enable sharing");
+    assert_eq!(resp.status(), 200);
+
+    // Drain the SharingStarted control event that reader received
+    let _ = next_server_message_timeout(
+        &mut reader_socket,
+        Subprotocol::Proto,
+        Duration::from_secs(3),
+    )
+    .await;
+
+    // Publisher connects: reader receives MemberStatus with ONLINE
+    let pub_ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut pub_socket = world.connect(&pub_ticket, "gs.v1.proto").await;
+    hello(&mut pub_socket, Subprotocol::Proto).await;
+
+    let msg = next_server_message_timeout(
+        &mut reader_socket,
+        Subprotocol::Proto,
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("MemberStatus ONLINE");
+    match msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::MemberStatus(status)) => {
+            assert_eq!(
+                status.connectivity,
+                gs_service::gs_protocol::Connectivity::Online as i32
+            );
+        }
+        other => panic!("expected MemberStatus, got {other:?}"),
+    }
+
+    // Publisher disconnects
+    drop(pub_socket);
+
+    // Reader must receive MemberStatus with OFFLINE after grace expires
+    let offline_msg = next_server_message_timeout(
+        &mut reader_socket,
+        Subprotocol::Proto,
+        Duration::from_secs(3),
+    )
+    .await
+    .expect("MemberStatus OFFLINE after grace");
+    match offline_msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::MemberStatus(status)) => {
+            assert_eq!(
+                status.connectivity,
+                gs_service::gs_protocol::Connectivity::Offline as i32
+            );
+            assert!(status.sharing);
+        }
+        other => panic!("expected MemberStatus OFFLINE, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_fr_prs_004_non_sharing_member_never_emits_presence_events() {
+    // covers: FR-PRS-004, INV-PRS-1, docs/05 §8 (miembro que no comparte nunca emite presencia)
+    let config = StreamConfig {
+        max_connections: 10,
+        offline_grace: Duration::from_millis(100),
+        ..StreamConfig::default()
+    };
+    let world = setup("non-sharing-presence", config).await;
+    let session_id = session_of(&world).await;
+
+    // Add member with read=true, publish=true, but sharing is false by default
+    add_member(
+        &world,
+        &session_id,
+        "stream-reader-non-sharing-presence",
+        "MEMBER",
+        true,
+        true,
+    )
+    .await;
+
+    // Owner connects and subscribes
+    let owner_ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut owner_socket = world.connect(&owner_ticket, "gs.v1.proto").await;
+    hello(&mut owner_socket, Subprotocol::Proto).await;
+    subscribe(&mut owner_socket, &session_id, Subprotocol::Proto, true).await;
+
+    // Reader device (sharing is false) connects via WebSocket
+    let reader_ticket = world
+        .ticket(&world.reader_device_token.response.access_token)
+        .await;
+    let mut reader_socket = world.connect(&reader_ticket, "gs.v1.proto").await;
+    hello(&mut reader_socket, Subprotocol::Proto).await;
+
+    // Owner should NOT receive any MemberStatus presence event
+    let msg = next_server_message_timeout(
+        &mut owner_socket,
+        Subprotocol::Proto,
+        Duration::from_millis(150),
+    )
+    .await;
+    assert!(
+        msg.is_none(),
+        "no presence event for non-sharing member connecting"
+    );
+
+    // Reader disconnects and grace expires
+    drop(reader_socket);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // Owner still must NOT receive any MemberStatus presence event
+    let msg_after = next_server_message_timeout(
+        &mut owner_socket,
+        Subprotocol::Proto,
+        Duration::from_millis(150),
+    )
+    .await;
+    assert!(
+        msg_after.is_none(),
+        "no presence event for non-sharing member disconnecting"
+    );
 }

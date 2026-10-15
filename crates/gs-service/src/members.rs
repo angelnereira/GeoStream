@@ -1358,3 +1358,14 @@ pub async fn set_sharing<E: EphemeralStore, B: Bus>(
         )),
     }
 }
+
+/// Lists all active memberships where the given device is currently the publishing device (docs/04 §6.3, FR-PRS-002).
+pub async fn list_active_publishing_by_device(
+    pool: &gs_store::PgPool,
+    tenant_id: TenantId,
+    device_id: DeviceId,
+) -> Result<Vec<MemberWithSubject>, MemberUseCaseError> {
+    MembershipRepository::list_active_publishing_by_device(pool, tenant_id, device_id)
+        .await
+        .map_err(Into::into)
+}

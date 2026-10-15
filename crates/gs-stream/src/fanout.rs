@@ -23,7 +23,7 @@ use dashmap::DashMap;
 use gs_service::authz::{AuthzCache, PrincipalIdentity};
 use gs_service::control::{GlobalBusEvent, SessionControlEvent};
 use gs_service::gs_domain::Subprotocol;
-use gs_service::gs_domain::ids::{ConnectionId, MemberId, SessionId};
+use gs_service::gs_domain::ids::{ConnectionId, DeviceId, MemberId, SessionId};
 use gs_service::gs_protocol::server_message::Body as ServerBody;
 use gs_service::gs_protocol::{
     MemberEvent, MemberEventKind, MemberStatus, ServerMessage, SessionEvent, SessionEventKind,
@@ -157,7 +157,8 @@ pub struct ConnHandle {
 #[derive(Debug)]
 pub struct Fanout {
     by_session: DashMap<SessionId, Vec<ConnHandle>>,
-    active_connections: DashMap<ConnectionId, ActiveConn>,
+    pub(crate) active_connections: DashMap<ConnectionId, ActiveConn>,
+    device_listeners: DashMap<DeviceId, CancellationToken>,
     /// Bus the instance publishes and receives from (docs/04 §6.1).
     bus: Arc<InMemoryBus>,
     /// Authorization cache for invalidation on bus events (docs/04 §6.2, ADR-0009).
@@ -183,6 +184,7 @@ impl Fanout {
         Self {
             by_session: DashMap::new(),
             active_connections: DashMap::new(),
+            device_listeners: DashMap::new(),
             bus,
             authz: std::sync::RwLock::new(authz),
             key_prefix: key_prefix.into(),
@@ -202,15 +204,45 @@ impl Fanout {
         self.authz.read().ok().and_then(|guard| guard.clone())
     }
 
-    /// Registers an active connection on this instance and ensures global security listener runs.
+    /// Registers an active connection on this instance and ensures listeners run.
     pub async fn register_active_conn(self: &Arc<Self>, conn: ActiveConn) {
+        let device_id = conn.principal.device_id;
         self.active_connections.insert(conn.connection_id, conn);
         self.ensure_global_listener().await;
+        if let Some(dev_id) = device_id {
+            self.ensure_device_listener(dev_id).await;
+        }
     }
 
     /// Unregisters an active connection when it closes.
     pub fn unregister_active_conn(&self, connection_id: ConnectionId) {
-        self.active_connections.remove(&connection_id);
+        if let Some((_, conn)) = self.active_connections.remove(&connection_id)
+            && let Some(device_id) = conn.principal.device_id
+        {
+            let still_has = self
+                .active_connections
+                .iter()
+                .any(|entry| entry.principal.device_id == Some(device_id));
+            if !still_has && let Some((_, cancel)) = self.device_listeners.remove(&device_id) {
+                cancel.cancel();
+            }
+        }
+    }
+
+    /// Ensures device listener task is running on `{key_prefix}:bus:dev:{device_id}` (docs/04 §6.3, docs/08 §6.7, FR-STR-007).
+    pub async fn ensure_device_listener(self: &Arc<Self>, device_id: DeviceId) {
+        if self.device_listeners.contains_key(&device_id) {
+            return;
+        }
+        let cancel = CancellationToken::new();
+        self.device_listeners.insert(device_id, cancel.clone());
+        let topic = format!("{}:bus:dev:{}", self.key_prefix, device_id);
+        if let Ok(sub) = self.bus.subscribe(&topic).await {
+            let fanout = Arc::clone(self);
+            tokio::spawn(async move {
+                device_bus_task(fanout, device_id, sub, cancel).await;
+            });
+        }
     }
 
     /// Number of active connections on this stream instance.
@@ -656,6 +688,21 @@ impl Fanout {
                     }
                 }
             }
+            SessionControlEvent::MemberStatusChanged {
+                session_id: _,
+                member,
+                at: _,
+            } => {
+                let msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::MemberStatus(member)),
+                };
+                if let Some(entry) = self.by_session.get(&session_id) {
+                    for handle in entry.iter() {
+                        send_server_msg(handle, &msg).await;
+                    }
+                }
+            }
         }
     }
 
@@ -861,6 +908,57 @@ async fn global_bus_task(fanout: Arc<Fanout>, subscription: u64) {
                             .close_tx
                             .send(crate::close_codes::CLOSE_AUTH_EXPIRED)
                             .await;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Reads the device-scoped bus topic `{key_prefix}:bus:dev:{device_id}` and closes superseded connections (docs/04 §6.3, docs/08 §6.7, FR-STR-007).
+async fn device_bus_task(
+    fanout: Arc<Fanout>,
+    device_id: DeviceId,
+    subscription: u64,
+    cancel: CancellationToken,
+) {
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = fanout.bus.unsubscribe(subscription).await;
+                return;
+            }
+            res = tokio::time::timeout(Duration::from_secs(1), fanout.bus.next_message(subscription)) => {
+                let Ok(message) = res else {
+                    continue;
+                };
+                let Ok(Some(message)) = message else {
+                    return;
+                };
+
+                let Ok(event) = serde_json::from_slice::<gs_service::control::DeviceBusEvent>(&message.payload) else {
+                    continue;
+                };
+
+                match event {
+                    gs_service::control::DeviceBusEvent::Supersede {
+                        device_id: dev_id_str,
+                        connection_id: incoming_conn_id_str,
+                        ..
+                    } => {
+                        if dev_id_str == device_id.to_string() {
+                            for entry in fanout.active_connections.iter() {
+                                let conn = entry.value();
+                                if conn.principal.device_id.as_ref().map(|d| d.to_string()) == Some(dev_id_str.clone())
+                                    && conn.connection_id.to_string() != incoming_conn_id_str
+                                {
+                                    let _ = conn
+                                        .close_tx
+                                        .send(crate::close_codes::CLOSE_SUPERSEDED)
+                                        .await;
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -52,8 +52,8 @@ pub use members::{
     AddMemberRequest, MemberList, MemberResource, MemberUseCaseError, SetSharingCaller,
     SetSharingContext, SharingRequest, UpdateCaller, UpdateMemberRequest, add_member,
     add_member_with_bus, get_member, get_member_for_device_me, leave_session,
-    leave_session_with_bus, list_members, revoke_member, revoke_member_with_bus, set_sharing,
-    update_member, update_member_with_bus,
+    leave_session_with_bus, list_active_publishing_by_device, list_members, revoke_member,
+    revoke_member_with_bus, set_sharing, update_member, update_member_with_bus,
 };
 pub use publishing::{
     PublishCaller, PublishError, PublishOutcome, PublishParams, PublishThrottle, publish_ack_for,

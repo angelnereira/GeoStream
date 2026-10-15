@@ -67,15 +67,15 @@ Reglas:
 | FR-STR-004 | MUST | F4 | Acks de publicación | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-005 | MUST | F4 | Heartbeat, inactividad y cierre | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-stream/src/close_codes.rs` | cumplido |
 | FR-STR-006 | MUST | F4 | Backpressure | `crates/gs-stream/src/fanout.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
-| FR-STR-007 | MUST | F4 | Una conexión por dispositivo | — | pendiente |
+| FR-STR-007 | MUST | F4 | Una conexión por dispositivo | `crates/gs-stream/src/connection.rs`, `crates/gs-stream/src/fanout.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-008 | MUST | F4 | Revocación en vivo | `crates/gs-service/tests/control_events_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-009 | MUST | F6 | Fan-out multi-instancia | — | pendiente |
 | FR-STR-010 | MUST | F6 | Drenaje controlado | — | pendiente |
 | FR-STR-011 | MUST | F4 | Eventos de sesión y miembros | `crates/gs-service/tests/control_events_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-PRS-001 | MUST | F4 | Estado de miembro | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/src/subscription.rs` | cumplido |
-| FR-PRS-002 | MUST | F4 | Gracia de desconexión | — | pendiente |
+| FR-PRS-002 | MUST | F4 | Gracia de desconexión | `crates/gs-stream/src/connection.rs`, `crates/gs-store/src/repos/membership_repo.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-PRS-003 | MUST | F6 | Presencia multi-instancia | — | pendiente |
-| FR-PRS-004 | MUST | F4 | Minimización de presencia | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/src/subscription.rs` | cumplido |
+| FR-PRS-004 | MUST | F4 | Minimización de presencia | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/src/subscription.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-SDK-001 | MUST | F5 | Fachada pública | — | pendiente |
 | FR-SDK-002 | MUST | F5 | Proveedor de credenciales | — | pendiente |
 | FR-SDK-003 | MUST | F5 | Permisos y servicio de ubicación | — | pendiente |

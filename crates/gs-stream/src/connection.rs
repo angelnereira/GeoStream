@@ -21,10 +21,15 @@ use futures::SinkExt;
 use futures::StreamExt;
 use futures::stream::SplitSink;
 use gs_service::authz::{AuthzCache, PrincipalIdentity};
+use gs_service::control::{
+    DeviceBusEvent, SessionControlEvent, format_rfc3339, publish_device_bus_event,
+    publish_session_control, to_proto_member_status,
+};
 use gs_service::gs_auth::TenantPolicy;
 use gs_service::gs_domain::Subprotocol;
 use gs_service::gs_domain::error::{AsErrorCode, ErrorCode};
 use gs_service::gs_domain::ids::{ConnectionId, SessionId};
+use gs_service::gs_domain::membership::Connectivity;
 use gs_service::gs_ephemeral::EphemeralStore;
 use gs_service::gs_protocol::ErrorCode as ProtoErrorCode;
 use gs_service::gs_protocol::client_message::Body as ClientBody;
@@ -35,6 +40,7 @@ use gs_service::gs_protocol::{
     Unsubscribe,
 };
 use gs_service::gs_store::PgPool;
+use gs_service::members::list_active_publishing_by_device;
 use gs_service::publishing::{
     PublishCaller, PublishError, PublishParams, PublishThrottle, publish_ack_for,
 };
@@ -53,7 +59,7 @@ use tokio_util::sync::CancellationToken;
 use crate::close_codes::{
     CLOSE_AUTH_EXPIRED, CLOSE_GOING_AWAY, CLOSE_IDLE_TIMEOUT, CLOSE_INTERNAL,
     CLOSE_MESSAGE_TOO_BIG, CLOSE_NORMAL, CLOSE_PROTOCOL_ERROR, CLOSE_RATE_LIMITED,
-    CLOSE_SLOW_CONSUMER, CLOSE_UNSUPPORTED_PROTOCOL,
+    CLOSE_SLOW_CONSUMER, CLOSE_SUPERSEDED, CLOSE_UNSUPPORTED_PROTOCOL,
 };
 use crate::codec::{FrameCodec, FrameError};
 use crate::config::{StreamConfig, StreamLimits as EffectiveLimits};
@@ -171,6 +177,8 @@ pub struct Connection {
     session_end_tx: mpsc::Sender<(SessionId, SubscriptionEndReason)>,
     /// Receiver for session end notifications from fan-out.
     session_end_rx: mpsc::Receiver<(SessionId, SubscriptionEndReason)>,
+    /// Last instant at which presence was renewed in ephemeral store (docs/08 §6.5).
+    last_presence_renew: Instant,
 }
 
 impl Connection {
@@ -219,6 +227,7 @@ impl Connection {
             cancel: CancellationToken::new(),
             session_end_tx,
             session_end_rx,
+            last_presence_renew: Instant::now(),
         })
     }
 
@@ -278,6 +287,8 @@ impl Connection {
         // The state was checked at the upgrade, so the first revalidation comes after one full
         // TTL of the cache (docs/06 §7).
         let mut authz_deadline = started + state.authz.ttl();
+        let presence_interval = (self.config.presence_ttl / 3).max(Duration::from_millis(50));
+        let mut next_presence_renew = started + presence_interval;
         let mut close_signal_closed = false;
 
         loop {
@@ -317,6 +328,29 @@ impl Connection {
                         self.subscriptions.remove(session_id);
                         self.throttles.remove(&session_id);
                     }
+                    continue;
+                }
+                // Periodic presence renewal for devices (docs/04 §6.3, docs/08 §6.5)
+                _ = tokio::time::sleep_until(next_presence_renew),
+                    if matches!(self.state, ConnectionState::Ready)
+                        && matches!(self.grant.principal_kind, TicketPrincipalKind::Device)
+                        && self.grant.device_id.is_some() => {
+                    if let Some(device_id) = self.grant.device_id {
+                        let presence_key = format!("{}:presence:{}", state.redis_key_prefix, device_id);
+                        let conn_id_str = self.connection_id.to_string();
+                        let now_str = format_rfc3339(OffsetDateTime::now_utc());
+                        let fields = [
+                            ("connection_id", conn_id_str.as_str()),
+                            ("instance_id", self.config.instance_id.as_str()),
+                            ("connected_at", now_str.as_str()),
+                        ];
+                        let _ = state
+                            .ephemeral
+                            .set_presence(&presence_key, &fields, self.config.presence_ttl)
+                            .await;
+                        self.last_presence_renew = Instant::now();
+                    }
+                    next_presence_renew = Instant::now() + presence_interval;
                     continue;
                 }
                 frame = stream.next() => frame,
@@ -453,7 +487,7 @@ impl Connection {
                     .await;
                     return;
                 }
-                self.handle_heartbeat(request_id, heartbeat).await;
+                self.handle_heartbeat(state, request_id, heartbeat).await;
             }
             Some(ClientBody::Subscribe(subscribe)) => {
                 self.handle_subscribe(state, request_id, subscribe).await;
@@ -536,11 +570,110 @@ impl Connection {
         };
         if !self.send(&message).await {
             self.close(CLOSE_SLOW_CONSUMER);
+            return;
+        }
+
+        // Establish device presence and single connection guarantee (FR-STR-007, FR-PRS-002, docs/04 §6.3, docs/08 §6.7)
+        if matches!(self.grant.principal_kind, TicketPrincipalKind::Device)
+            && let Some(device_id) = self.grant.device_id
+        {
+            self.last_presence_renew = Instant::now();
+            let presence_key = format!("{}:presence:{}", state.redis_key_prefix, device_id);
+            let conn_id_str = self.connection_id.to_string();
+            let server_time_str = format_rfc3339(server_time);
+            let fields = [
+                ("connection_id", conn_id_str.as_str()),
+                ("instance_id", self.config.instance_id.as_str()),
+                ("connected_at", server_time_str.as_str()),
+            ];
+            let _ = state
+                .ephemeral
+                .set_presence(&presence_key, &fields, self.config.presence_ttl)
+                .await;
+
+            // Close any older connection of the same device on this instance with 4409 (FR-STR-007)
+            for entry in state.fanout.active_connections.iter() {
+                let conn = entry.value();
+                if conn.principal.device_id == Some(device_id)
+                    && conn.connection_id != self.connection_id
+                {
+                    let _ = conn.close_tx.send(CLOSE_SUPERSEDED).await;
+                }
+            }
+
+            // Publish supersede event on bus to close connections on other instances (docs/04 §6.3, docs/08 §6.7, FR-STR-007)
+            let supersede = DeviceBusEvent::Supersede {
+                device_id: device_id.to_string(),
+                connection_id: conn_id_str,
+                at: server_time_str.clone(),
+            };
+            let _ = publish_device_bus_event(
+                state.bus.as_ref(),
+                &state.redis_key_prefix,
+                device_id,
+                &supersede,
+            )
+            .await;
+
+            // Broadcast ONLINE to active publishing sessions (docs/05 §8, FR-PRS-002)
+            if let Ok(publishers) =
+                list_active_publishing_by_device(&state.pool, self.grant.tenant_id, device_id).await
+            {
+                for pub_member in publishers {
+                    let proto_status = to_proto_member_status(
+                        pub_member.membership.session_id,
+                        pub_member.membership.id,
+                        &pub_member.external_subject_id,
+                        pub_member.membership.role,
+                        pub_member.membership.capabilities,
+                        true,
+                        Connectivity::Online,
+                        None,
+                    );
+                    let event = SessionControlEvent::MemberStatusChanged {
+                        session_id: pub_member.membership.session_id.to_string(),
+                        member: proto_status,
+                        at: server_time_str.clone(),
+                    };
+                    let _ = publish_session_control(
+                        state.bus.as_ref(),
+                        &state.redis_key_prefix,
+                        pub_member.membership.session_id,
+                        &event,
+                    )
+                    .await;
+                }
+            }
         }
     }
 
-    /// Answers a heartbeat with the server clock (docs/08 §6.5).
-    async fn handle_heartbeat(&mut self, request_id: u64, heartbeat: Heartbeat) {
+    /// Answers a heartbeat with the server clock and renews presence (docs/08 §6.5).
+    async fn handle_heartbeat(
+        &mut self,
+        state: &StreamState,
+        request_id: u64,
+        heartbeat: Heartbeat,
+    ) {
+        if matches!(self.grant.principal_kind, TicketPrincipalKind::Device)
+            && let Some(device_id) = self.grant.device_id
+        {
+            let presence_interval = (self.config.presence_ttl / 3).max(Duration::from_millis(50));
+            if Instant::now().duration_since(self.last_presence_renew) >= presence_interval {
+                let presence_key = format!("{}:presence:{}", state.redis_key_prefix, device_id);
+                let conn_id_str = self.connection_id.to_string();
+                let now_str = format_rfc3339(OffsetDateTime::now_utc());
+                let fields = [
+                    ("connection_id", conn_id_str.as_str()),
+                    ("instance_id", self.config.instance_id.as_str()),
+                    ("connected_at", now_str.as_str()),
+                ];
+                let _ = state
+                    .ephemeral
+                    .set_presence(&presence_key, &fields, self.config.presence_ttl)
+                    .await;
+                self.last_presence_renew = Instant::now();
+            }
+        }
         let ack = HeartbeatAck {
             client_time: heartbeat.client_time,
             server_time: Some(to_proto_timestamp(OffsetDateTime::now_utc())),
@@ -1184,6 +1317,61 @@ pub async fn run_session(session: AcceptedSession, state: Arc<StreamState>) {
         state.fanout.unsubscribe(session_id, connection_id);
     }
     state.fanout.unregister_active_conn(connection_id);
+
+    // Presence cleanup and disconnection grace (FR-PRS-002, docs/04 §6.3)
+    if matches!(connection.grant.principal_kind, TicketPrincipalKind::Device)
+        && let Some(device_id) = connection.grant.device_id
+    {
+        let presence_key = format!("{}:presence:{}", state.redis_key_prefix, device_id);
+        let conn_id_str = connection_id.to_string();
+        let released = state
+            .ephemeral
+            .release_presence(&presence_key, &conn_id_str)
+            .await
+            .unwrap_or(false);
+
+        if released {
+            let state_clone = Arc::clone(&state);
+            let tenant_id = connection.grant.tenant_id;
+            let offline_grace = state.config.offline_grace;
+            tokio::spawn(async move {
+                tokio::time::sleep(offline_grace).await;
+                if let Ok(None) = state_clone.ephemeral.get_presence(&presence_key).await
+                    && let Ok(publishers) =
+                        list_active_publishing_by_device(&state_clone.pool, tenant_id, device_id)
+                            .await
+                {
+                    let now_str = format_rfc3339(OffsetDateTime::now_utc());
+                    for pub_member in publishers {
+                        if pub_member.membership.sharing {
+                            let proto_status = to_proto_member_status(
+                                pub_member.membership.session_id,
+                                pub_member.membership.id,
+                                &pub_member.external_subject_id,
+                                pub_member.membership.role,
+                                pub_member.membership.capabilities,
+                                true,
+                                Connectivity::Offline,
+                                None,
+                            );
+                            let event = SessionControlEvent::MemberStatusChanged {
+                                session_id: pub_member.membership.session_id.to_string(),
+                                member: proto_status,
+                                at: now_str.clone(),
+                            };
+                            let _ = publish_session_control(
+                                state_clone.bus.as_ref(),
+                                &state_clone.redis_key_prefix,
+                                pub_member.membership.session_id,
+                                &event,
+                            )
+                            .await;
+                        }
+                    }
+                }
+            });
+        }
+    }
 
     // The close frame is written by the owner of the socket, before it goes away (docs/08 §8).
     let close = CloseFrame {

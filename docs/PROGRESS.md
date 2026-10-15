@@ -35,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado), T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks), T-F4-06 (fan-out por bus con coalescencia y backpressure) y T-F4-07 (eventos de control y revocación en vivo) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal), T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado), T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks), T-F4-06 (fan-out por bus con coalescencia y backpressure), T-F4-07 (eventos de control y revocación en vivo) y T-F4-08 (presencia, gracia de desconexión y conexión única) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -48,6 +48,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-14 — T-F4-08 — Presencia, gracia de desconexión y conexión única (`Supersede`, código 4409)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Rama: `feat/T-F4-08-presence`.
+- Requisitos: FR-PRS-002, FR-STR-007, FR-PRS-004.
+- Evidencia: implementación completa del ciclo de presencia efímera, conexión única por dispositivo y gracia de desconexión según `docs/04` §6.3 y `docs/08` §6.7. En `ClientHello`, los dispositivos registran su presencia en `{prefix}:presence:{device_id}` con TTL `presence_ttl` (90s); ante conexión concurrente del mismo dispositivo, la conexión anterior se cierra con código 4409 (`CLOSE_SUPERSEDED`) localmente y se emite `DeviceBusEvent::Supersede` en `{prefix}:bus:dev:{device_id}` para instancias remotas. Conexiones de aplicación no registran presencia ni sufren supersede (FR-STR-007). Al conectar un dispositivo publicador con `sharing=true`, se difunde `MemberStatusChanged{connectivity: ONLINE}` por `{prefix}:bus:ctl:{session_id}`. La conexión renueva periódicamente su presencia (`presence_ttl / 3`) y ante `Heartbeat`. Al desconectarse, `release_presence` atómico valida `connection_id` para no anular reconexiones previas; si se libera la clave, se espera `offline_grace` (10s) en background: si no hubo reconexión, se emite `MemberStatusChanged{connectivity: OFFLINE}`; si reconectó durante la gracia, el evento `OFFLINE` se suprime limpiamente (FR-PRS-002). Miembros sin compartición activa (`sharing=false`) nunca emiten eventos de presencia (INV-PRS-1, FR-PRS-004). Pruebas: 5 pruebas de integración extremo a extremo en `crates/gs-stream/tests/connection_test.rs`. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (404 pruebas, 0 fallos; base en `main`: 399 → +5), `cargo deny check`, `cargo run -p geostream-tools -- all`: todos OK.
 
 ### 2026-10-14 — T-F4-07 — Eventos de control y revocación en vivo (`SubscriptionEnded`, cierres 4401/4403)
 - Autor/agente: Angel Nereira (con agente de código).

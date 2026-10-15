@@ -41,6 +41,10 @@ pub const DEFAULT_MAX_FUTURE_SKEW_MS: i64 = 5_000;
 pub const DEFAULT_OUTBOUND_CONTROL_QUEUE: usize = 1_024;
 /// Default of `min_publish_interval_ms` (docs/17 §4).
 pub const DEFAULT_MIN_PUBLISH_INTERVAL_MS: u32 = 1_000;
+/// Default of `GS_PRESENCE_TTL_S` (docs/17 §2.2).
+pub const DEFAULT_PRESENCE_TTL_S: u64 = 90;
+/// Default of `GS_STREAM_OFFLINE_GRACE_MS` (docs/17 §2.6).
+pub const DEFAULT_OFFLINE_GRACE_MS: u64 = 10_000;
 
 /// Server side stream parameters (docs/17 §2.6).
 ///
@@ -78,6 +82,12 @@ pub struct StreamConfig {
     pub authz_cache_ttl: Duration,
     /// Bounded control queue per connection (`GS_STREAM_OUTBOUND_CONTROL_QUEUE`, docs/08 §10).
     pub outbound_control_queue: usize,
+    /// Unique instance identifier for presence records (`GS_INSTANCE_ID`).
+    pub instance_id: String,
+    /// TTL of presence records in ephemeral store (`GS_PRESENCE_TTL_S`, docs/04 §6.3).
+    pub presence_ttl: Duration,
+    /// Grace duration before marking an offline publisher as OFFLINE (`GS_STREAM_OFFLINE_GRACE_MS`, docs/04 §6.3, FR-PRS-002).
+    pub offline_grace: Duration,
 }
 
 impl Default for StreamConfig {
@@ -99,6 +109,9 @@ impl Default for StreamConfig {
             max_future_skew_ms: DEFAULT_MAX_FUTURE_SKEW_MS,
             authz_cache_ttl: Duration::from_millis(DEFAULT_AUTHZ_CACHE_TTL_MS),
             outbound_control_queue: DEFAULT_OUTBOUND_CONTROL_QUEUE,
+            instance_id: "stream-1".to_string(),
+            presence_ttl: Duration::from_secs(DEFAULT_PRESENCE_TTL_S),
+            offline_grace: Duration::from_millis(DEFAULT_OFFLINE_GRACE_MS),
         }
     }
 }

@@ -398,6 +398,40 @@ impl MembershipRepository {
         })
     }
 
+    /// Lists all active memberships where the given device is currently the publishing device.
+    ///
+    /// Used for presence offline grace and connectivity notifications (docs/04 §6.3, FR-PRS-002).
+    pub async fn list_active_publishing_by_device(
+        pool: &Pool,
+        tenant_id: TenantId,
+        device_id: gs_domain::ids::DeviceId,
+    ) -> Result<Vec<MemberWithSubject>, StoreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT m.id, m.tenant_id, m.session_id, m.subject_id, m.role,
+                   m.can_publish, m.can_read, m.can_invite, m.can_manage,
+                   m.status, m.sharing, m.publisher_device_id, m.sharing_changed_at,
+                   m.joined_via, m.invitation_id, m.joined_at, m.ended_at, m.version,
+                   s.external_subject_id
+            FROM memberships m
+            JOIN subjects s ON s.id = m.subject_id AND s.tenant_id = m.tenant_id
+            WHERE m.tenant_id = $1 AND m.publisher_device_id = $2 AND m.sharing = true AND m.status = 'ACTIVE'
+            ORDER BY m.joined_at ASC, m.id ASC;
+            "#,
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(device_id.into_uuid())
+        .fetch_all(pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        let mut members = Vec::with_capacity(rows.len());
+        for row in &rows {
+            members.push(Self::map_row_with_subject(row)?);
+        }
+        Ok(members)
+    }
+
     /// Adds a member directly in a transaction with row-level session lock (INV-MEM-6, INV-MEM-7).
     pub async fn add_member(
         pool: &Pool,

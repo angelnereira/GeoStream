@@ -5,7 +5,7 @@
 #![forbid(unsafe_code)]
 
 use gs_bus::{Bus, BusError};
-use gs_domain::ids::{MemberId, SessionId};
+use gs_domain::ids::{DeviceId, MemberId, SessionId};
 use gs_domain::membership::{Capabilities, Connectivity, MemberRole};
 use gs_domain::session::{SessionMode, SessionStatus};
 use gs_protocol::{
@@ -15,6 +15,18 @@ use gs_protocol::{
 };
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+
+/// Device-scoped bus events published to `{prefix}:bus:dev:{device_id}` (docs/04 §6.3, docs/08 §6.7, FR-STR-007).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "event")]
+pub enum DeviceBusEvent {
+    /// A new connection of the same device completed handshake; older connections must close with 4409.
+    Supersede {
+        device_id: String,
+        connection_id: String,
+        at: String,
+    },
+}
 
 /// Global security events published to `{prefix}:bus:global` (docs/04 §6.1, docs/06 §7, docs/08 §9).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +163,13 @@ pub enum SessionControlEvent {
         member: Option<ProtoMemberStatus>,
         at: String,
     },
+    /// A member's status (such as connectivity or sharing) changed (docs/05 §8, §10, FR-PRS-001, FR-PRS-002).
+    /// Subscribers receive `MemberStatus`.
+    MemberStatusChanged {
+        session_id: String,
+        member: ProtoMemberStatus,
+        at: String,
+    },
 }
 
 /// Helper to build a wire `ProtoSessionInfo` from domain fields.
@@ -252,4 +271,16 @@ pub fn format_rfc3339(instant: OffsetDateTime) -> String {
     instant
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()
+}
+
+/// Publishes a device-scoped bus event to `{key_prefix}:bus:dev:{device_id}` (docs/04 §6.3, docs/08 §6.7, FR-STR-007).
+pub async fn publish_device_bus_event<B: Bus>(
+    bus: &B,
+    key_prefix: &str,
+    device_id: DeviceId,
+    event: &DeviceBusEvent,
+) -> Result<usize, BusError> {
+    let topic = format!("{key_prefix}:bus:dev:{device_id}");
+    let payload = serde_json::to_vec(event).map_err(|e| BusError::ConnectionLost(e.to_string()))?;
+    bus.publish(&topic, &payload).await
 }
