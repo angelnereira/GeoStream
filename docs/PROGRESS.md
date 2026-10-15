@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F4-04 — Suscripción sin huecos, snapshot y `MemberStatus` con minimización | Angel Nereira (con agente de código) | 2026-10-13 | `crates/gs-service`, `crates/gs-stream` | FR-STR-002, FR-PRS-001, FR-PRS-004; leer `08` §6.3, `05` §8 |
+| T-F4-07 — Eventos de control y revocación en vivo (`SubscriptionEnded`, cierres 4401/4403) | Angel Nereira (con agente de código) | 2026-10-14 | `crates/gs-service`, `crates/gs-stream`, `crates/gs-api` | FR-STR-008, FR-STR-011, FR-AUTH-005; leer `08` §9, `05` §10 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
