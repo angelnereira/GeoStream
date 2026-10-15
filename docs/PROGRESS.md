@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| — | — | — | — | Ninguna tarea en curso |
+| T-F4-08 — Presencia, gracia de desconexión y conexión única | Angel Nereira (con agente de código) | 2026-10-14 | `crates/gs-stream`, `crates/gs-service` | FR-PRS-002, FR-STR-007; leer `04` §6.3, `08` §6.7 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
