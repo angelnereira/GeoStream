@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| T-F4-12 — gs-devclient | Angel Nereira (con agente de código) | 2026-10-15 | `apps/gs-devclient` | `04` §4, demo M1 (dos publicadores y un lector) |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
