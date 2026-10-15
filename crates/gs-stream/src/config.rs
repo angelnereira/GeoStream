@@ -45,6 +45,8 @@ pub const DEFAULT_MIN_PUBLISH_INTERVAL_MS: u32 = 1_000;
 pub const DEFAULT_PRESENCE_TTL_S: u64 = 90;
 /// Default of `GS_STREAM_OFFLINE_GRACE_MS` (docs/17 §2.6).
 pub const DEFAULT_OFFLINE_GRACE_MS: u64 = 10_000;
+/// Default of `GS_STREAM_AUTH_EXPIRING_LEAD_S` (docs/17 §2.6).
+pub const DEFAULT_AUTH_EXPIRING_LEAD_S: u64 = 60;
 
 /// Server side stream parameters (docs/17 §2.6).
 ///
@@ -88,6 +90,8 @@ pub struct StreamConfig {
     pub presence_ttl: Duration,
     /// Grace duration before marking an offline publisher as OFFLINE (`GS_STREAM_OFFLINE_GRACE_MS`, docs/04 §6.3, FR-PRS-002).
     pub offline_grace: Duration,
+    /// Anticipation before auth expiry to send `AuthExpiring` (`GS_STREAM_AUTH_EXPIRING_LEAD_S`, docs/08 §6.6).
+    pub auth_expiring_lead: Duration,
 }
 
 impl Default for StreamConfig {
@@ -112,6 +116,7 @@ impl Default for StreamConfig {
             instance_id: "stream-1".to_string(),
             presence_ttl: Duration::from_secs(DEFAULT_PRESENCE_TTL_S),
             offline_grace: Duration::from_millis(DEFAULT_OFFLINE_GRACE_MS),
+            auth_expiring_lead: Duration::from_secs(DEFAULT_AUTH_EXPIRING_LEAD_S),
         }
     }
 }

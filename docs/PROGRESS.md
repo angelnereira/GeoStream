@@ -35,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal), T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado), T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks), T-F4-06 (fan-out por bus con coalescencia y backpressure), T-F4-07 (eventos de control y revocación en vivo) y T-F4-08 (presencia, gracia de desconexión y conexión única) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal), T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado), T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks), T-F4-06 (fan-out por bus con coalescencia y backpressure), T-F4-07 (eventos de control y revocación en vivo), T-F4-08 (presencia, gracia de desconexión y conexión única) y T-F4-09 (AuthExpiring / AuthRefresh) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -48,6 +48,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-14 — T-F4-09 — Renovación de autenticación en vivo (`AuthExpiring`, `AuthRefresh`, `AuthRefreshAck`)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Rama: `feat/T-F4-09-auth-refresh`.
+- Requisitos: FR-AUTH-007.
+- Evidencia: implementación completa del flujo de renovación de autenticación según `docs/08_STREAM_PROTOCOL.md` §6.6 y `docs/06_IDENTITY_AUTH.md` §4.3. El servidor envía el mensaje no solicitado `AuthExpiring{auth_expires_at}` con `request_id=0` al restar `auth_expiring_lead` (por defecto 60s) para la expiración de la ventana de autenticación (o de inmediato tras `ClientHello` si la ventana restante es menor o igual al lead). Ante `AuthRefresh{access_token}` de un dispositivo, se verifica criptográficamente el token y su estado en base de datos (`verify_device_token_principal`); si es válido y del mismo `device_id`, responde `AuthRefreshAck{auth_expires_at}`, actualiza scopes y época `sep` en la conexión, y posterga la expiración; si el token es inválido o ha expirado, responde `StreamError{UNAUTHENTICATED | TOKEN_EXPIRED}` manteniendo la conexión activa hasta su vencimiento anterior; si el token pertenece a otro dispositivo, responde `StreamError{PERMISSION_DENIED}` y cierra con código 4403 (`CLOSE_FORBIDDEN`). Conexiones de aplicación rechazan `AuthRefresh` con `StreamError{PERMISSION_DENIED}`. Si la ventana de autenticación vence sin renovación, la conexión se cierra con 4401 (`CLOSE_AUTH_EXPIRED`). Pruebas: 7 pruebas de integración extremo a extremo en `crates/gs-stream/tests/connection_test.rs`. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (411 pruebas, 0 fallos; base en `main`: 404 → +7), `cargo deny check`, `cargo run -p geostream-tools -- all`: todos OK.
 
 ### 2026-10-14 — T-F4-08 — Presencia, gracia de desconexión y conexión única (`Supersede`, código 4409)
 - Autor/agente: Angel Nereira (con agente de código).

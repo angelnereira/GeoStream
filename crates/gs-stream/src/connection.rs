@@ -20,12 +20,14 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures::SinkExt;
 use futures::StreamExt;
 use futures::stream::SplitSink;
+use gs_service::auth::{AuthError, verify_device_token_principal};
 use gs_service::authz::{AuthzCache, PrincipalIdentity};
 use gs_service::control::{
     DeviceBusEvent, SessionControlEvent, format_rfc3339, publish_device_bus_event,
     publish_session_control, to_proto_member_status,
 };
 use gs_service::gs_auth::TenantPolicy;
+use gs_service::gs_auth::jwt::{JwtError, SigningKeySet};
 use gs_service::gs_domain::Subprotocol;
 use gs_service::gs_domain::error::{AsErrorCode, ErrorCode};
 use gs_service::gs_domain::ids::{ConnectionId, SessionId};
@@ -35,9 +37,9 @@ use gs_service::gs_protocol::ErrorCode as ProtoErrorCode;
 use gs_service::gs_protocol::client_message::Body as ClientBody;
 use gs_service::gs_protocol::server_message::Body as ServerBody;
 use gs_service::gs_protocol::{
-    ClientHello, ClientMessage, Heartbeat, HeartbeatAck, LocationUpdate, PrincipalKind, PublishAck,
-    PublishLocation, ServerHello, ServerMessage, StreamError, Subscribe, SubscriptionEndReason,
-    Unsubscribe,
+    AuthExpiring, AuthRefresh, AuthRefreshAck, ClientHello, ClientMessage, Heartbeat, HeartbeatAck,
+    LocationUpdate, PrincipalKind, PublishAck, PublishLocation, ServerHello, ServerMessage,
+    StreamError, Subscribe, SubscriptionEndReason, Unsubscribe,
 };
 use gs_service::gs_store::PgPool;
 use gs_service::members::list_active_publishing_by_device;
@@ -57,7 +59,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::close_codes::{
-    CLOSE_AUTH_EXPIRED, CLOSE_GOING_AWAY, CLOSE_IDLE_TIMEOUT, CLOSE_INTERNAL,
+    CLOSE_AUTH_EXPIRED, CLOSE_FORBIDDEN, CLOSE_GOING_AWAY, CLOSE_IDLE_TIMEOUT, CLOSE_INTERNAL,
     CLOSE_MESSAGE_TOO_BIG, CLOSE_NORMAL, CLOSE_PROTOCOL_ERROR, CLOSE_RATE_LIMITED,
     CLOSE_SLOW_CONSUMER, CLOSE_SUPERSEDED, CLOSE_UNSUPPORTED_PROTOCOL,
 };
@@ -109,6 +111,12 @@ pub struct StreamState {
     pub redis_key_prefix: String,
     /// Stream configuration (docs/17 §2.6).
     pub config: StreamConfig,
+    /// Public keys for verifying device tokens on AuthRefresh (docs/06 §4.4).
+    pub signing_keys: Arc<SigningKeySet>,
+    /// JWT issuer (docs/06 §4.3).
+    pub jwt_issuer: String,
+    /// JWT verification leeway in seconds (docs/06 §4.3).
+    pub jwt_leeway_seconds: u64,
 }
 
 impl std::fmt::Debug for StreamState {
@@ -119,6 +127,8 @@ impl std::fmt::Debug for StreamState {
             .field("authz", &"<authz cache>")
             .field("redis_key_prefix", &self.redis_key_prefix)
             .field("config", &self.config)
+            .field("jwt_issuer", &self.jwt_issuer)
+            .field("jwt_leeway_seconds", &self.jwt_leeway_seconds)
             .finish()
     }
 }
@@ -179,6 +189,8 @@ pub struct Connection {
     session_end_rx: mpsc::Receiver<(SessionId, SubscriptionEndReason)>,
     /// Last instant at which presence was renewed in ephemeral store (docs/08 §6.5).
     last_presence_renew: Instant,
+    /// Whether `AuthExpiring` has already been sent for the current auth expiration window.
+    auth_expiring_sent: bool,
 }
 
 impl Connection {
@@ -228,6 +240,7 @@ impl Connection {
             session_end_tx,
             session_end_rx,
             last_presence_renew: Instant::now(),
+            auth_expiring_sent: false,
         })
     }
 
@@ -292,11 +305,40 @@ impl Connection {
         let mut close_signal_closed = false;
 
         loop {
-            if self.auth_expires_at <= OffsetDateTime::now_utc() {
+            let now_utc = OffsetDateTime::now_utc();
+            if self.auth_expires_at <= now_utc {
                 // The window closed without a refresh (docs/08 §6.6, T-F4-09).
                 self.close(CLOSE_AUTH_EXPIRED);
                 return self.outcome();
             }
+            let remaining_dur = (self.auth_expires_at - now_utc)
+                .try_into()
+                .unwrap_or(Duration::ZERO);
+            let auth_expire_deadline = Instant::now() + remaining_dur;
+
+            let lead_dur = self.config.auth_expiring_lead;
+            let next_auth_expiring =
+                if !self.auth_expiring_sent && matches!(self.state, ConnectionState::Ready) {
+                    if remaining_dur <= lead_dur {
+                        let auth_expiring = AuthExpiring {
+                            auth_expires_at: Some(to_proto_timestamp(self.auth_expires_at)),
+                        };
+                        let message = ServerMessage {
+                            request_id: 0,
+                            body: Some(ServerBody::AuthExpiring(auth_expiring)),
+                        };
+                        if !self.send(&message).await {
+                            self.close(CLOSE_SLOW_CONSUMER);
+                            return self.outcome();
+                        }
+                        self.auth_expiring_sent = true;
+                        Instant::now() + Duration::from_secs(86400 * 365)
+                    } else {
+                        Instant::now() + (remaining_dur - lead_dur)
+                    }
+                } else {
+                    Instant::now() + Duration::from_secs(86400 * 365)
+                };
 
             // The principal is revalidated at most every `GS_AUTHZ_CACHE_TTL_MS`, and a bus
             // event can drop the cached entry earlier (docs/06 §7, ADR-0009).
@@ -351,6 +393,28 @@ impl Connection {
                         self.last_presence_renew = Instant::now();
                     }
                     next_presence_renew = Instant::now() + presence_interval;
+                    continue;
+                }
+                // Auth window expiry (docs/08 §6.6, FR-AUTH-007)
+                _ = tokio::time::sleep_until(auth_expire_deadline) => {
+                    self.close(CLOSE_AUTH_EXPIRED);
+                    return self.outcome();
+                }
+                // Auth expiring lead notification (docs/08 §6.6, FR-AUTH-007)
+                _ = tokio::time::sleep_until(next_auth_expiring),
+                    if matches!(self.state, ConnectionState::Ready) && !self.auth_expiring_sent => {
+                    let auth_expiring = AuthExpiring {
+                        auth_expires_at: Some(to_proto_timestamp(self.auth_expires_at)),
+                    };
+                    let message = ServerMessage {
+                        request_id: 0,
+                        body: Some(ServerBody::AuthExpiring(auth_expiring)),
+                    };
+                    if !self.send(&message).await {
+                        self.close(CLOSE_SLOW_CONSUMER);
+                        return self.outcome();
+                    }
+                    self.auth_expiring_sent = true;
                     continue;
                 }
                 frame = stream.next() => frame,
@@ -499,15 +563,17 @@ impl Connection {
             Some(ClientBody::PublishLocation(publish)) => {
                 self.handle_publish(state, request_id, publish).await;
             }
-            // `AuthRefresh` belongs to T-F4-09; until it lands the client gets an explicit
-            // protocol error (docs/08 §4).
-            Some(ClientBody::AuthRefresh(_)) => {
-                self.reply_protocol_error(
-                    request_id,
-                    ProtoErrorCode::ProtocolError,
-                    "operation not supported yet",
-                )
-                .await;
+            Some(ClientBody::AuthRefresh(refresh)) => {
+                if !matches!(self.state, ConnectionState::Ready) {
+                    self.reply_protocol_error(
+                        request_id,
+                        ProtoErrorCode::ProtocolError,
+                        "hello must be the first message",
+                    )
+                    .await;
+                    return;
+                }
+                self.handle_auth_refresh(state, request_id, refresh).await;
             }
             None => {
                 self.reply_protocol_error(
@@ -643,6 +709,141 @@ impl Connection {
                     )
                     .await;
                 }
+            }
+        }
+
+        // If remaining time until auth_expires_at is already <= auth_expiring_lead,
+        // send AuthExpiring immediately (docs/08 §6.6).
+        let now_utc = OffsetDateTime::now_utc();
+        let remaining_secs = (self.auth_expires_at - now_utc).whole_seconds();
+        if remaining_secs <= self.config.auth_expiring_lead.as_secs() as i64 {
+            let auth_expiring = AuthExpiring {
+                auth_expires_at: Some(to_proto_timestamp(self.auth_expires_at)),
+            };
+            let message = ServerMessage {
+                request_id: 0,
+                body: Some(ServerBody::AuthExpiring(auth_expiring)),
+            };
+            if !self.send(&message).await {
+                self.close(CLOSE_SLOW_CONSUMER);
+                return;
+            }
+            self.auth_expiring_sent = true;
+        }
+    }
+
+    /// Handles `AuthRefresh` from a device or application (docs/08 §6.6, FR-AUTH-007).
+    async fn handle_auth_refresh(
+        &mut self,
+        state: &StreamState,
+        request_id: u64,
+        refresh: AuthRefresh,
+    ) {
+        if self.is_application() {
+            let error = StreamError {
+                code: ProtoErrorCode::PermissionDenied as i32,
+                message: "applications cannot refresh authentication; reconnect with a new ticket"
+                    .to_string(),
+                retry_after_ms: 0,
+                field: String::new(),
+                session_id: String::new(),
+            };
+            let reply = ServerMessage {
+                request_id,
+                body: Some(ServerBody::Error(error)),
+            };
+            let _ = self.send(&reply).await;
+            return;
+        }
+
+        match verify_device_token_principal(
+            &state.pool,
+            &refresh.access_token,
+            &state.signing_keys,
+            &state.jwt_issuer,
+            state.jwt_leeway_seconds,
+        )
+        .await
+        {
+            Ok(verified) => {
+                let expected_did = self.grant.device_id;
+                if expected_did.is_none() || expected_did != Some(verified.device.id) {
+                    let error = StreamError {
+                        code: ProtoErrorCode::PermissionDenied as i32,
+                        message: "token belongs to another device".to_string(),
+                        retry_after_ms: 0,
+                        field: String::new(),
+                        session_id: String::new(),
+                    };
+                    let reply = ServerMessage {
+                        request_id,
+                        body: Some(ServerBody::Error(error)),
+                    };
+                    let _ = self.send(&reply).await;
+                    self.close(CLOSE_FORBIDDEN);
+                    return;
+                }
+
+                if verified.tenant.id != self.grant.tenant_id
+                    || verified.application.id != self.grant.application_id
+                {
+                    let error = StreamError {
+                        code: ProtoErrorCode::PermissionDenied as i32,
+                        message: "token belongs to another tenant or application".to_string(),
+                        retry_after_ms: 0,
+                        field: String::new(),
+                        session_id: String::new(),
+                    };
+                    let reply = ServerMessage {
+                        request_id,
+                        body: Some(ServerBody::Error(error)),
+                    };
+                    let _ = self.send(&reply).await;
+                    self.close(CLOSE_FORBIDDEN);
+                    return;
+                }
+
+                if let Ok(new_exp) = OffsetDateTime::from_unix_timestamp(verified.claims.exp) {
+                    self.auth_expires_at = new_exp;
+                    self.grant.auth_expires_at = format_rfc3339(new_exp);
+                }
+                self.grant.scopes = verified.claims.scp;
+                self.grant.token_epoch = Some(verified.claims.sep);
+                self.principal.token_epoch = Some(verified.claims.sep);
+                self.auth_expiring_sent = false;
+
+                let ack = AuthRefreshAck {
+                    auth_expires_at: Some(to_proto_timestamp(self.auth_expires_at)),
+                };
+                let reply = ServerMessage {
+                    request_id,
+                    body: Some(ServerBody::AuthRefreshAck(ack)),
+                };
+                if !self.send(&reply).await {
+                    self.close(CLOSE_SLOW_CONSUMER);
+                }
+            }
+            Err(auth_err) => {
+                let code = match &auth_err {
+                    AuthError::Token(JwtError::Expired) => ProtoErrorCode::TokenExpired,
+                    _ => ProtoErrorCode::Unauthenticated,
+                };
+                let message = match code {
+                    ProtoErrorCode::TokenExpired => "device token expired",
+                    _ => "unauthenticated device token",
+                };
+                let error = StreamError {
+                    code: code as i32,
+                    message: message.to_string(),
+                    retry_after_ms: 0,
+                    field: String::new(),
+                    session_id: String::new(),
+                };
+                let reply = ServerMessage {
+                    request_id,
+                    body: Some(ServerBody::Error(error)),
+                };
+                let _ = self.send(&reply).await;
             }
         }
     }

@@ -62,6 +62,8 @@ struct World {
     device_token: MintedToken,
     other_device_token: MintedToken,
     reader_device_token: MintedToken,
+    signing: gs_service::gs_auth::SigningKey,
+    kid: String,
 }
 
 /// Parses a session id printed by the fixture.
@@ -212,6 +214,8 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
     let prefix = format!("gs:stream:{suffix}");
     let connections = ConnectionCounter::new();
 
+    let keyset_arc = Arc::new(keyset);
+
     let stream_state = Arc::new(StreamState {
         pool: pool.clone(),
         ephemeral: ephemeral.clone(),
@@ -220,6 +224,9 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         fanout: Arc::new(gs_stream::Fanout::new(bus.clone(), prefix.clone())),
         redis_key_prefix: prefix.clone(),
         config: config.clone(),
+        signing_keys: keyset_arc.clone(),
+        jwt_issuer: ISSUER.to_string(),
+        jwt_leeway_seconds: 30,
     });
     // `gs-stream` owns the connection; the binary wires it into the upgrade route.
     let runner: SessionRunner = Arc::new(move |accepted: gs_api::AcceptedWebSocket| {
@@ -240,7 +247,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
 
     let session_state = SessionApiState {
         pool: pool.clone(),
-        signing_keys: Arc::new(keyset),
+        signing_keys: keyset_arc,
         issuer: ISSUER.to_string(),
         leeway_seconds: 30,
         crypto_rotator: None,
@@ -296,6 +303,8 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         device_token,
         other_device_token,
         reader_device_token,
+        signing,
+        kid,
     }
 }
 
@@ -2583,4 +2592,440 @@ async fn test_fr_prs_004_non_sharing_member_never_emits_presence_events() {
         msg_after.is_none(),
         "no presence event for non-sharing member disconnecting"
     );
+}
+
+#[tokio::test]
+async fn test_fr_auth_007_server_sends_auth_expiring_immediately_if_within_lead() {
+    // covers: FR-AUTH-007, docs/08 §6.6
+    let world = setup("auth-expiring-immediate", StreamConfig::default()).await;
+    let short_token = gs_service::tokens::mint_device_token(
+        &world.pool,
+        &world.key_with_scope,
+        &TokenRequest {
+            external_subject_id: "auth-expiring-subj".to_string(),
+            installation_id: INSTALLATION.to_string(),
+            platform: "ANDROID".to_string(),
+            app_version: None,
+            sdk_version: None,
+            scopes: Some(vec!["stream:connect".to_string()]),
+            ttl_seconds: Some(5),
+        },
+        TokenTtlBounds {
+            min_seconds: 1,
+            default_seconds: 900,
+            max_seconds: 86400,
+        },
+        ISSUER,
+        &world.signing,
+        &world.kid,
+    )
+    .await
+    .expect("mint short token");
+
+    let ticket = world.ticket(&short_token.response.access_token).await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Immediately after hello, server must send AuthExpiring
+    let msg =
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+            .await
+            .expect("AuthExpiring message must be delivered");
+
+    assert_eq!(msg.request_id, 0);
+    match msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::AuthExpiring(expiring)) => {
+            assert!(expiring.auth_expires_at.is_some());
+        }
+        other => panic!("expected AuthExpiring, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_fr_auth_007_auth_refresh_extends_session_and_prevents_4401() {
+    // covers: FR-AUTH-007, docs/08 §6.6
+    let config = StreamConfig {
+        auth_expiring_lead: Duration::from_secs(60),
+        ..StreamConfig::default()
+    };
+    let world = setup("auth-refresh-extends", config).await;
+
+    let short_token = gs_service::tokens::mint_device_token(
+        &world.pool,
+        &world.key_with_scope,
+        &TokenRequest {
+            external_subject_id: "auth-refresh-subj".to_string(),
+            installation_id: INSTALLATION.to_string(),
+            platform: "ANDROID".to_string(),
+            app_version: None,
+            sdk_version: None,
+            scopes: Some(vec!["stream:connect".to_string()]),
+            ttl_seconds: Some(2),
+        },
+        TokenTtlBounds {
+            min_seconds: 1,
+            default_seconds: 900,
+            max_seconds: 86400,
+        },
+        ISSUER,
+        &world.signing,
+        &world.kid,
+    )
+    .await
+    .expect("mint short token");
+
+    let ticket = world.ticket(&short_token.response.access_token).await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Receive AuthExpiring
+    let exp_msg =
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+            .await
+            .expect("AuthExpiring");
+    assert!(matches!(
+        exp_msg.body,
+        Some(gs_service::gs_protocol::server_message::Body::AuthExpiring(
+            _
+        ))
+    ));
+
+    // Mint a new token for the same device with 900s TTL
+    let new_token = gs_service::tokens::mint_device_token(
+        &world.pool,
+        &world.key_with_scope,
+        &TokenRequest {
+            external_subject_id: "auth-refresh-subj".to_string(),
+            installation_id: INSTALLATION.to_string(),
+            platform: "ANDROID".to_string(),
+            app_version: None,
+            sdk_version: None,
+            scopes: Some(vec!["stream:connect".to_string()]),
+            ttl_seconds: Some(900),
+        },
+        TokenTtlBounds {
+            min_seconds: 1,
+            default_seconds: 900,
+            max_seconds: 86400,
+        },
+        ISSUER,
+        &world.signing,
+        &world.kid,
+    )
+    .await
+    .expect("mint new token");
+
+    // Send AuthRefresh
+    let refresh_msg = gs_service::gs_protocol::ClientMessage {
+        request_id: 101,
+        body: Some(gs_service::gs_protocol::client_message::Body::AuthRefresh(
+            gs_service::gs_protocol::AuthRefresh {
+                access_token: new_token.response.access_token,
+            },
+        )),
+    };
+    let payload = encode_client(&refresh_msg, Subprotocol::Proto);
+    socket
+        .send(frame_of(payload, Subprotocol::Proto))
+        .await
+        .expect("send AuthRefresh");
+
+    // Receive AuthRefreshAck
+    let ack_msg =
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+            .await
+            .expect("AuthRefreshAck");
+    assert_eq!(ack_msg.request_id, 101);
+    match ack_msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::AuthRefreshAck(ack)) => {
+            assert!(ack.auth_expires_at.is_some());
+        }
+        other => panic!("expected AuthRefreshAck, got {other:?}"),
+    }
+
+    // Wait past the original 2s expiration (e.g. 2.5s)
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+
+    // Send a Heartbeat to verify connection is still completely alive and working
+    let hb = gs_service::gs_protocol::ClientMessage {
+        request_id: 102,
+        body: Some(gs_service::gs_protocol::client_message::Body::Heartbeat(
+            gs_service::gs_protocol::Heartbeat { client_time: None },
+        )),
+    };
+    let hb_payload = encode_client(&hb, Subprotocol::Proto);
+    socket
+        .send(frame_of(hb_payload, Subprotocol::Proto))
+        .await
+        .expect("send heartbeat");
+
+    let hb_ack =
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+            .await
+            .expect("HeartbeatAck");
+    assert_eq!(hb_ack.request_id, 102);
+    assert!(matches!(
+        hb_ack.body,
+        Some(gs_service::gs_protocol::server_message::Body::HeartbeatAck(
+            _
+        ))
+    ));
+}
+
+#[tokio::test]
+async fn test_fr_auth_007_connection_closes_with_4401_if_auth_expires_without_refresh() {
+    // covers: FR-AUTH-007, docs/08 §6.6
+    let world = setup("auth-expire-close", StreamConfig::default()).await;
+
+    let short_token = gs_service::tokens::mint_device_token(
+        &world.pool,
+        &world.key_with_scope,
+        &TokenRequest {
+            external_subject_id: "auth-expire-subj".to_string(),
+            installation_id: INSTALLATION.to_string(),
+            platform: "ANDROID".to_string(),
+            app_version: None,
+            sdk_version: None,
+            scopes: Some(vec!["stream:connect".to_string()]),
+            ttl_seconds: Some(1),
+        },
+        TokenTtlBounds {
+            min_seconds: 1,
+            default_seconds: 900,
+            max_seconds: 86400,
+        },
+        ISSUER,
+        &world.signing,
+        &world.kid,
+    )
+    .await
+    .expect("mint short token");
+
+    let ticket = world.ticket(&short_token.response.access_token).await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Connection must close with 4401 without client refresh
+    let code = read_close_code(&mut socket).await;
+    assert_eq!(
+        code, 4401,
+        "expired auth must close with 4401 (CLOSE_AUTH_EXPIRED)"
+    );
+}
+
+#[tokio::test]
+async fn test_fr_auth_007_auth_refresh_with_another_device_token_fails_permission_denied_and_closes_4403()
+ {
+    // covers: FR-AUTH-007, docs/08 §6.6
+    let world = setup("auth-refresh-diff-device", StreamConfig::default()).await;
+
+    // Connect with device A
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Try to refresh with device B token (other_device_token)
+    let refresh_msg = gs_service::gs_protocol::ClientMessage {
+        request_id: 201,
+        body: Some(gs_service::gs_protocol::client_message::Body::AuthRefresh(
+            gs_service::gs_protocol::AuthRefresh {
+                access_token: world.other_device_token.response.access_token.clone(),
+            },
+        )),
+    };
+    let payload = encode_client(&refresh_msg, Subprotocol::Proto);
+    socket
+        .send(frame_of(payload, Subprotocol::Proto))
+        .await
+        .expect("send AuthRefresh");
+
+    // Server must respond with StreamError{PERMISSION_DENIED}
+    let err_msg =
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+            .await
+            .expect("StreamError");
+    assert_eq!(err_msg.request_id, 201);
+    match err_msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::Error(err)) => {
+            assert_eq!(
+                err.code,
+                gs_service::gs_protocol::ErrorCode::PermissionDenied as i32
+            );
+        }
+        other => panic!("expected StreamError, got {other:?}"),
+    }
+
+    // And close the connection with 4403 (CLOSE_FORBIDDEN)
+    let code = read_close_code(&mut socket).await;
+    assert_eq!(
+        code, 4403,
+        "refresh with another device must close with 4403 (CLOSE_FORBIDDEN)"
+    );
+}
+
+#[tokio::test]
+async fn test_fr_auth_007_auth_refresh_with_expired_token_replies_stream_error_and_connection_continues()
+ {
+    // covers: FR-AUTH-007, docs/08 §6.6
+    let world = setup("auth-refresh-expired", StreamConfig::default()).await;
+
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Create an expired token for the same device
+    let past = time::OffsetDateTime::now_utc() - Duration::from_secs(3600);
+    let claims = gs_service::gs_auth::jwt::DeviceTokenClaims::new(
+        ISSUER,
+        world.device_token.response.subject_id.parse().expect("sub"),
+        world.tenant_id,
+        world.application_id,
+        world.device_token.response.device_id.parse().expect("did"),
+        vec!["stream:connect".to_string()],
+        1,
+        past,
+        60,
+    )
+    .expect("claims");
+    let expired_token =
+        gs_service::gs_auth::jwt::issue_device_token(&world.signing, &world.kid, &claims)
+            .expect("issue expired token");
+
+    // Send AuthRefresh with expired token
+    let refresh_msg = gs_service::gs_protocol::ClientMessage {
+        request_id: 301,
+        body: Some(gs_service::gs_protocol::client_message::Body::AuthRefresh(
+            gs_service::gs_protocol::AuthRefresh {
+                access_token: expired_token.token,
+            },
+        )),
+    };
+    let payload = encode_client(&refresh_msg, Subprotocol::Proto);
+    socket
+        .send(frame_of(payload, Subprotocol::Proto))
+        .await
+        .expect("send AuthRefresh");
+
+    // Server must respond with StreamError{TOKEN_EXPIRED}
+    let err_msg =
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+            .await
+            .expect("StreamError");
+    assert_eq!(err_msg.request_id, 301);
+    match err_msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::Error(err)) => {
+            assert_eq!(
+                err.code,
+                gs_service::gs_protocol::ErrorCode::TokenExpired as i32
+            );
+        }
+        other => panic!("expected StreamError, got {other:?}"),
+    }
+
+    // Connection remains open! Send heartbeat to verify
+    let hb = gs_service::gs_protocol::ClientMessage {
+        request_id: 302,
+        body: Some(gs_service::gs_protocol::client_message::Body::Heartbeat(
+            gs_service::gs_protocol::Heartbeat { client_time: None },
+        )),
+    };
+    let hb_payload = encode_client(&hb, Subprotocol::Proto);
+    socket
+        .send(frame_of(hb_payload, Subprotocol::Proto))
+        .await
+        .expect("send heartbeat");
+
+    let hb_ack =
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+            .await
+            .expect("HeartbeatAck");
+    assert_eq!(hb_ack.request_id, 302);
+}
+
+#[tokio::test]
+async fn test_fr_auth_007_auth_refresh_with_invalid_token_replies_stream_error_unauthenticated() {
+    // covers: FR-AUTH-007, docs/08 §6.6
+    let world = setup("auth-refresh-invalid", StreamConfig::default()).await;
+
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Send AuthRefresh with garbage token
+    let refresh_msg = gs_service::gs_protocol::ClientMessage {
+        request_id: 401,
+        body: Some(gs_service::gs_protocol::client_message::Body::AuthRefresh(
+            gs_service::gs_protocol::AuthRefresh {
+                access_token: "invalid.jwt.token".to_string(),
+            },
+        )),
+    };
+    let payload = encode_client(&refresh_msg, Subprotocol::Proto);
+    socket
+        .send(frame_of(payload, Subprotocol::Proto))
+        .await
+        .expect("send AuthRefresh");
+
+    // Server must respond with StreamError{UNAUTHENTICATED}
+    let err_msg =
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+            .await
+            .expect("StreamError");
+    assert_eq!(err_msg.request_id, 401);
+    match err_msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::Error(err)) => {
+            assert_eq!(
+                err.code,
+                gs_service::gs_protocol::ErrorCode::Unauthenticated as i32
+            );
+        }
+        other => panic!("expected StreamError, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_fr_auth_007_application_cannot_refresh_authentication() {
+    // covers: FR-AUTH-007, docs/08 §6.6
+    let world = setup("app-no-refresh", StreamConfig::default()).await;
+
+    let ticket = world.ticket(&world.key_with_scope).await;
+    let mut socket = world.connect(&ticket, "gs.v1.json").await;
+    hello(&mut socket, Subprotocol::Json).await;
+
+    // Application sends AuthRefresh
+    let refresh_msg = gs_service::gs_protocol::ClientMessage {
+        request_id: 501,
+        body: Some(gs_service::gs_protocol::client_message::Body::AuthRefresh(
+            gs_service::gs_protocol::AuthRefresh {
+                access_token: "any-token".to_string(),
+            },
+        )),
+    };
+    let payload = encode_client(&refresh_msg, Subprotocol::Json);
+    socket
+        .send(frame_of(payload, Subprotocol::Json))
+        .await
+        .expect("send AuthRefresh");
+
+    // Server responds with StreamError{PERMISSION_DENIED}
+    let err_msg =
+        next_server_message_timeout(&mut socket, Subprotocol::Json, Duration::from_millis(500))
+            .await
+            .expect("StreamError");
+    assert_eq!(err_msg.request_id, 501);
+    match err_msg.body {
+        Some(gs_service::gs_protocol::server_message::Body::Error(err)) => {
+            assert_eq!(
+                err.code,
+                gs_service::gs_protocol::ErrorCode::PermissionDenied as i32
+            );
+        }
+        other => panic!("expected StreamError, got {other:?}"),
+    }
 }
