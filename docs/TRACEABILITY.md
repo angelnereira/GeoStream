@@ -111,7 +111,7 @@ Reglas:
 | FR-GEO-002 | MUST | F11 | Evaluación con histéresis | — | pendiente |
 | FR-GEO-003 | MUST | F11 | Eventos | — | pendiente |
 | FR-GEO-004 | SHOULD | F11 | Índice espacial en proceso | — | pendiente |
-| FR-PRV-001 | MUST | F4 | Efímero por defecto | — | pendiente |
+| FR-PRV-001 | MUST | F4 | Efímero por defecto | `crates/gs-testkit/tests/scenarios_test.rs` | cumplido |
 | FR-PRV-002 | MUST | F10 | Borrado y exportación de subject | — | pendiente |
 | FR-PRV-003 | MUST | F10 | Jobs de retención | — | pendiente |
 | FR-PRV-004 | MUST | F4 | Redacción de coordenadas | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/log_verifier.rs` | en curso |

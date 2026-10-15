@@ -139,6 +139,7 @@ pub enum SessionControlEvent {
     SharingStarted {
         session_id: String,
         member_id: String,
+        #[serde(default)]
         device_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         member: Option<ProtoMemberStatus>,
@@ -148,6 +149,7 @@ pub enum SessionControlEvent {
     SharingStopped {
         session_id: String,
         member_id: String,
+        #[serde(default)]
         device_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         member: Option<ProtoMemberStatus>,
@@ -157,7 +159,9 @@ pub enum SessionControlEvent {
     SharingTransferred {
         session_id: String,
         member_id: String,
+        #[serde(default)]
         old_device_id: String,
+        #[serde(default)]
         new_device_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         member: Option<ProtoMemberStatus>,

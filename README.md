@@ -3,8 +3,8 @@
 **Infraestructura de ubicación en tiempo real, privada por defecto, multi-inquilino y de alto rendimiento para integrar en aplicaciones móviles y sistemas backend.**
 
 > **Estado actual:** **Fase F4 — Stream en nodo único (Hito M1)** en desarrollo activo.
-> Fases F0, F1, F2 y F3 completadas; Fase F4 con 10 tareas completadas (tickets, conexión WS, AuthzCache, suscripción gap-free, publicación CAS, fan-out coalescido, control y revocación en vivo, presencia con gracia de desconexión, renovación AuthExpiring/AuthRefresh, y snapshot REST).
-> Suite integral de 421 pruebas automatizadas verdes sin advertencias.
+> Fases F0, F1, F2 y F3 completadas; Fase F4 con 11 tareas completadas (tickets, conexión WS, AuthzCache, suscripción gap-free, publicación CAS, fan-out coalescido, control y revocación en vivo, presencia con gracia de desconexión, renovación AuthExpiring/AuthRefresh, snapshot REST, y runner de escenarios con suite e2e SCN-001..010 en `gs-testkit`).
+> Suite integral de 451 pruebas automatizadas verdes sin advertencias.
 > Repositorio gobernado por documentación ([`AGENTS.md`](AGENTS.md), [`docs/00_INDEX.md`](docs/00_INDEX.md)).
 
 ---
@@ -50,7 +50,7 @@ El proyecto está organizado como un espacio de trabajo Cargo modular, cohesiona
 | **`gs-api`** | [`crates/gs-api`](crates/gs-api) | Servidor HTTP REST (Axum) conforme a OpenAPI 3.1, middleware de correlación, rate limiting, Problem Details (RFC 7807/9457) y upgrade a WebSocket. |
 | **`gs-stream`** | [`crates/gs-stream`](crates/gs-stream) | Servidor WebSocket de tiempo real: máquina de estados, negociación de subprotocolos, codecs, colas acotadas, token bucket y distribución fan-out. |
 | **`gs-worker`** | [`crates/gs-worker`](crates/gs-worker) | Tareas en segundo plano (limpieza de expiraciones, webhooks en F8, retención de datos en F10). |
-| **`gs-testkit`** | [`crates/gs-testkit`](crates/gs-testkit) | Utilidades de pruebas de integración con contenedores (`testcontainers` para PostgreSQL y Valkey). |
+| **`gs-testkit`** | [`crates/gs-testkit`](crates/gs-testkit) | Servidor de prueba Axum en memoria, cliente WebSocket reactivo multiformato (`gs.v1.json` y `gs.v1.proto`), y runner declarativo de escenarios normativos (`contracts/scenarios/`). |
 | **`geostream-tools`** | [`tools`](tools) | Herramienta CLI de verificación interna: consistencia de contratos, dependencias, catálogo de errores, trazabilidad de requisitos y enlaces. |
 
 ---
@@ -65,7 +65,7 @@ El plan de trabajo avanza conforme a [`docs/21_ROADMAP.md`](docs/21_ROADMAP.md):
 | **F1** | Núcleo de dominio | **Completada** | Modelos puros, invariantes de negocio, CAS, property testing (>90% cobertura en `gs-domain`). |
 | **F2** | Base de plataforma | **Completada** | PostgreSQL con migraciones, tokens JWT Ed25519, API keys, observabilidad JSON, CLI admin. |
 | **F3** | Plano de control REST | **Completada** | CRUD completo de sesiones, miembros, invitaciones Base32, compartición, conformidad OpenAPI. |
-| **F4** | Stream en nodo único | **En curso (M1)** | Handshake WS, tickets de un solo uso, caché authz con bus, suscripción sin huecos con snapshot, publicación CAS deduplicada, fan-out coalescido, control y revocación en vivo, presencia con gracia de desconexión, conexión única (`Supersede`), renovación de auth (`AuthExpiring`/`AuthRefresh`) y snapshot REST. |
+| **F4** | Stream en nodo único | **En curso (M1)** | Handshake WS, tickets de un solo uso, caché authz con bus, suscripción sin huecos con snapshot, publicación CAS deduplicada, fan-out coalescido, control y revocación en vivo, presencia con gracia de desconexión, conexión única (`Supersede`), renovación de auth (`AuthExpiring`/`AuthRefresh`), snapshot REST y runner de escenarios declarativo (`gs-testkit`) con suite e2e SCN-001..010 verde en ambos subprotocolos. |
 | **F5** | SDK Flutter (M2) | Pendiente | Cliente Flutter en Dart, gestión de ubicación en segundo plano, reconexión y cola offline. |
 | **F6–F12** | Escalamiento y Ecosistema | Pendiente | Redis/Valkey multinodo, geocercas, webhooks, adaptadores de mapas (MapLibre/Google Maps) y auditoría. |
 
@@ -160,6 +160,74 @@ Ejemplo de respuesta (`200 OK`, cabecera `Cache-Control: no-store`):
 
 ---
 
+## 🧪 Runner de Escenarios y `gs-testkit` (`contracts/scenarios/`)
+
+El crate [`gs-testkit`](crates/gs-testkit) proporciona un entorno de pruebas de integración extremo a extremo declarativo y determinista según [`docs/18_TESTING_STRATEGY.md`](docs/18_TESTING_STRATEGY.md) §6 y [`contracts/README.md`](contracts/README.md) §5. Permite ejecutar especificaciones formales de escenarios multi-participante directamente desde archivos JSON normativos (`contracts/scenarios/*.json`), validando secuencias completas de llamadas REST e intercambios WebSocket contra una instancia real del servidor.
+
+### Arquitectura del Runner
+
+```mermaid
+flowchart TD
+    ScenarioFile["Escenario Declarativo\n(contracts/scenarios/scn_*.json)"] --> AST["Parser y AST DSL\n(gs-testkit::dsl)"]
+    AST --> Runner["Runner de Escenarios\n(gs-testkit::runner)"]
+
+    subgraph TestEnvironment ["Entorno de Prueba Aislado"]
+        TestServer["Servidor Axum en Memoria\n(Puerto efímero :0)"]
+        EphemeralStore["Almacén Efímero en Memoria"]
+        Bus["Bus de Difusión en Memoria"]
+        Postgres[("PostgreSQL Aislado")]
+        TestServer --- EphemeralStore
+        TestServer --- Bus
+        TestServer --- Postgres
+    end
+
+    Runner --> TestServer
+    Runner --> TemplateEngine["Motor de Plantillas y Variables\n({{var}}, {{var.path}}, {{$now - 1h}})"]
+    Runner --> Matcher["Motor de Aserciones y Coincidencia\n(partial_match + proto3 default handling)"]
+    Runner --> Clients["Clientes WebSocket Reactivos\n(TestClient: gs.v1.json / gs.v1.proto)"]
+    Clients <-->|WebSocket Stream| TestServer
+```
+
+### Componentes Principales
+
+1. **Servidor de Prueba en Proceso (`TestServer`):** Levanta un listener Axum real en un puerto TCP efímero (`127.0.0.1:0`) con PostgreSQL migrado, almacén efímero (`InMemoryEphemeralStore`) y bus (`InMemoryBus`), exponiendo tanto el API REST `/v1` como el endpoint de streaming `/v1/stream`.
+2. **Cliente WebSocket Reactivo (`TestClient`):** Conecta a `/v1/stream`, canjea automáticamente un ticket de un solo uso (`POST /v1/stream/tickets`), completa el handshake `ClientHello`/`ServerHello`, y procesa concurrentemente tramas binarias Protobuf (`gs.v1.proto`) o texto JSON (`gs.v1.json`). Dispone de un buzón tipado de mensajes entrantes (`inbox`), filtrando y correlacionando respuestas a peticiones (`request_id`), eventos de control y actualizaciones de ubicación.
+3. **Motor de Plantillas (`TemplateEngine`):** Resuelve dinámicamente variables capturadas de respuestas REST previas (`{{var}}`, `{{var.path}}`), expresiones JSONPath (`json_path`), y fórmulas de tiempo relativo (`{{$now - 1h}}`, `{{$now + 30s}}`) formateadas estrictamente en RFC 3339.
+4. **Motor de Aserciones y Coincidencia Parcial (`Matcher`):** Compara cargas útiles reales frente a patrones esperados. Soporta comodines (`"*"`, `null`), comparación numérica flexible (cadenas numéricas `uint64` proto3 frente a enteros JSON), y gestiona la regla canónica de omisión de valores por defecto de Protobuf 3 (donde campos booleanos `false`, numéricos `0` o cadenas vacías `""` no serializados coinciden con valores por defecto esperados).
+
+### Matriz de Escenarios Normativos (SCN-001 .. SCN-010)
+
+Todos los escenarios están implementados y verificados con ambos subprotocolos (`gs.v1.json` y `gs.v1.proto`) en [`crates/gs-testkit/tests/scenarios_test.rs`](crates/gs-testkit/tests/scenarios_test.rs):
+
+| ID | Título | Subprotocolos | Requisitos Clave Validados |
+|---|---|---|---|
+| **SCN-001** | Sesión 1-a-1: dos dispositivos comparten ubicación | `gs.v1.json`, `gs.v1.proto` | FR-STR-001, FR-STR-002, FR-STR-003, FR-LOC-003, INV-SHR-1 |
+| **SCN-002** | Revocación inmediata: miembro expulsado deja de recibir y publicar | `gs.v1.json`, `gs.v1.proto` | FR-MEM-004, FR-STR-008, FR-PRV-001, NFR-SEC-002 |
+| **SCN-003** | Transferencia de publicador entre dos dispositivos del mismo subject | `gs.v1.json`, `gs.v1.proto` | FR-SHR-004, FR-STR-004, INV-SHR-4 |
+| **SCN-004** | Rotación y revocación de credenciales en vivo (cierre 4401) | `gs.v1.json`, `gs.v1.proto` | FR-AUTH-005, FR-STR-011, NFR-SEC-002 |
+| **SCN-005** | Deshabilitación de tenant/aplicación en vivo (cierre 4403) | `gs.v1.json`, `gs.v1.proto` | FR-ADM-003, FR-STR-011 |
+| **SCN-006** | Cese voluntario de compartición: deja de publicar y borra snapshot | `gs.v1.json`, `gs.v1.proto` | FR-SHR-003, FR-PRV-001, NFR-PRIV-002 |
+| **SCN-007** | Degradación de permisos en vivo (`lost_read` y `SubscriptionEnded`) | `gs.v1.json`, `gs.v1.proto` | FR-MEM-003, FR-STR-008 |
+| **SCN-008** | Cierre y expiración de sesión (`SessionClosed`, `SessionExpired`) | `gs.v1.json`, `gs.v1.proto` | FR-SES-004, FR-SES-005, FR-STR-008 |
+| **SCN-009** | Gracia de desconexión (10s): reconexión dentro de gracia vs evento OFFLINE | `gs.v1.json`, `gs.v1.proto` (`nightly`) | FR-PRS-002, FR-PRS-004, INV-PRS-1 |
+| **SCN-010** | Conexión única por dispositivo: reemplazo concurrente (`Supersede` 4409) | `gs.v1.json`, `gs.v1.proto` | FR-STR-007 |
+
+### Ejecución de Pruebas de Escenarios
+
+```bash
+# Ejecutar los escenarios SCN-001..008 y SCN-010 en ambos subprotocolos (18 pruebas rápidas)
+cargo test -p gs-testkit --test scenarios_test
+
+# Ejecutar un escenario específico con subprotocolo JSON o Protobuf
+cargo test -p gs-testkit --test scenarios_test -- test_scn_001_json
+cargo test -p gs-testkit --test scenarios_test -- test_scn_001_proto
+
+# Ejecutar el escenario de gracia de desconexión SCN-009 (~59s por subprotocolo)
+cargo test -p gs-testkit --test scenarios_test -- --ignored test_scn_009
+```
+
+---
+
 ## 🚀 Inicio Rápido y Desarrollo Local
 
 ### Requisitos Previos
@@ -241,8 +309,11 @@ cargo fmt --all -- --check
 # 2. Análisis estático y linter sin advertencias
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# 3. Ejecutar toda la suite de pruebas del workspace (421 pruebas)
+# 3. Ejecutar toda la suite de pruebas del workspace (451 pruebas)
 cargo test --workspace
+
+# Ejecutar la suite e2e de escenarios declarativos (SCN-001..010 en JSON y Protobuf)
+cargo test -p gs-testkit --test scenarios_test
 
 # 4. Auditoría de dependencias, licencias y avisos de seguridad
 cargo deny check
@@ -288,7 +359,7 @@ docs/
   ├── 15_INTEGRATION_GUIDE.md     Guía práctica para desarrolladores e integradores backend
   ├── 16_OPERATIONS.md            Operación, métricas Prometheus, logs estructurados y CLI
   ├── 17_CONFIGURATION.md        Variables de entorno, configuración del servidor y políticas
-  ├── 18_TESTING_QA.md            Estrategia de pruebas, vectores de prueba y QA
+  ├── 18_TESTING_STRATEGY.md      Estrategia de pruebas, vectores de prueba y QA
   ├── 19_ENGINEERING_STANDARDS.md Estándares de ingeniería y Definition of Done
   ├── 20_AGENT_PROTOCOL.md        Protocolo de trabajo estructurado para agentes de código
   ├── 21_ROADMAP.md               Hoja de ruta por fases y tareas

@@ -1829,12 +1829,34 @@ dependencies = [
 name = "gs-testkit"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "criterion",
+ "futures",
+ "gs-api",
+ "gs-auth",
+ "gs-bus",
+ "gs-config",
+ "gs-domain",
+ "gs-ephemeral",
+ "gs-protocol",
+ "gs-service",
+ "gs-store",
+ "gs-stream",
  "jsonschema",
  "proptest",
+ "prost",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
  "testcontainers",
  "testcontainers-modules",
+ "thiserror",
+ "time",
+ "tokio",
  "tokio-tungstenite 0.30.0",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

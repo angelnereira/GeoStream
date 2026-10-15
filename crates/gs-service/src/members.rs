@@ -1188,15 +1188,9 @@ pub async fn set_sharing<E: EphemeralStore, B: Bus>(
         SetSharingOutcome::Success { member, transition } => {
             // Apply ephemeral and bus effects (docs/04 §7.4, docs/11 §2.1)
             let mver_key = format!("{}:mver:{session_id}", ctx.key_prefix);
-            let new_mver = match ctx.ephemeral.increment_membership_version(&mver_key).await {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to increment membership version in ephemeral store");
-                    1
-                }
-            };
-
-            let ctl_topic = format!("{}:bus:ctl:{session_id}", ctx.key_prefix);
+            if let Err(e) = ctx.ephemeral.increment_membership_version(&mver_key).await {
+                tracing::warn!(error = %e, "failed to increment membership version in ephemeral store");
+            }
 
             match transition {
                 SharingTransition::Stopped => {
@@ -1214,18 +1208,36 @@ pub async fn set_sharing<E: EphemeralStore, B: Bus>(
                         }
                     }
 
-                    let payload = serde_json::to_vec(&serde_json::json!({
-                        "event": "SharingStopped",
-                        "session_id": session_id.to_string(),
-                        "member_id": member.membership.id.to_string(),
-                        "external_subject_id": member.external_subject_id,
-                        "sharing": false,
-                        "mver": new_mver,
-                        "occurred_at": format_rfc3339(now),
-                    }))
-                    .unwrap_or_default();
+                    let proto_member = crate::control::to_proto_member_status(
+                        session_id,
+                        member.membership.id,
+                        &member.external_subject_id,
+                        member.membership.role,
+                        member.membership.capabilities,
+                        false,
+                        Connectivity::Unspecified,
+                        None,
+                    );
+                    let event = crate::control::SessionControlEvent::SharingStopped {
+                        session_id: session_id.to_string(),
+                        member_id: member.membership.id.to_string(),
+                        device_id: ctx
+                            .caller
+                            .device_id
+                            .map(|d| d.to_string())
+                            .unwrap_or_default(),
+                        member: Some(proto_member),
+                        at: crate::control::format_rfc3339(now),
+                    };
 
-                    if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
+                    if let Err(e) = crate::control::publish_session_control(
+                        ctx.bus,
+                        ctx.key_prefix,
+                        session_id,
+                        &event,
+                    )
+                    .await
+                    {
                         tracing::warn!(error = %e, "failed to publish SharingStopped control event on bus");
                     }
 
@@ -1256,18 +1268,32 @@ pub async fn set_sharing<E: EphemeralStore, B: Bus>(
                     .await;
                 }
                 SharingTransition::Started(publisher_device) => {
-                    let payload = serde_json::to_vec(&serde_json::json!({
-                        "event": "SharingStarted",
-                        "session_id": session_id.to_string(),
-                        "member_id": member.membership.id.to_string(),
-                        "external_subject_id": member.external_subject_id,
-                        "sharing": true,
-                        "mver": new_mver,
-                        "occurred_at": format_rfc3339(now),
-                    }))
-                    .unwrap_or_default();
+                    let proto_member = crate::control::to_proto_member_status(
+                        session_id,
+                        member.membership.id,
+                        &member.external_subject_id,
+                        member.membership.role,
+                        member.membership.capabilities,
+                        true,
+                        Connectivity::Online,
+                        None,
+                    );
+                    let event = crate::control::SessionControlEvent::SharingStarted {
+                        session_id: session_id.to_string(),
+                        member_id: member.membership.id.to_string(),
+                        device_id: publisher_device.to_string(),
+                        member: Some(proto_member),
+                        at: crate::control::format_rfc3339(now),
+                    };
 
-                    if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
+                    if let Err(e) = crate::control::publish_session_control(
+                        ctx.bus,
+                        ctx.key_prefix,
+                        session_id,
+                        &event,
+                    )
+                    .await
+                    {
                         tracing::warn!(error = %e, "failed to publish SharingStarted control event on bus");
                     }
 
@@ -1294,20 +1320,33 @@ pub async fn set_sharing<E: EphemeralStore, B: Bus>(
                     previous_device,
                     new_device,
                 } => {
-                    let payload = serde_json::to_vec(&serde_json::json!({
-                        "event": "SharingTransferred",
-                        "session_id": session_id.to_string(),
-                        "member_id": member.membership.id.to_string(),
-                        "external_subject_id": member.external_subject_id,
-                        "previous_device_id": previous_device.to_string(),
-                        "new_device_id": new_device.to_string(),
-                        "sharing": true,
-                        "mver": new_mver,
-                        "occurred_at": format_rfc3339(now),
-                    }))
-                    .unwrap_or_default();
+                    let proto_member = crate::control::to_proto_member_status(
+                        session_id,
+                        member.membership.id,
+                        &member.external_subject_id,
+                        member.membership.role,
+                        member.membership.capabilities,
+                        true,
+                        Connectivity::Online,
+                        None,
+                    );
+                    let event = crate::control::SessionControlEvent::SharingTransferred {
+                        session_id: session_id.to_string(),
+                        member_id: member.membership.id.to_string(),
+                        old_device_id: previous_device.to_string(),
+                        new_device_id: new_device.to_string(),
+                        member: Some(proto_member),
+                        at: crate::control::format_rfc3339(now),
+                    };
 
-                    if let Err(e) = ctx.bus.publish(&ctl_topic, &payload).await {
+                    if let Err(e) = crate::control::publish_session_control(
+                        ctx.bus,
+                        ctx.key_prefix,
+                        session_id,
+                        &event,
+                    )
+                    .await
+                    {
                         tracing::warn!(error = %e, "failed to publish SharingTransferred control event on bus");
                     }
 
