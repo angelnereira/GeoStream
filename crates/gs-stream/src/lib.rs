@@ -24,7 +24,7 @@ pub use connection::{
     AcceptedSession, Connection, ConnectionOutcome, ConnectionState, MAX_PROTOCOL_MINOR,
     StreamState, run_session,
 };
-pub use fanout::{ConnHandle, Fanout, Frame, LatestMap, Outbound};
+pub use fanout::{ActiveConn, ConnHandle, Fanout, Frame, LatestMap, Outbound};
 pub use subscription::{
     Subscription, SubscriptionSet, SubscriptionState, subscribe_ack, unsubscribe_ack,
 };

@@ -9,9 +9,11 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use gs_bus::Bus;
 use gs_domain::error::{AsErrorCode, ErrorCode};
 use gs_domain::ids::{DeviceId, SessionId, SubjectId, TenantId};
 use gs_domain::session::{Actor, ClosedReason, Session, SessionError, SessionMode, SessionStatus};
+use gs_ephemeral::EphemeralStore;
 use gs_store::models::{ActorKind, AuditOutcome};
 pub use gs_store::repos::{SessionFilters, SessionPage};
 use gs_store::repos::{SessionRepository, SessionUpdate};
@@ -748,6 +750,50 @@ pub async fn update_session_with_actor(
     Ok(updated)
 }
 
+/// Updates a session with bus notification (docs/05 §10, FR-STR-011).
+#[allow(clippy::too_many_arguments)]
+pub async fn update_session_with_bus<B: Bus>(
+    pool: &PgPool,
+    bus: &B,
+    key_prefix: &str,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    expected_version: Option<u64>,
+    request: &UpdateSessionRequest,
+    policy: SessionPolicy,
+    actor: Option<Actor>,
+) -> Result<Session, SessionUseCaseError> {
+    let session = update_session_with_actor(
+        pool,
+        tenant_id,
+        session_id,
+        expected_version,
+        request,
+        policy,
+        actor,
+    )
+    .await?;
+
+    let proto_session = crate::control::to_proto_session_info(
+        session.id,
+        session.mode,
+        session.status,
+        session.expires_at,
+        session.max_members,
+        session.stale_after_seconds,
+        session.snapshot_ttl_seconds,
+    );
+    let now = time::OffsetDateTime::now_utc();
+    let event = crate::control::SessionControlEvent::SessionUpdated {
+        session_id: session_id.to_string(),
+        session: proto_session,
+        at: crate::control::format_rfc3339(now),
+    };
+    let _ = crate::control::publish_session_control(bus, key_prefix, session_id, &event).await;
+
+    Ok(session)
+}
+
 /// Closes a session: idempotent and with the effects of docs/05 §4.3 (FR-SES-004).
 pub async fn close_session(
     pool: &PgPool,
@@ -814,6 +860,62 @@ pub async fn close_session_with_actor(
     .await;
 
     Ok(res)
+}
+
+/// Closes a session with ephemeral cleanup and bus notification (docs/04 §7.5, docs/05 §4.3, docs/11 §2.1, FR-SES-004, FR-STR-008).
+#[allow(clippy::too_many_arguments)]
+pub async fn close_session_with_bus<E: EphemeralStore, B: Bus>(
+    pool: &PgPool,
+    ephemeral: &E,
+    bus: &B,
+    key_prefix: &str,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    reason: ClosedReason,
+    actor: Option<Actor>,
+) -> Result<Session, SessionUseCaseError> {
+    let session = close_session_with_actor(pool, tenant_id, session_id, reason, actor).await?;
+
+    // 1. Delete all member snapshots in ephemeral for this session (NFR-PRIV-002)
+    if let Ok(page) = gs_store::repos::MembershipRepository::list_active_by_session(
+        pool, tenant_id, session_id, 1000, None,
+    )
+    .await
+    {
+        for m in page.members {
+            let snap_key = format!("{key_prefix}:snap:{session_id}:{}", m.membership.id);
+            for _ in 0..3 {
+                if ephemeral.delete_snapshot(&snap_key).await.is_ok() {
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2. Increment membership version
+    let mver_key = format!("{key_prefix}:mver:{session_id}");
+    let _ = ephemeral.increment_membership_version(&mver_key).await;
+
+    // 3. Publish SessionClosed on ctl topic
+    let proto_session = crate::control::to_proto_session_info(
+        session.id,
+        session.mode,
+        session.status,
+        session.expires_at,
+        session.max_members,
+        session.stale_after_seconds,
+        session.snapshot_ttl_seconds,
+    );
+    let now = time::OffsetDateTime::now_utc();
+    let event = crate::control::SessionControlEvent::SessionClosed {
+        session_id: session_id.to_string(),
+        reason: reason.to_string(),
+        session: Some(proto_session),
+        at: crate::control::format_rfc3339(now),
+    };
+    let _ = crate::control::publish_session_control(bus, key_prefix, session_id, &event).await;
+
+    Ok(session)
 }
 
 /// Verifies that a device's subject is an active member of the session (docs/07 §9.2).
@@ -883,6 +985,32 @@ pub async fn expire_due_sessions(
         )
         .await;
         session_ids.push(session_id);
+    }
+    Ok(session_ids)
+}
+
+/// Expires due sessions with ephemeral cleanup and bus notification (docs/04 §7.5, FR-SES-005, FR-STR-008).
+pub async fn expire_due_sessions_with_bus<E: EphemeralStore, B: Bus>(
+    pool: &PgPool,
+    ephemeral: &E,
+    bus: &B,
+    key_prefix: &str,
+    batch_limit: u32,
+) -> Result<Vec<SessionId>, SessionUseCaseError> {
+    let session_ids = expire_due_sessions(pool, batch_limit).await?;
+    let now = time::OffsetDateTime::now_utc();
+    for session_id in &session_ids {
+        // 1. Increment mver
+        let mver_key = format!("{key_prefix}:mver:{session_id}");
+        let _ = ephemeral.increment_membership_version(&mver_key).await;
+
+        // 2. Publish SessionExpired on ctl topic
+        let event = crate::control::SessionControlEvent::SessionExpired {
+            session_id: session_id.to_string(),
+            session: None,
+            at: crate::control::format_rfc3339(now),
+        };
+        let _ = crate::control::publish_session_control(bus, key_prefix, *session_id, &event).await;
     }
     Ok(session_ids)
 }

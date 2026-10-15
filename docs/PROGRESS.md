@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F4-07 — Eventos de control y revocación en vivo (`SubscriptionEnded`, cierres 4401/4403) | Angel Nereira (con agente de código) | 2026-10-14 | `crates/gs-service`, `crates/gs-stream`, `crates/gs-api` | FR-STR-008, FR-STR-011, FR-AUTH-005; leer `08` §9, `05` §10 |
+| — | — | — | — | Ninguna tarea en curso |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -35,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado) T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks) y T-F4-06 (fan-out por bus con coalescencia y backpressure) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal) T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado), T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks), T-F4-06 (fan-out por bus con coalescencia y backpressure) y T-F4-07 (eventos de control y revocación en vivo) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -48,6 +48,14 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-14 — T-F4-07 — Eventos de control y revocación en vivo (`SubscriptionEnded`, cierres 4401/4403)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Rama: `feat/T-F4-07-control-revocation`.
+- Requisitos: FR-STR-008, FR-STR-011, FR-AUTH-005.
+- Evidencia: implementada la emisión de eventos de control en `gs-service` y el despacho de notificaciones en `gs-stream` (`docs/08_STREAM_PROTOCOL.md` §9, `docs/05_DOMAIN_MODEL.md` §10, `docs/06_IDENTITY_AUTH.md` §7). Las mutaciones de miembros y sesiones invocan métodos `_with_bus`: `close_session_with_bus`, `update_session_with_bus`, `expire_due_sessions_with_bus`, `add_member_with_bus`, `update_member_with_bus`, `revoke_member_with_bus` y `leave_session_with_bus` sobre `{prefix}:bus:ctl:{session_id}`; al cerrar o expirar sesión se limpian snapshots efímeros y se eleva `mver`. En revocación de credenciales (`revoke_tokens_with_bus`) y desactivación de dispositivo (`deactivate_device`) se emiten eventos en `{prefix}:bus:global`. `gs-stream::fanout` mantiene suscripción a ambos canales y despacha: ante cierre/expiración de sesión `SessionEvent` y `SubscriptionEnded{SESSION_CLOSED|SESSION_EXPIRED}` terminando la suscripción localmente; ante revocación/abandono de miembro `SubscriptionEnded{MEMBER_REVOKED|MEMBER_LEFT}` al miembro y `MemberEvent{REVOKED|LEFT}` a los restantes; ante cambio de capacidades que retira lectura (`lost_read`) `SubscriptionEnded{PERMISSION_CHANGED}` al miembro y `MemberEvent{UPDATED}` a los demás; ante `TenantDisabled`/`ApplicationDisabled` cierra conexiones activas con 4403 (`CLOSE_FORBIDDEN`); ante `ApiKeyRevoked`/`SubjectTokensRevoked`/`DeviceDeactivated` cierra con 4401 (`CLOSE_AUTH_EXPIRED`). Pruebas: 8 de integración en `crates/gs-service/tests/control_events_test.rs` y 8 de integración extremo a extremo en `crates/gs-stream/tests/connection_test.rs`. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (399 pruebas, 0 fallos; base en `main`: 383 → +16), `cargo deny check`, `cargo run -p geostream-tools -- all`: todos OK.
+- Notas: Se actualizó `rustls` a 0.23.46 (parche de seguridad para RUSTSEC-2026-0349 verificado con `cargo deny check`).
 
 ### 2026-10-14 — T-F4-06 — Fan-out por bus (ruta única), coalescencia y backpressure
 - Autor/agente: Angel Nereira (con agente de código).

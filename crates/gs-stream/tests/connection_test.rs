@@ -21,9 +21,11 @@ use gs_service::auth::DeviceTokenKeys;
 use gs_service::gs_auth::{generate_signing_key, parse_private_pem};
 use gs_service::gs_domain::Subprotocol;
 
+use gs_service::control::GlobalBusEvent;
+use gs_service::gs_protocol::{MemberEventKind, SessionEventKind, SubscriptionEndReason};
 use gs_service::migrate::{connect_pool, run_migrations};
 use gs_service::tokens::{MintedToken, TokenRequest, TokenTtlBounds, mint_device_token};
-use gs_service::{AuthzCache, InMemoryBus, InMemoryEphemeralStore};
+use gs_service::{AuthzCache, Bus, InMemoryBus, InMemoryEphemeralStore};
 use gs_stream::{StreamConfig, StreamState, run_session};
 use serde_json::{Value, json};
 use tokio_tungstenite::MaybeTlsStream;
@@ -49,7 +51,10 @@ struct World {
     ws_base: String,
     pool: gs_service::gs_store::PgPool,
     tenant_id: gs_service::gs_domain::ids::TenantId,
+    application_id: gs_service::gs_domain::ids::ApplicationId,
     ephemeral: Arc<InMemoryEphemeralStore>,
+    bus: Arc<InMemoryBus>,
+    prefix: String,
     connections: ConnectionCounter,
     _server: tokio::task::JoinHandle<()>,
     key_with_scope: String,
@@ -116,6 +121,10 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         &application.id.to_string(),
         Some(vec![
             "tokens:mint".to_string(),
+            "sessions:read".to_string(),
+            "sessions:write".to_string(),
+            "members:write".to_string(),
+            "subjects:manage".to_string(),
             "stream:connect".to_string(),
             "locations:read".to_string(),
         ]),
@@ -236,7 +245,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         crypto_rotator: None,
         idempotency_retention: Duration::from_secs(3600),
         ephemeral: ephemeral.clone(),
-        bus,
+        bus: bus.clone(),
         redis_key_prefix: prefix.clone(),
         stream_ticket: StreamTicketConfig {
             ttl: Duration::from_secs(30),
@@ -248,7 +257,7 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
     let stream_api_state = StreamApiState {
         pool: connect_pool(&test_database_url()).await.expect("connect"),
         ephemeral: ephemeral.clone(),
-        redis_key_prefix: prefix,
+        redis_key_prefix: prefix.clone(),
         upgrade_rpm_per_ip: 120,
         max_connections: 2,
         max_frame_bytes: 16_384,
@@ -275,7 +284,10 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
         ws_base: format!("ws://127.0.0.1:{port}"),
         pool: pool.clone(),
         tenant_id: tenant.id,
+        application_id: application.id,
         ephemeral,
+        bus,
+        prefix,
         connections,
         _server: server,
         key_with_scope: key_with_scope.credential.to_string(),
@@ -1724,4 +1736,472 @@ async fn test_fr_str_006_only_the_newest_location_per_member_is_delivered() {
         sequences.windows(2).all(|pair| pair[1] > pair[0]),
         "locations of a member arrive in order: {sequences:?}"
     );
+}
+
+async fn add_member(
+    world: &World,
+    session_id: &str,
+    external_subject_id: &str,
+    role: &str,
+    read: bool,
+    publish: bool,
+) -> String {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!(
+            "{}/v1/sessions/{session_id}/members",
+            world.http_base
+        ))
+        .bearer_auth(&world.key_with_scope)
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "external_subject_id": external_subject_id,
+                "role": role,
+                "capabilities": {
+                    "read": read,
+                    "publish": publish,
+                    "invite": false,
+                    "manage": false,
+                },
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("add member");
+    assert_eq!(resp.status(), 201, "add member must succeed");
+    let text = resp.text().await.expect("text");
+    let body: Value = serde_json::from_str(&text).expect("json");
+    body["id"].as_str().expect("member id").to_string()
+}
+
+async fn next_server_message_timeout(
+    socket: &mut Socket,
+    subprotocol: Subprotocol,
+    timeout: Duration,
+) -> Option<gs_service::gs_protocol::ServerMessage> {
+    tokio::time::timeout(timeout, async {
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Binary(bytes))) => {
+                    return Some(decode_server(&bytes, subprotocol));
+                }
+                Some(Ok(Message::Text(text))) => {
+                    return Some(decode_server(text.as_bytes(), subprotocol));
+                }
+                Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+#[tokio::test]
+async fn test_fr_str_008_member_revocation_ends_subscription_and_notifies_peers() {
+    // covers: FR-STR-008, docs/08 §9, docs/05 §10
+    let world = setup("revoke-member-live", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+    let member_id = add_member(
+        &world,
+        &session_id,
+        "stream-other-revoke-member-live",
+        "MEMBER",
+        true,
+        true,
+    )
+    .await;
+
+    let ticket_a = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let ticket_b = world
+        .ticket(&world.other_device_token.response.access_token)
+        .await;
+
+    let mut socket_a = world.connect(&ticket_a, "gs.v1.proto").await;
+    hello(&mut socket_a, Subprotocol::Proto).await;
+    subscribe(&mut socket_a, &session_id, Subprotocol::Proto, true).await;
+
+    let mut socket_b = world.connect(&ticket_b, "gs.v1.proto").await;
+    hello(&mut socket_b, Subprotocol::Proto).await;
+    subscribe(&mut socket_b, &session_id, Subprotocol::Proto, true).await;
+
+    // Revoke member B via REST API (which publishes SessionControlEvent::MemberRevoked)
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!(
+            "{}/v1/sessions/{session_id}/members/{member_id}",
+            world.http_base
+        ))
+        .bearer_auth(&world.device_token.response.access_token)
+        .send()
+        .await
+        .expect("revoke member");
+    assert_eq!(resp.status(), 204);
+
+    // Socket B receives SubscriptionEnded with reason MEMBER_REVOKED
+    let msg_b =
+        next_server_message_timeout(&mut socket_b, Subprotocol::Proto, Duration::from_secs(3))
+            .await
+            .expect("SubscriptionEnded message for revoked member");
+    match msg_b.body {
+        Some(gs_service::gs_protocol::server_message::Body::SubscriptionEnded(ended)) => {
+            assert_eq!(ended.session_id, session_id);
+            assert_eq!(ended.reason, SubscriptionEndReason::MemberRevoked as i32);
+        }
+        other => panic!("expected SubscriptionEnded, got {other:?}"),
+    }
+
+    // Socket A receives MemberEvent with kind REVOKED
+    let msg_a =
+        next_server_message_timeout(&mut socket_a, Subprotocol::Proto, Duration::from_secs(3))
+            .await
+            .expect("MemberEvent for remaining subscriber");
+    match msg_a.body {
+        Some(gs_service::gs_protocol::server_message::Body::MemberEvent(event)) => {
+            assert_eq!(event.kind, MemberEventKind::Revoked as i32);
+        }
+        other => panic!("expected MemberEvent, got {other:?}"),
+    }
+
+    // Subsequent publish by revoked member fails with MemberRevoked
+    let ack = publish(
+        &mut socket_b,
+        &session_id,
+        vec![sample(10)],
+        Subprotocol::Proto,
+    )
+    .await;
+    assert_eq!(
+        ack.request_error,
+        gs_service::gs_protocol::ErrorCode::MemberRevoked as i32
+    );
+}
+
+#[tokio::test]
+async fn test_fr_str_008_member_leave_ends_subscription_and_notifies_peers() {
+    // covers: FR-STR-008, docs/08 §9, docs/05 §10
+    let world = setup("leave-member-live", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+    let _member_id = add_member(
+        &world,
+        &session_id,
+        "stream-other-leave-member-live",
+        "MEMBER",
+        true,
+        true,
+    )
+    .await;
+
+    let ticket_a = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let ticket_b = world
+        .ticket(&world.other_device_token.response.access_token)
+        .await;
+
+    let mut socket_a = world.connect(&ticket_a, "gs.v1.proto").await;
+    hello(&mut socket_a, Subprotocol::Proto).await;
+    subscribe(&mut socket_a, &session_id, Subprotocol::Proto, true).await;
+
+    let mut socket_b = world.connect(&ticket_b, "gs.v1.proto").await;
+    hello(&mut socket_b, Subprotocol::Proto).await;
+    subscribe(&mut socket_b, &session_id, Subprotocol::Proto, true).await;
+
+    // Member B leaves via REST API (which publishes SessionControlEvent::MemberLeft)
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!(
+            "{}/v1/sessions/{session_id}/leave",
+            world.http_base
+        ))
+        .bearer_auth(&world.other_device_token.response.access_token)
+        .send()
+        .await
+        .expect("leave session");
+    assert_eq!(resp.status(), 204);
+
+    // Socket B receives SubscriptionEnded with reason MEMBER_LEFT
+    let msg_b =
+        next_server_message_timeout(&mut socket_b, Subprotocol::Proto, Duration::from_secs(3))
+            .await
+            .expect("SubscriptionEnded message for leaving member");
+    match msg_b.body {
+        Some(gs_service::gs_protocol::server_message::Body::SubscriptionEnded(ended)) => {
+            assert_eq!(ended.session_id, session_id);
+            assert_eq!(ended.reason, SubscriptionEndReason::MemberLeft as i32);
+        }
+        other => panic!("expected SubscriptionEnded, got {other:?}"),
+    }
+
+    // Socket A receives MemberEvent with kind LEFT
+    let msg_a =
+        next_server_message_timeout(&mut socket_a, Subprotocol::Proto, Duration::from_secs(3))
+            .await
+            .expect("MemberEvent for remaining subscriber");
+    match msg_a.body {
+        Some(gs_service::gs_protocol::server_message::Body::MemberEvent(event)) => {
+            assert_eq!(event.kind, MemberEventKind::Left as i32);
+        }
+        other => panic!("expected MemberEvent, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_fr_str_008_session_close_ends_all_subscriptions() {
+    // covers: FR-STR-008, docs/08 §9, docs/05 §10
+    let world = setup("close-session-live", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+
+    let ticket_a = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let mut socket_a = world.connect(&ticket_a, "gs.v1.proto").await;
+    hello(&mut socket_a, Subprotocol::Proto).await;
+    subscribe(&mut socket_a, &session_id, Subprotocol::Proto, true).await;
+
+    // Owner closes the session via REST API
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!(
+            "{}/v1/sessions/{session_id}/close",
+            world.http_base
+        ))
+        .bearer_auth(&world.device_token.response.access_token)
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "reason": "COMPLETED" }).to_string())
+        .send()
+        .await
+        .expect("close session");
+    assert_eq!(resp.status(), 200);
+
+    // Socket A receives SessionEvent::Closed first
+    let msg_1 =
+        next_server_message_timeout(&mut socket_a, Subprotocol::Proto, Duration::from_secs(3))
+            .await
+            .expect("SessionEvent::Closed");
+    match msg_1.body {
+        Some(gs_service::gs_protocol::server_message::Body::SessionEvent(event)) => {
+            assert_eq!(event.kind, SessionEventKind::Closed as i32);
+        }
+        other => panic!("expected SessionEvent, got {other:?}"),
+    }
+
+    // Socket A then receives SubscriptionEnded with reason SESSION_CLOSED
+    let msg_2 =
+        next_server_message_timeout(&mut socket_a, Subprotocol::Proto, Duration::from_secs(3))
+            .await
+            .expect("SubscriptionEnded");
+    match msg_2.body {
+        Some(gs_service::gs_protocol::server_message::Body::SubscriptionEnded(ended)) => {
+            assert_eq!(ended.session_id, session_id);
+            assert_eq!(ended.reason, SubscriptionEndReason::SessionClosed as i32);
+        }
+        other => panic!("expected SubscriptionEnded, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_fr_str_008_permission_change_ends_subscription() {
+    // covers: FR-STR-008, docs/08 §9, docs/05 §10
+    let world = setup("perm-change-live", StreamConfig::default()).await;
+    let session_id = session_of(&world).await;
+    let member_id = add_member(
+        &world,
+        &session_id,
+        "stream-other-perm-change-live",
+        "MEMBER",
+        true,
+        true,
+    )
+    .await;
+
+    let ticket_a = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+    let ticket_b = world
+        .ticket(&world.other_device_token.response.access_token)
+        .await;
+
+    let mut socket_a = world.connect(&ticket_a, "gs.v1.proto").await;
+    hello(&mut socket_a, Subprotocol::Proto).await;
+    subscribe(&mut socket_a, &session_id, Subprotocol::Proto, true).await;
+
+    let mut socket_b = world.connect(&ticket_b, "gs.v1.proto").await;
+    hello(&mut socket_b, Subprotocol::Proto).await;
+    subscribe(&mut socket_b, &session_id, Subprotocol::Proto, true).await;
+
+    // Owner removes READ capability from member B via REST API
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(format!(
+            "{}/v1/sessions/{session_id}/members/{member_id}",
+            world.http_base
+        ))
+        .bearer_auth(&world.device_token.response.access_token)
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "capabilities": {
+                    "read": false,
+                    "publish": true,
+                    "invite": false,
+                    "manage": false,
+                }
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .expect("update member");
+    assert_eq!(resp.status(), 200);
+
+    // Socket B receives SubscriptionEnded with reason PERMISSION_CHANGED
+    let msg_b =
+        next_server_message_timeout(&mut socket_b, Subprotocol::Proto, Duration::from_secs(3))
+            .await
+            .expect("SubscriptionEnded for member who lost read");
+    match msg_b.body {
+        Some(gs_service::gs_protocol::server_message::Body::SubscriptionEnded(ended)) => {
+            assert_eq!(ended.session_id, session_id);
+            assert_eq!(
+                ended.reason,
+                SubscriptionEndReason::PermissionChanged as i32
+            );
+        }
+        other => panic!("expected SubscriptionEnded, got {other:?}"),
+    }
+
+    // Socket A receives MemberEvent with kind UPDATED
+    let msg_a =
+        next_server_message_timeout(&mut socket_a, Subprotocol::Proto, Duration::from_secs(3))
+            .await
+            .expect("MemberEvent for remaining subscriber");
+    match msg_a.body {
+        Some(gs_service::gs_protocol::server_message::Body::MemberEvent(event)) => {
+            assert_eq!(event.kind, MemberEventKind::Updated as i32);
+        }
+        other => panic!("expected MemberEvent, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_fr_auth_005_live_token_revocation_closes_connection_with_4401() {
+    // covers: FR-AUTH-005, docs/06 §7, docs/08 §9 (cierre 4401 en vivo sin esperar TTL)
+    let world = setup("live-token-revocation", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.other_device_token.response.access_token)
+        .await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Revoke tokens of other_device_token via REST API with application key
+    let other_subject = &world.other_device_token.response.subject_id;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!(
+            "{}/v1/subjects/{other_subject}/revoke-tokens",
+            world.http_base
+        ))
+        .bearer_auth(&world.key_with_scope)
+        .send()
+        .await
+        .expect("revoke tokens");
+    assert_eq!(resp.status(), 200);
+
+    // The connection must close with 4401 immediately in real time
+    assert_eq!(read_close_code(&mut socket).await, 4401);
+}
+
+#[tokio::test]
+async fn test_fr_auth_005_live_device_deactivation_closes_connection_with_4401() {
+    // covers: FR-AUTH-005, docs/06 §7, docs/08 §9 (cierre 4401 en vivo por desactivación de dispositivo)
+    let world = setup("live-device-deactivation", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Publish DeviceDeactivated event on the global bus
+    let event = GlobalBusEvent::DeviceDeactivated {
+        tenant_id: world.tenant_id.to_string(),
+        device_id: world.device_token.response.device_id.clone(),
+        subject_id: None,
+        at: "2026-10-14T20:00:00Z".to_string(),
+    };
+    world
+        .bus
+        .publish(
+            &format!("{}:bus:global", world.prefix),
+            &serde_json::to_vec(&event).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The connection must close with 4401 immediately in real time
+    assert_eq!(read_close_code(&mut socket).await, 4401);
+}
+
+#[tokio::test]
+async fn test_fr_str_011_live_tenant_disabled_closes_connection_with_4403() {
+    // covers: FR-STR-011, docs/06 §7, docs/08 §9 (cierre 4403 en vivo por tenant deshabilitado)
+    let world = setup("live-tenant-disable", StreamConfig::default()).await;
+    let ticket = world
+        .ticket(&world.device_token.response.access_token)
+        .await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Publish TenantDisabled event on the global bus
+    let event = GlobalBusEvent::TenantDisabled {
+        tenant_id: world.tenant_id.to_string(),
+        at: "2026-10-14T20:00:00Z".to_string(),
+    };
+    world
+        .bus
+        .publish(
+            &format!("{}:bus:global", world.prefix),
+            &serde_json::to_vec(&event).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The connection must close with 4403 immediately in real time
+    assert_eq!(read_close_code(&mut socket).await, 4403);
+}
+
+#[tokio::test]
+async fn test_fr_str_011_live_application_disabled_closes_connection_with_4403() {
+    // covers: FR-STR-011, docs/06 §7, docs/08 §9 (cierre 4403 en vivo por application deshabilitada)
+    let world = setup("live-app-disable", StreamConfig::default()).await;
+    let ticket = world.ticket(&world.key_with_scope).await;
+
+    let mut socket = world.connect(&ticket, "gs.v1.proto").await;
+    hello(&mut socket, Subprotocol::Proto).await;
+
+    // Publish ApplicationDisabled event on the global bus
+    let event = GlobalBusEvent::ApplicationDisabled {
+        tenant_id: world.tenant_id.to_string(),
+        application_id: world.application_id.to_string(),
+        at: "2026-10-14T20:00:00Z".to_string(),
+    };
+    world
+        .bus
+        .publish(
+            &format!("{}:bus:global", world.prefix),
+            &serde_json::to_vec(&event).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The connection must close with 4403 immediately in real time
+    assert_eq!(read_close_code(&mut socket).await, 4403);
 }

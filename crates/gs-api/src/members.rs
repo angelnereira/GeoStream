@@ -17,9 +17,9 @@ use gs_service::idempotency::{
 };
 use gs_service::members::{
     AddMemberRequest, MemberResource, MemberUseCaseError, MembershipRepository, SetSharingCaller,
-    SetSharingContext, SharingRequest, UpdateCaller, UpdateMemberRequest, add_member, get_member,
-    get_member_for_device_me, leave_session, list_members, revoke_member, set_sharing,
-    update_member,
+    SetSharingContext, SharingRequest, UpdateCaller, UpdateMemberRequest, add_member_with_bus,
+    get_member, get_member_for_device_me, leave_session_with_bus, list_members,
+    revoke_member_with_bus, set_sharing, update_member_with_bus,
 };
 
 use crate::pagination::parse_pagination_query;
@@ -190,7 +190,17 @@ pub async fn add_member_handler(
         }
     }
 
-    match add_member(&state.pool, tenant_id, session_id, &request).await {
+    match add_member_with_bus(
+        &state.pool,
+        state.ephemeral.as_ref(),
+        state.bus.as_ref(),
+        &state.redis_key_prefix,
+        tenant_id,
+        session_id,
+        &request,
+    )
+    .await
+    {
         Ok(member) => {
             let etag_val = member.etag();
             let response_body = serde_json::to_value(&member).unwrap_or(Value::Null);
@@ -652,13 +662,16 @@ pub async fn update_member_handler(
         }
     };
 
-    match update_member(
+    match update_member_with_bus(
         &state.pool,
+        state.ephemeral.as_ref(),
+        state.bus.as_ref(),
+        &state.redis_key_prefix,
         tenant_id,
         session_id,
         target_member_id,
-        expected_version,
         &request,
+        expected_version,
         update_caller,
     )
     .await
@@ -760,7 +773,17 @@ pub async fn revoke_member_handler(
         }
     }
 
-    match revoke_member(&state.pool, tenant_id, session_id, target_member_id).await {
+    match revoke_member_with_bus(
+        &state.pool,
+        state.ephemeral.as_ref(),
+        state.bus.as_ref(),
+        &state.redis_key_prefix,
+        tenant_id,
+        session_id,
+        target_member_id,
+    )
+    .await
+    {
         Ok(()) => {
             let mut resp = StatusCode::NO_CONTENT.into_response();
             if let Ok(v) = axum::http::HeaderValue::from_str(&request_id) {
@@ -809,7 +832,17 @@ pub async fn leave_session_handler(
 
     let tenant_id = caller.tenant_id();
 
-    match leave_session(&state.pool, tenant_id, session_id, dev.subject.id).await {
+    match leave_session_with_bus(
+        &state.pool,
+        state.ephemeral.as_ref(),
+        state.bus.as_ref(),
+        &state.redis_key_prefix,
+        tenant_id,
+        session_id,
+        dev.subject.id,
+    )
+    .await
+    {
         Ok(()) => {
             let mut resp = StatusCode::NO_CONTENT.into_response();
             if let Ok(v) = axum::http::HeaderValue::from_str(&request_id) {

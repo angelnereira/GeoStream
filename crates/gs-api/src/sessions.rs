@@ -26,9 +26,9 @@ use gs_service::idempotency::{
 use gs_service::migrate::PgPool;
 use gs_service::sessions::{
     CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,
-    SessionUseCaseError, UpdateSessionRequest, close_session_with_actor, create_session,
-    get_session, list_sessions_for_application, list_sessions_for_subject,
-    update_session_with_actor, verify_device_active_member, verify_device_manage_capability,
+    SessionUseCaseError, UpdateSessionRequest, close_session_with_bus, create_session, get_session,
+    list_sessions_for_application, list_sessions_for_subject, update_session_with_bus,
+    verify_device_active_member, verify_device_manage_capability,
 };
 
 use crate::pagination::parse_pagination_query;
@@ -738,8 +738,10 @@ pub async fn update_session_handler(
         CallerPrincipal::Application(app) => Actor::Application(app.application.id),
     };
 
-    match update_session_with_actor(
+    match update_session_with_bus(
         &state.pool,
+        state.bus.as_ref(),
+        &state.redis_key_prefix,
         tenant_id,
         session_id,
         Some(expected_version),
@@ -820,7 +822,18 @@ pub async fn close_session_handler(
         }
     };
 
-    match close_session_with_actor(&state.pool, tenant_id, session_id, reason, Some(actor)).await {
+    match close_session_with_bus(
+        &state.pool,
+        state.ephemeral.as_ref(),
+        state.bus.as_ref(),
+        &state.redis_key_prefix,
+        tenant_id,
+        session_id,
+        reason,
+        Some(actor),
+    )
+    .await
+    {
         Ok(session) => {
             let resource =
                 match SessionResource::from_session_with_counts(&state.pool, &session).await {

@@ -13,6 +13,7 @@
 //! - FR-SES-007: Owner departure cascades to oldest manager or closes/clears owner.
 #![forbid(unsafe_code)]
 
+use std::str::FromStr;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -360,6 +361,50 @@ pub async fn add_member(
     }
 }
 
+/// Adds a member with bus notification (FR-MEM-001, FR-STR-011).
+pub async fn add_member_with_bus<E: EphemeralStore, B: Bus>(
+    pool: &PgPool,
+    ephemeral: &E,
+    bus: &B,
+    key_prefix: &str,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    request: &AddMemberRequest,
+) -> Result<MemberResource, MemberUseCaseError> {
+    let res = add_member(pool, tenant_id, session_id, request).await?;
+
+    // Increment mver
+    let mver_key = format!("{key_prefix}:mver:{session_id}");
+    let _ = ephemeral.increment_membership_version(&mver_key).await;
+
+    let member_id =
+        MemberId::from_str(&res.id).map_err(|e| MemberUseCaseError::Validation(e.to_string()))?;
+    let now = OffsetDateTime::now_utc();
+    let proto_member = crate::control::to_proto_member_status(
+        session_id,
+        member_id,
+        &request.external_subject_id,
+        res.role,
+        Capabilities {
+            publish: res.capabilities.publish,
+            read: res.capabilities.read,
+            invite: res.capabilities.invite,
+            manage: res.capabilities.manage,
+        },
+        false,
+        Connectivity::Unspecified,
+        None,
+    );
+    let event = crate::control::SessionControlEvent::MemberJoined {
+        session_id: session_id.to_string(),
+        member: proto_member,
+        at: crate::control::format_rfc3339(now),
+    };
+    let _ = crate::control::publish_session_control(bus, key_prefix, session_id, &event).await;
+
+    Ok(res)
+}
+
 /// Lists active members of a session with cursor pagination (FR-MEM-002, docs/07 §9.3).
 pub async fn list_members(
     pool: &PgPool,
@@ -639,6 +684,88 @@ pub async fn update_member(
     ))
 }
 
+/// Updates member capabilities with ephemeral cleanup and bus notification (FR-MEM-003, FR-STR-008, FR-STR-011).
+#[allow(clippy::too_many_arguments)]
+pub async fn update_member_with_bus<E: EphemeralStore, B: Bus>(
+    pool: &PgPool,
+    ephemeral: &E,
+    bus: &B,
+    key_prefix: &str,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    target_member_id: MemberId,
+    request: &UpdateMemberRequest,
+    expected_version: Option<u64>,
+    caller: UpdateCaller<'_>,
+) -> Result<MemberResource, MemberUseCaseError> {
+    // 1. Fetch current member to compare capabilities
+    let current = MembershipRepository::get_by_id(pool, tenant_id, session_id, target_member_id)
+        .await?
+        .ok_or(MemberUseCaseError::NotFound)?;
+    let old_caps = current.membership.capabilities;
+
+    let res = update_member(
+        pool,
+        tenant_id,
+        session_id,
+        target_member_id,
+        expected_version,
+        request,
+        caller,
+    )
+    .await?;
+
+    let new_caps = Capabilities {
+        publish: res.capabilities.publish,
+        read: res.capabilities.read,
+        invite: res.capabilities.invite,
+        manage: res.capabilities.manage,
+    };
+    let lost_read = old_caps.read && !new_caps.read;
+    let lost_publish = old_caps.publish && !new_caps.publish;
+
+    // If lost publish while sharing, delete snapshot
+    if lost_publish && current.membership.sharing {
+        let snap_key = format!("{key_prefix}:snap:{session_id}:{target_member_id}");
+        for _ in 0..3 {
+            if ephemeral.delete_snapshot(&snap_key).await.is_ok() {
+                break;
+            }
+        }
+    }
+
+    // Increment mver
+    let mver_key = format!("{key_prefix}:mver:{session_id}");
+    let _ = ephemeral.increment_membership_version(&mver_key).await;
+
+    // Publish MemberUpdated
+    let now = OffsetDateTime::now_utc();
+    let proto_member = crate::control::to_proto_member_status(
+        session_id,
+        target_member_id,
+        &current.external_subject_id,
+        match res.role {
+            gs_domain::membership::MemberRole::Owner => MemberRole::Owner,
+            gs_domain::membership::MemberRole::Member => MemberRole::Member,
+        },
+        new_caps,
+        res.sharing,
+        Connectivity::Unspecified,
+        None,
+    );
+    let event = crate::control::SessionControlEvent::MemberUpdated {
+        session_id: session_id.to_string(),
+        member: proto_member,
+        subject_id: current.membership.subject_id.to_string(),
+        lost_read,
+        lost_publish,
+        at: crate::control::format_rfc3339(now),
+    };
+    let _ = crate::control::publish_session_control(bus, key_prefix, session_id, &event).await;
+
+    Ok(res)
+}
+
 /// Revokes a member (idempotent 204, FR-MEM-006, docs/07 §9.3).
 pub async fn revoke_member(
     pool: &PgPool,
@@ -750,6 +877,278 @@ pub async fn leave_session(
                     serde_json::json!({
                         "reason": "owner_left",
                     }),
+                )
+                .await;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Revokes a member with ephemeral cleanup and bus notification (docs/04 §7.3, docs/11 §2.1, FR-MEM-004, FR-STR-008).
+pub async fn revoke_member_with_bus<E: EphemeralStore, B: Bus>(
+    pool: &PgPool,
+    ephemeral: &E,
+    bus: &B,
+    key_prefix: &str,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    target_member_id: MemberId,
+) -> Result<(), MemberUseCaseError> {
+    let now = OffsetDateTime::now_utc();
+    let outcome =
+        MembershipRepository::revoke_member(pool, tenant_id, session_id, target_member_id, now)
+            .await?;
+
+    match outcome {
+        RevokeOutcome::NotFound => Err(MemberUseCaseError::NotFound),
+        RevokeOutcome::AlreadyEnded => Ok(()), // Idempotent 204
+        RevokeOutcome::Revoked {
+            member,
+            session_closed,
+            promoted_owner,
+        } => {
+            let _ = record_audit(
+                pool,
+                tenant_id,
+                ActorKind::Application,
+                None,
+                Some(member.membership.subject_id),
+                "member.revoked",
+                Some("member"),
+                Some(target_member_id.into_uuid()),
+                AuditOutcome::Success,
+                None,
+                serde_json::json!({
+                    "session_id": session_id.to_string(),
+                    "session_closed": session_closed,
+                }),
+            )
+            .await;
+
+            // 1. Delete ephemeral snapshot (NFR-PRIV-002, retry up to 3 times)
+            let snap_key = format!("{key_prefix}:snap:{session_id}:{target_member_id}");
+            for _ in 0..3 {
+                if ephemeral.delete_snapshot(&snap_key).await.is_ok() {
+                    break;
+                }
+            }
+
+            // 2. Increment membership version
+            let mver_key = format!("{key_prefix}:mver:{session_id}");
+            let _ = ephemeral.increment_membership_version(&mver_key).await;
+
+            // 3. Publish MemberRevoked on bus:ctl:{session_id}
+            let proto_member = crate::control::to_proto_member_status(
+                session_id,
+                target_member_id,
+                &member.external_subject_id,
+                member.membership.role,
+                member.membership.capabilities,
+                false,
+                Connectivity::Unspecified,
+                None,
+            );
+            let event = crate::control::SessionControlEvent::MemberRevoked {
+                session_id: session_id.to_string(),
+                member_id: target_member_id.to_string(),
+                subject_id: member.membership.subject_id.to_string(),
+                member: Some(proto_member),
+                at: crate::control::format_rfc3339(now),
+            };
+            let _ =
+                crate::control::publish_session_control(bus, key_prefix, session_id, &event).await;
+
+            if session_closed {
+                let _ = record_audit(
+                    pool,
+                    tenant_id,
+                    ActorKind::System,
+                    None,
+                    Some(member.membership.subject_id),
+                    "session.closed",
+                    Some("session"),
+                    Some(session_id.into_uuid()),
+                    AuditOutcome::Success,
+                    None,
+                    serde_json::json!({
+                        "reason": "owner_left",
+                    }),
+                )
+                .await;
+                let close_event = crate::control::SessionControlEvent::SessionClosed {
+                    session_id: session_id.to_string(),
+                    reason: "OWNER_LEFT".to_string(),
+                    session: None,
+                    at: crate::control::format_rfc3339(now),
+                };
+                let _ = crate::control::publish_session_control(
+                    bus,
+                    key_prefix,
+                    session_id,
+                    &close_event,
+                )
+                .await;
+            } else if let Some(new_owner_m) = promoted_owner {
+                let proto_owner = crate::control::to_proto_member_status(
+                    session_id,
+                    new_owner_m.membership.id,
+                    &new_owner_m.external_subject_id,
+                    new_owner_m.membership.role,
+                    new_owner_m.membership.capabilities,
+                    new_owner_m.membership.sharing,
+                    Connectivity::Unspecified,
+                    None,
+                );
+                let update_event = crate::control::SessionControlEvent::MemberUpdated {
+                    session_id: session_id.to_string(),
+                    member: proto_owner,
+                    subject_id: new_owner_m.membership.subject_id.to_string(),
+                    lost_read: false,
+                    lost_publish: false,
+                    at: crate::control::format_rfc3339(now),
+                };
+                let _ = crate::control::publish_session_control(
+                    bus,
+                    key_prefix,
+                    session_id,
+                    &update_event,
+                )
+                .await;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Voluntarily leaves a session with ephemeral cleanup and bus notification (FR-MEM-005, FR-STR-008).
+pub async fn leave_session_with_bus<E: EphemeralStore, B: Bus>(
+    pool: &PgPool,
+    ephemeral: &E,
+    bus: &B,
+    key_prefix: &str,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    caller_subject_id: SubjectId,
+) -> Result<(), MemberUseCaseError> {
+    let now = OffsetDateTime::now_utc();
+    let outcome =
+        MembershipRepository::leave_session(pool, tenant_id, session_id, caller_subject_id, now)
+            .await?;
+
+    match outcome {
+        LeaveOutcome::NotFound => Err(MemberUseCaseError::NotFound),
+        LeaveOutcome::Left {
+            member,
+            session_closed,
+            promoted_owner,
+        } => {
+            let member_id = member.membership.id;
+            let _ = record_audit(
+                pool,
+                tenant_id,
+                ActorKind::Device,
+                None,
+                Some(caller_subject_id),
+                "member.left",
+                Some("member"),
+                Some(member_id.into_uuid()),
+                AuditOutcome::Success,
+                None,
+                serde_json::json!({
+                    "session_id": session_id.to_string(),
+                    "session_closed": session_closed,
+                }),
+            )
+            .await;
+
+            // 1. Delete ephemeral snapshot (NFR-PRIV-002, retry up to 3 times)
+            let snap_key = format!("{key_prefix}:snap:{session_id}:{member_id}");
+            for _ in 0..3 {
+                if ephemeral.delete_snapshot(&snap_key).await.is_ok() {
+                    break;
+                }
+            }
+
+            // 2. Increment membership version
+            let mver_key = format!("{key_prefix}:mver:{session_id}");
+            let _ = ephemeral.increment_membership_version(&mver_key).await;
+
+            // 3. Publish MemberLeft on bus:ctl:{session_id}
+            let proto_member = crate::control::to_proto_member_status(
+                session_id,
+                member_id,
+                &member.external_subject_id,
+                member.membership.role,
+                member.membership.capabilities,
+                false,
+                Connectivity::Unspecified,
+                None,
+            );
+            let event = crate::control::SessionControlEvent::MemberLeft {
+                session_id: session_id.to_string(),
+                member_id: member_id.to_string(),
+                subject_id: caller_subject_id.to_string(),
+                member: Some(proto_member),
+                at: crate::control::format_rfc3339(now),
+            };
+            let _ =
+                crate::control::publish_session_control(bus, key_prefix, session_id, &event).await;
+
+            if session_closed {
+                let _ = record_audit(
+                    pool,
+                    tenant_id,
+                    ActorKind::System,
+                    None,
+                    Some(caller_subject_id),
+                    "session.closed",
+                    Some("session"),
+                    Some(session_id.into_uuid()),
+                    AuditOutcome::Success,
+                    None,
+                    serde_json::json!({
+                        "reason": "owner_left",
+                    }),
+                )
+                .await;
+                let close_event = crate::control::SessionControlEvent::SessionClosed {
+                    session_id: session_id.to_string(),
+                    reason: "OWNER_LEFT".to_string(),
+                    session: None,
+                    at: crate::control::format_rfc3339(now),
+                };
+                let _ = crate::control::publish_session_control(
+                    bus,
+                    key_prefix,
+                    session_id,
+                    &close_event,
+                )
+                .await;
+            } else if let Some(new_owner_m) = promoted_owner {
+                let proto_owner = crate::control::to_proto_member_status(
+                    session_id,
+                    new_owner_m.membership.id,
+                    &new_owner_m.external_subject_id,
+                    new_owner_m.membership.role,
+                    new_owner_m.membership.capabilities,
+                    new_owner_m.membership.sharing,
+                    Connectivity::Unspecified,
+                    None,
+                );
+                let update_event = crate::control::SessionControlEvent::MemberUpdated {
+                    session_id: session_id.to_string(),
+                    member: proto_owner,
+                    subject_id: new_owner_m.membership.subject_id.to_string(),
+                    lost_read: false,
+                    lost_publish: false,
+                    at: crate::control::format_rfc3339(now),
+                };
+                let _ = crate::control::publish_session_control(
+                    bus,
+                    key_prefix,
+                    session_id,
+                    &update_event,
                 )
                 .await;
             }

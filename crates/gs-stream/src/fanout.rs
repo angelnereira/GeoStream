@@ -1,5 +1,5 @@
 //! Fan-out of a session over the bus, with coalescing and bounded queues
-//! (docs/04 §8, docs/08 §10, FR-STR-003, FR-STR-006).
+//! (docs/04 §8, docs/08 §10, FR-STR-003, FR-STR-006, FR-STR-008, FR-STR-011, FR-AUTH-005).
 //!
 //! Every connection has one writer task that owns its socket and two inputs:
 //!
@@ -17,17 +17,24 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use dashmap::DashMap;
-use gs_service::gs_domain::ids::{MemberId, SessionId};
-use gs_service::gs_protocol::{ServerMessage, SubscribeAck, UnsubscribeAck};
+use gs_service::authz::{AuthzCache, PrincipalIdentity};
+use gs_service::control::{GlobalBusEvent, SessionControlEvent};
+use gs_service::gs_domain::Subprotocol;
+use gs_service::gs_domain::ids::{ConnectionId, MemberId, SessionId};
+use gs_service::gs_protocol::server_message::Body as ServerBody;
+use gs_service::gs_protocol::{
+    MemberEvent, MemberEventKind, MemberStatus, ServerMessage, SessionEvent, SessionEventKind,
+    SessionInfo, SessionStatus, SubscribeAck, SubscriptionEndReason, SubscriptionEnded,
+    UnsubscribeAck,
+};
 use gs_service::{Bus, InMemoryBus};
 use prost::Message as _;
 use tokio::sync::{Notify, mpsc};
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
-
-use gs_service::gs_domain::Subprotocol;
 
 /// Default of `GS_STREAM_OUTBOUND_CONTROL_QUEUE` (docs/17 §2.6).
 pub const DEFAULT_OUTBOUND_CONTROL_QUEUE: usize = 1_024;
@@ -117,43 +124,121 @@ impl Outbound {
     }
 }
 
+/// An active connection registered on this stream instance (docs/08 §8, §9).
+#[derive(Debug, Clone)]
+pub struct ActiveConn {
+    /// Connection identifier.
+    pub connection_id: ConnectionId,
+    /// Principal identity for selective security revocations.
+    pub principal: PrincipalIdentity,
+    /// Channel to send close code (4401 or 4403) to the connection.
+    pub close_tx: mpsc::Sender<u16>,
+}
+
 /// Handle of a live connection inside the fan-out of an instance.
 #[derive(Debug, Clone)]
 pub struct ConnHandle {
     /// Connection the handle belongs to.
-    pub connection_id: gs_service::gs_domain::ids::ConnectionId,
+    pub connection_id: ConnectionId,
     /// Subprotocol that connection negotiated: each frame is encoded with it (docs/08 §2).
     pub subprotocol: Subprotocol,
     /// Outbound side of that connection.
     pub outbound: Outbound,
     /// Cancelled when the connection ends, so its writer stops.
     pub cancel: CancellationToken,
+    /// Principal identity of the connection.
+    pub principal: PrincipalIdentity,
+    /// Channel to signal subscription end for a session to the connection machine.
+    pub session_end_tx: mpsc::Sender<(SessionId, SubscriptionEndReason)>,
 }
 
-/// Fan-out of an instance: local subscriptions per session and the bus tasks that feed them.
+/// Fan-out of an instance: local subscriptions per session, active connection registry,
+/// and the bus tasks that feed them (docs/04 §8, docs/08 §9, §10).
 #[derive(Debug)]
 pub struct Fanout {
     by_session: DashMap<SessionId, Vec<ConnHandle>>,
+    active_connections: DashMap<ConnectionId, ActiveConn>,
     /// Bus the instance publishes and receives from (docs/04 §6.1).
     bus: Arc<InMemoryBus>,
+    /// Authorization cache for invalidation on bus events (docs/04 §6.2, ADR-0009).
+    authz: std::sync::RwLock<Option<Arc<AuthzCache>>>,
     /// Ephemeral key prefix (`GS_REDIS_KEY_PREFIX`, default `gs`).
     key_prefix: String,
+    /// Tracks if global security bus listener is running.
+    global_listener_started: AtomicBool,
 }
 
 impl Fanout {
     /// Builds the fan-out of an instance over its bus.
     pub fn new(bus: Arc<InMemoryBus>, key_prefix: impl Into<String>) -> Self {
+        Self::with_authz(bus, key_prefix, None)
+    }
+
+    /// Builds the fan-out with an optional authorization cache reference.
+    pub fn with_authz(
+        bus: Arc<InMemoryBus>,
+        key_prefix: impl Into<String>,
+        authz: Option<Arc<AuthzCache>>,
+    ) -> Self {
         Self {
             by_session: DashMap::new(),
+            active_connections: DashMap::new(),
             bus,
+            authz: std::sync::RwLock::new(authz),
             key_prefix: key_prefix.into(),
+            global_listener_started: AtomicBool::new(false),
+        }
+    }
+
+    /// Associates an authorization cache with this fan-out.
+    pub fn set_authz(&self, authz: Arc<AuthzCache>) {
+        if let Ok(mut lock) = self.authz.write() {
+            *lock = Some(authz);
+        }
+    }
+
+    /// Retrieves a reference to the authorization cache if set.
+    pub fn authz(&self) -> Option<Arc<AuthzCache>> {
+        self.authz.read().ok().and_then(|guard| guard.clone())
+    }
+
+    /// Registers an active connection on this instance and ensures global security listener runs.
+    pub async fn register_active_conn(self: &Arc<Self>, conn: ActiveConn) {
+        self.active_connections.insert(conn.connection_id, conn);
+        self.ensure_global_listener().await;
+    }
+
+    /// Unregisters an active connection when it closes.
+    pub fn unregister_active_conn(&self, connection_id: ConnectionId) {
+        self.active_connections.remove(&connection_id);
+    }
+
+    /// Number of active connections on this stream instance.
+    pub fn active_connections_count(&self) -> usize {
+        self.active_connections.len()
+    }
+
+    /// Ensures the global security listener task is running on `{key_prefix}:bus:global`.
+    pub async fn ensure_global_listener(self: &Arc<Self>) {
+        if self
+            .global_listener_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            let topic = format!("{}:bus:global", self.key_prefix);
+            if let Ok(sub) = self.bus.subscribe(&topic).await {
+                let fanout = Arc::clone(self);
+                tokio::spawn(async move {
+                    global_bus_task(fanout, sub).await;
+                });
+            }
         }
     }
 
     /// Registers a connection in the fan-out of a session.
     ///
-    /// The first local subscriber of a session also subscribes to its bus topic and starts the
-    /// task that deposits what arrives, so every update travels one path (docs/04 §8).
+    /// The first local subscriber of a session also subscribes to its location and control bus
+    /// topics and starts the tasks that deposit what arrives (docs/04 §8, docs/08 §9).
     pub async fn subscribe(self: &Arc<Self>, session_id: SessionId, handle: ConnHandle) {
         let first = {
             let mut entry = self.by_session.entry(session_id).or_default();
@@ -162,11 +247,15 @@ impl Fanout {
             first
         };
         if first {
-            // The bus subscription completes before returning: with a broadcast bus, a
-            // message published between the registration and the subscription would be lost.
+            // Subscribe to location updates
             if let Ok(subscription) = self.bus.subscribe(&self.topic(session_id)).await {
                 let fanout = Arc::clone(self);
                 tokio::spawn(async move { topic_task(fanout, session_id, subscription).await });
+            }
+            // Subscribe to control events
+            if let Ok(ctl_sub) = self.bus.subscribe(&self.ctl_topic(session_id)).await {
+                let fanout = Arc::clone(self);
+                tokio::spawn(async move { ctl_topic_task(fanout, session_id, ctl_sub).await });
             }
         }
     }
@@ -175,11 +264,7 @@ impl Fanout {
     ///
     /// With the last subscriber gone the task of the topic ends and releases its bus
     /// subscription (refcount of docs/04 §6.1).
-    pub fn unsubscribe(
-        &self,
-        session_id: SessionId,
-        connection_id: gs_service::gs_domain::ids::ConnectionId,
-    ) -> bool {
+    pub fn unsubscribe(&self, session_id: SessionId, connection_id: ConnectionId) -> bool {
         let mut emptied = false;
         if let Some(mut entry) = self.by_session.get_mut(&session_id) {
             entry.retain(|handle| handle.connection_id != connection_id);
@@ -233,6 +318,347 @@ impl Fanout {
         }
     }
 
+    /// Handles a session-scoped control event received from the bus (docs/05 §10, docs/08 §9).
+    pub async fn handle_control_event(&self, session_id: SessionId, event: SessionControlEvent) {
+        match event {
+            SessionControlEvent::SessionClosed {
+                session_id: sid,
+                reason: _,
+                session,
+                at: _,
+            } => {
+                let session_info = session.unwrap_or_else(|| SessionInfo {
+                    session_id: sid.clone(),
+                    status: SessionStatus::Closed as i32,
+                    ..Default::default()
+                });
+                let session_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::SessionEvent(SessionEvent {
+                        kind: SessionEventKind::Closed as i32,
+                        session: Some(session_info),
+                    })),
+                };
+                let ended_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::SubscriptionEnded(SubscriptionEnded {
+                        session_id: sid,
+                        reason: SubscriptionEndReason::SessionClosed as i32,
+                    })),
+                };
+                if let Some((_, handles)) = self.by_session.remove(&session_id) {
+                    for handle in handles {
+                        send_server_msg(&handle, &session_msg).await;
+                        send_server_msg(&handle, &ended_msg).await;
+                        let _ = handle
+                            .session_end_tx
+                            .send((session_id, SubscriptionEndReason::SessionClosed))
+                            .await;
+                    }
+                }
+            }
+            SessionControlEvent::SessionExpired {
+                session_id: sid,
+                session,
+                at: _,
+            } => {
+                let session_info = session.unwrap_or_else(|| SessionInfo {
+                    session_id: sid.clone(),
+                    status: SessionStatus::Expired as i32,
+                    ..Default::default()
+                });
+                let session_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::SessionEvent(SessionEvent {
+                        kind: SessionEventKind::Expired as i32,
+                        session: Some(session_info),
+                    })),
+                };
+                let ended_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::SubscriptionEnded(SubscriptionEnded {
+                        session_id: sid,
+                        reason: SubscriptionEndReason::SessionExpired as i32,
+                    })),
+                };
+                if let Some((_, handles)) = self.by_session.remove(&session_id) {
+                    for handle in handles {
+                        send_server_msg(&handle, &session_msg).await;
+                        send_server_msg(&handle, &ended_msg).await;
+                        let _ = handle
+                            .session_end_tx
+                            .send((session_id, SubscriptionEndReason::SessionExpired))
+                            .await;
+                    }
+                }
+            }
+            SessionControlEvent::SessionUpdated {
+                session_id: _,
+                session,
+                at: _,
+            } => {
+                let msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::SessionEvent(SessionEvent {
+                        kind: SessionEventKind::Updated as i32,
+                        session: Some(session),
+                    })),
+                };
+                if let Some(entry) = self.by_session.get(&session_id) {
+                    for handle in entry.iter() {
+                        send_server_msg(handle, &msg).await;
+                    }
+                }
+            }
+            SessionControlEvent::MemberJoined {
+                session_id: _,
+                member,
+                at: _,
+            } => {
+                let msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::MemberEvent(MemberEvent {
+                        kind: MemberEventKind::Joined as i32,
+                        member: Some(member),
+                    })),
+                };
+                if let Some(entry) = self.by_session.get(&session_id) {
+                    for handle in entry.iter() {
+                        send_server_msg(handle, &msg).await;
+                    }
+                }
+            }
+            SessionControlEvent::MemberUpdated {
+                session_id: sid,
+                member,
+                subject_id,
+                lost_read,
+                lost_publish: _,
+                at: _,
+            } => {
+                let member_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::MemberEvent(MemberEvent {
+                        kind: MemberEventKind::Updated as i32,
+                        member: Some(member),
+                    })),
+                };
+                if lost_read {
+                    let ended_msg = ServerMessage {
+                        request_id: 0,
+                        body: Some(ServerBody::SubscriptionEnded(SubscriptionEnded {
+                            session_id: sid,
+                            reason: SubscriptionEndReason::PermissionChanged as i32,
+                        })),
+                    };
+                    let mut empty = false;
+                    if let Some(mut entry) = self.by_session.get_mut(&session_id) {
+                        for handle in entry.iter() {
+                            if handle.principal.subject_id.as_ref().map(|s| s.to_string())
+                                == Some(subject_id.clone())
+                            {
+                                send_server_msg(handle, &ended_msg).await;
+                                let _ = handle
+                                    .session_end_tx
+                                    .send((session_id, SubscriptionEndReason::PermissionChanged))
+                                    .await;
+                            } else {
+                                send_server_msg(handle, &member_msg).await;
+                            }
+                        }
+                        entry.retain(|h| {
+                            h.principal.subject_id.as_ref().map(|s| s.to_string())
+                                != Some(subject_id.clone())
+                        });
+                        empty = entry.is_empty();
+                    }
+                    if empty {
+                        self.by_session.remove(&session_id);
+                    }
+                } else if let Some(entry) = self.by_session.get(&session_id) {
+                    for handle in entry.iter() {
+                        send_server_msg(handle, &member_msg).await;
+                    }
+                }
+            }
+            SessionControlEvent::MemberLeft {
+                session_id: sid,
+                member_id,
+                subject_id,
+                member,
+                at: _,
+            } => {
+                let ended_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::SubscriptionEnded(SubscriptionEnded {
+                        session_id: sid.clone(),
+                        reason: SubscriptionEndReason::MemberLeft as i32,
+                    })),
+                };
+                let member_status = member.unwrap_or_else(|| MemberStatus {
+                    session_id: sid,
+                    member_id,
+                    ..Default::default()
+                });
+                let member_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::MemberEvent(MemberEvent {
+                        kind: MemberEventKind::Left as i32,
+                        member: Some(member_status),
+                    })),
+                };
+                let mut empty = false;
+                if let Some(mut entry) = self.by_session.get_mut(&session_id) {
+                    for handle in entry.iter() {
+                        if handle.principal.subject_id.as_ref().map(|s| s.to_string())
+                            == Some(subject_id.clone())
+                        {
+                            send_server_msg(handle, &ended_msg).await;
+                            let _ = handle
+                                .session_end_tx
+                                .send((session_id, SubscriptionEndReason::MemberLeft))
+                                .await;
+                        } else {
+                            send_server_msg(handle, &member_msg).await;
+                        }
+                    }
+                    entry.retain(|h| {
+                        h.principal.subject_id.as_ref().map(|s| s.to_string())
+                            != Some(subject_id.clone())
+                    });
+                    empty = entry.is_empty();
+                }
+                if empty {
+                    self.by_session.remove(&session_id);
+                }
+            }
+            SessionControlEvent::MemberRevoked {
+                session_id: sid,
+                member_id,
+                subject_id,
+                member,
+                at: _,
+            } => {
+                let ended_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::SubscriptionEnded(SubscriptionEnded {
+                        session_id: sid.clone(),
+                        reason: SubscriptionEndReason::MemberRevoked as i32,
+                    })),
+                };
+                let member_status = member.unwrap_or_else(|| MemberStatus {
+                    session_id: sid,
+                    member_id,
+                    ..Default::default()
+                });
+                let member_msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::MemberEvent(MemberEvent {
+                        kind: MemberEventKind::Revoked as i32,
+                        member: Some(member_status),
+                    })),
+                };
+                let mut empty = false;
+                if let Some(mut entry) = self.by_session.get_mut(&session_id) {
+                    for handle in entry.iter() {
+                        if handle.principal.subject_id.as_ref().map(|s| s.to_string())
+                            == Some(subject_id.clone())
+                        {
+                            send_server_msg(handle, &ended_msg).await;
+                            let _ = handle
+                                .session_end_tx
+                                .send((session_id, SubscriptionEndReason::MemberRevoked))
+                                .await;
+                        } else {
+                            send_server_msg(handle, &member_msg).await;
+                        }
+                    }
+                    entry.retain(|h| {
+                        h.principal.subject_id.as_ref().map(|s| s.to_string())
+                            != Some(subject_id.clone())
+                    });
+                    empty = entry.is_empty();
+                }
+                if empty {
+                    self.by_session.remove(&session_id);
+                }
+            }
+            SessionControlEvent::SharingStarted {
+                session_id: sid,
+                member_id,
+                device_id: _,
+                member,
+                at: _,
+            } => {
+                let status = member.unwrap_or_else(|| MemberStatus {
+                    session_id: sid,
+                    member_id,
+                    sharing: true,
+                    connectivity: gs_service::gs_protocol::Connectivity::Online as i32,
+                    ..Default::default()
+                });
+                let msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::MemberStatus(status)),
+                };
+                if let Some(entry) = self.by_session.get(&session_id) {
+                    for handle in entry.iter() {
+                        send_server_msg(handle, &msg).await;
+                    }
+                }
+            }
+            SessionControlEvent::SharingStopped {
+                session_id: sid,
+                member_id,
+                device_id: _,
+                member,
+                at: _,
+            } => {
+                let status = member.unwrap_or_else(|| MemberStatus {
+                    session_id: sid,
+                    member_id,
+                    sharing: false,
+                    connectivity: gs_service::gs_protocol::Connectivity::Unspecified as i32,
+                    ..Default::default()
+                });
+                let msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::MemberStatus(status)),
+                };
+                if let Some(entry) = self.by_session.get(&session_id) {
+                    for handle in entry.iter() {
+                        send_server_msg(handle, &msg).await;
+                    }
+                }
+            }
+            SessionControlEvent::SharingTransferred {
+                session_id: sid,
+                member_id,
+                old_device_id: _,
+                new_device_id: _,
+                member,
+                at: _,
+            } => {
+                let status = member.unwrap_or_else(|| MemberStatus {
+                    session_id: sid,
+                    member_id,
+                    sharing: true,
+                    connectivity: gs_service::gs_protocol::Connectivity::Online as i32,
+                    ..Default::default()
+                });
+                let msg = ServerMessage {
+                    request_id: 0,
+                    body: Some(ServerBody::MemberStatus(status)),
+                };
+                if let Some(entry) = self.by_session.get(&session_id) {
+                    for handle in entry.iter() {
+                        send_server_msg(handle, &msg).await;
+                    }
+                }
+            }
+        }
+    }
+
     /// Number of local subscribers of a session: diagnostic helper.
     pub fn subscribers(&self, session_id: SessionId) -> usize {
         self.by_session
@@ -246,9 +672,14 @@ impl Fanout {
         self.by_session.iter().map(|entry| entry.len()).sum()
     }
 
-    /// Bus topic of a session (docs/04 §6.1).
+    /// Bus topic of location updates for a session (docs/04 §6.1).
     fn topic(&self, session_id: SessionId) -> String {
         format!("{}:bus:loc:{session_id}", self.key_prefix)
+    }
+
+    /// Bus topic of control events for a session (docs/04 §6.1, docs/05 §10).
+    fn ctl_topic(&self, session_id: SessionId) -> String {
+        format!("{}:bus:ctl:{session_id}", self.key_prefix)
     }
 }
 
@@ -284,9 +715,165 @@ async fn topic_task(fanout: Arc<Fanout>, session_id: SessionId, subscription: u6
         // the client is a `ServerMessage` with `request_id = 0` (docs/08 §4).
         let message = ServerMessage {
             request_id: 0,
-            body: Some(gs_service::gs_protocol::server_message::Body::LocationUpdate(update)),
+            body: Some(ServerBody::LocationUpdate(update)),
         };
         fanout.deposit_location(session_id, member_id, &message);
+    }
+}
+
+/// Reads the control bus topic of a session and dispatches control events (docs/08 §9).
+async fn ctl_topic_task(fanout: Arc<Fanout>, session_id: SessionId, subscription: u64) {
+    loop {
+        if fanout.subscribers(session_id) == 0 {
+            let _ = fanout.bus.unsubscribe(subscription).await;
+            return;
+        }
+        let Ok(message) = tokio::time::timeout(Duration::from_secs(1), async {
+            fanout.bus.next_message(subscription).await
+        })
+        .await
+        else {
+            continue;
+        };
+        let Ok(Some(message)) = message else {
+            return;
+        };
+
+        if let Some(ref authz) = fanout.authz() {
+            authz.invalidate_session(session_id);
+        }
+
+        let Ok(event) = serde_json::from_slice::<SessionControlEvent>(&message.payload) else {
+            continue;
+        };
+
+        fanout.handle_control_event(session_id, event).await;
+    }
+}
+
+/// Reads the global bus topic and handles global security revocations (docs/06 §7, docs/08 §9).
+async fn global_bus_task(fanout: Arc<Fanout>, subscription: u64) {
+    loop {
+        let Ok(message) = tokio::time::timeout(Duration::from_secs(1), async {
+            fanout.bus.next_message(subscription).await
+        })
+        .await
+        else {
+            continue;
+        };
+        let Ok(Some(message)) = message else {
+            return;
+        };
+
+        if let Some(ref authz) = fanout.authz() {
+            authz.note_global_bus_event(&message.payload);
+        }
+
+        let Ok(event) = serde_json::from_slice::<GlobalBusEvent>(&message.payload) else {
+            continue;
+        };
+
+        match event {
+            GlobalBusEvent::TenantDisabled { tenant_id, .. } => {
+                for entry in fanout.active_connections.iter() {
+                    let conn = entry.value();
+                    if conn.principal.tenant_id.to_string() == tenant_id {
+                        let _ = conn
+                            .close_tx
+                            .send(crate::close_codes::CLOSE_FORBIDDEN)
+                            .await;
+                    }
+                }
+            }
+            GlobalBusEvent::TenantEnabled { .. } => {}
+            GlobalBusEvent::ApplicationDisabled {
+                tenant_id,
+                application_id,
+                ..
+            } => {
+                for entry in fanout.active_connections.iter() {
+                    let conn = entry.value();
+                    if conn.principal.tenant_id.to_string() == tenant_id
+                        && conn.principal.application_id.to_string() == application_id
+                    {
+                        let _ = conn
+                            .close_tx
+                            .send(crate::close_codes::CLOSE_FORBIDDEN)
+                            .await;
+                    }
+                }
+            }
+            GlobalBusEvent::ApplicationEnabled { .. } => {}
+            GlobalBusEvent::ApiKeyRevoked {
+                tenant_id,
+                application_id,
+                ..
+            } => {
+                for entry in fanout.active_connections.iter() {
+                    let conn = entry.value();
+                    if conn.principal.tenant_id.to_string() == tenant_id {
+                        if let Some(ref app_id) = application_id {
+                            if conn.principal.application_id.to_string() == *app_id {
+                                let _ = conn
+                                    .close_tx
+                                    .send(crate::close_codes::CLOSE_AUTH_EXPIRED)
+                                    .await;
+                            }
+                        } else {
+                            let _ = conn
+                                .close_tx
+                                .send(crate::close_codes::CLOSE_AUTH_EXPIRED)
+                                .await;
+                        }
+                    }
+                }
+            }
+            GlobalBusEvent::SubjectTokensRevoked {
+                tenant_id,
+                subject_id,
+                ..
+            } => {
+                for entry in fanout.active_connections.iter() {
+                    let conn = entry.value();
+                    if conn.principal.tenant_id.to_string() == tenant_id
+                        && conn.principal.subject_id.as_ref().map(|s| s.to_string())
+                            == Some(subject_id.clone())
+                    {
+                        let _ = conn
+                            .close_tx
+                            .send(crate::close_codes::CLOSE_AUTH_EXPIRED)
+                            .await;
+                    }
+                }
+            }
+            GlobalBusEvent::DeviceDeactivated {
+                tenant_id,
+                device_id,
+                ..
+            } => {
+                for entry in fanout.active_connections.iter() {
+                    let conn = entry.value();
+                    if conn.principal.tenant_id.to_string() == tenant_id
+                        && conn.principal.device_id.as_ref().map(|d| d.to_string())
+                            == Some(device_id.clone())
+                    {
+                        let _ = conn
+                            .close_tx
+                            .send(crate::close_codes::CLOSE_AUTH_EXPIRED)
+                            .await;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Encodes a server message in the subprotocol of one connection and sends it via control queue.
+async fn send_server_msg(handle: &ConnHandle, message: &ServerMessage) {
+    if let Some(frame) = frame_of(message, handle.subprotocol)
+        && handle.outbound.control_send(frame).await.is_err()
+    {
+        handle.cancel.cancel();
     }
 }
 
@@ -312,9 +899,7 @@ fn member_id_of(update: &gs_service::gs_protocol::LocationUpdate) -> Result<Memb
 pub fn subscribe_ack_message(ack: SubscribeAck) -> ServerMessage {
     ServerMessage {
         request_id: 0,
-        body: Some(gs_service::gs_protocol::server_message::Body::SubscribeAck(
-            ack,
-        )),
+        body: Some(ServerBody::SubscribeAck(ack)),
     }
 }
 
@@ -322,7 +907,7 @@ pub fn subscribe_ack_message(ack: SubscribeAck) -> ServerMessage {
 pub fn unsubscribe_ack_message(ack: UnsubscribeAck) -> ServerMessage {
     ServerMessage {
         request_id: 0,
-        body: Some(gs_service::gs_protocol::server_message::Body::UnsubscribeAck(ack)),
+        body: Some(ServerBody::UnsubscribeAck(ack)),
     }
 }
 
@@ -334,6 +919,24 @@ mod tests {
         Frame {
             payload: payload.to_vec(),
             text: false,
+        }
+    }
+
+    fn test_handle(connection_id: ConnectionId, outbound: Outbound) -> ConnHandle {
+        let (session_end_tx, _) = mpsc::channel(4);
+        ConnHandle {
+            connection_id,
+            subprotocol: Subprotocol::Proto,
+            outbound,
+            cancel: CancellationToken::new(),
+            principal: PrincipalIdentity {
+                tenant_id: gs_service::gs_domain::ids::TenantId::new(),
+                application_id: gs_service::gs_domain::ids::ApplicationId::new(),
+                subject_id: Some(gs_service::gs_domain::ids::SubjectId::new()),
+                device_id: None,
+                token_epoch: None,
+            },
+            session_end_tx,
         }
     }
 
@@ -372,7 +975,7 @@ mod tests {
         let (outbound, _control, _latest, _notify) = Outbound::new(1);
         let message = ServerMessage {
             request_id: 1,
-            body: Some(gs_service::gs_protocol::server_message::Body::HeartbeatAck(
+            body: Some(ServerBody::HeartbeatAck(
                 gs_service::gs_protocol::HeartbeatAck {
                     client_time: None,
                     server_time: None,
@@ -400,18 +1003,14 @@ mod tests {
         let member_id = MemberId::new();
         let (first_outbound, _first_control, _first_latest, _first_notify) = Outbound::new(4);
         let (second_outbound, _second_control, _second_latest, _second_notify) = Outbound::new(4);
-        let first = ConnHandle {
-            connection_id: gs_service::gs_domain::ids::ConnectionId::new(),
-            subprotocol: Subprotocol::Proto,
-            outbound: first_outbound.clone(),
-            cancel: CancellationToken::new(),
-        };
-        let second = ConnHandle {
-            connection_id: gs_service::gs_domain::ids::ConnectionId::new(),
-            subprotocol: Subprotocol::Proto,
-            outbound: second_outbound.clone(),
-            cancel: CancellationToken::new(),
-        };
+        let first = test_handle(
+            gs_service::gs_domain::ids::ConnectionId::new(),
+            first_outbound.clone(),
+        );
+        let second = test_handle(
+            gs_service::gs_domain::ids::ConnectionId::new(),
+            second_outbound.clone(),
+        );
 
         fanout.by_session.entry(session_id).or_default().push(first);
         fanout
@@ -423,7 +1022,7 @@ mod tests {
 
         let update = ServerMessage {
             request_id: 0,
-            body: Some(gs_service::gs_protocol::server_message::Body::HeartbeatAck(
+            body: Some(ServerBody::HeartbeatAck(
                 gs_service::gs_protocol::HeartbeatAck {
                     client_time: None,
                     server_time: None,
@@ -446,12 +1045,7 @@ mod tests {
             .by_session
             .entry(session_id)
             .or_default()
-            .push(ConnHandle {
-                connection_id,
-                subprotocol: Subprotocol::Proto,
-                outbound,
-                cancel: CancellationToken::new(),
-            });
+            .push(test_handle(connection_id, outbound));
 
         assert!(
             fanout.unsubscribe(session_id, connection_id),

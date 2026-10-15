@@ -14,7 +14,7 @@ Reglas:
 | FR-AUTH-002 | MUST | F2 | Emisión de tokens de dispositivo | `crates/gs-service/tests/tokens_test.rs` | en curso |
 | FR-AUTH-003 | MUST | F2 | Verificación de tokens | `crates/gs-auth/tests/jwt_test.rs`, `crates/gs-service/tests/tokens_test.rs` | en curso |
 | FR-AUTH-004 | MUST | F2 | Rotación de claves de firma | `crates/gs-auth/tests/jwt_test.rs`, `crates/gs-auth/tests/signing_key_test.rs` | en curso |
-| FR-AUTH-005 | MUST | F3 | Revocación de tokens y desactivación de dispositivos | `crates/gs-service/tests/subjects_test.rs`, `crates/gs-api/tests/subjects_test.rs` | cumplido |
+| FR-AUTH-005 | MUST | F3 | Revocación de tokens y desactivación de dispositivos | `crates/gs-service/tests/subjects_test.rs`, `crates/gs-api/tests/subjects_test.rs`, `crates/gs-service/tests/control_events_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-AUTH-006 | MUST | F4 | Tickets de stream de un solo uso | `crates/gs-auth/src/ticket.rs`, `crates/gs-service/tests/tickets_test.rs`, `crates/gs-api/tests/stream_ticket_test.rs` | cumplido |
 | FR-AUTH-007 | MUST | F4 | Renovación de autenticación dentro de la conexión | — | pendiente |
 | FR-AUTH-008 | MUST | F2 | Scopes | `crates/gs-auth/tests/scopes_test.rs` | en curso |
@@ -68,10 +68,10 @@ Reglas:
 | FR-STR-005 | MUST | F4 | Heartbeat, inactividad y cierre | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-stream/src/close_codes.rs` | cumplido |
 | FR-STR-006 | MUST | F4 | Backpressure | `crates/gs-stream/src/fanout.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-007 | MUST | F4 | Una conexión por dispositivo | — | pendiente |
-| FR-STR-008 | MUST | F4 | Revocación en vivo | — | pendiente |
+| FR-STR-008 | MUST | F4 | Revocación en vivo | `crates/gs-service/tests/control_events_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-009 | MUST | F6 | Fan-out multi-instancia | — | pendiente |
 | FR-STR-010 | MUST | F6 | Drenaje controlado | — | pendiente |
-| FR-STR-011 | MUST | F4 | Eventos de sesión y miembros | — | pendiente |
+| FR-STR-011 | MUST | F4 | Eventos de sesión y miembros | `crates/gs-service/tests/control_events_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-PRS-001 | MUST | F4 | Estado de miembro | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/src/subscription.rs` | cumplido |
 | FR-PRS-002 | MUST | F4 | Gracia de desconexión | — | pendiente |
 | FR-PRS-003 | MUST | F6 | Presencia multi-instancia | — | pendiente |

@@ -5,6 +5,7 @@ pub mod admin;
 pub mod audit;
 pub mod auth;
 pub mod authz;
+pub mod control;
 pub mod idempotency;
 pub mod invitations;
 pub mod members;
@@ -32,6 +33,7 @@ pub use authz::{
     ApplicationView, AuthzCache, AuthzError, AuthzKey, CachedDecision, DEFAULT_AUTHZ_CACHE_TTL,
     DeviceMembershipView, PrincipalIdentity, verify_principal_state,
 };
+pub use control::*;
 pub use gs_bus::{Bus, BusError, BusMessage, InMemoryBus};
 pub use gs_ephemeral::{EphemeralError, EphemeralStore, InMemoryEphemeralStore};
 pub use idempotency::{
@@ -48,9 +50,10 @@ pub use invitations::{
 };
 pub use members::{
     AddMemberRequest, MemberList, MemberResource, MemberUseCaseError, SetSharingCaller,
-    SetSharingContext, SharingRequest, UpdateCaller, UpdateMemberRequest, add_member, get_member,
-    get_member_for_device_me, leave_session, list_members, revoke_member, set_sharing,
-    update_member,
+    SetSharingContext, SharingRequest, UpdateCaller, UpdateMemberRequest, add_member,
+    add_member_with_bus, get_member, get_member_for_device_me, leave_session,
+    leave_session_with_bus, list_members, revoke_member, revoke_member_with_bus, set_sharing,
+    update_member, update_member_with_bus,
 };
 pub use publishing::{
     PublishCaller, PublishError, PublishOutcome, PublishParams, PublishThrottle, publish_ack_for,
@@ -59,14 +62,15 @@ pub use publishing::{
 pub use sessions::{
     CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,
     SessionUseCaseError, UpdateSessionRequest, close_session, close_session_with_actor,
-    create_session, expire_due_sessions, get_session, list_sessions_for_application,
-    list_sessions_for_subject, update_session, update_session_with_actor,
-    verify_device_active_member, verify_device_manage_capability,
+    close_session_with_bus, create_session, expire_due_sessions, expire_due_sessions_with_bus,
+    get_session, list_sessions_for_application, list_sessions_for_subject, update_session,
+    update_session_with_actor, update_session_with_bus, verify_device_active_member,
+    verify_device_manage_capability,
 };
 pub use subjects::{
     DeactivateDeviceParams, DeviceResource, SubjectListResource, SubjectResource,
     SubjectUseCaseError, deactivate_device, find_subject_by_external_id, get_device, get_subject,
-    revoke_subject_tokens,
+    revoke_subject_tokens, revoke_tokens_with_bus,
 };
 pub use subscriptions::{
     LOCATIONS_READ_SCOPE, MemberStatusView, SessionInfoView, SubscribeError, SubscribeParams,

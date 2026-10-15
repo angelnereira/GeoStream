@@ -31,7 +31,8 @@ use gs_service::gs_protocol::client_message::Body as ClientBody;
 use gs_service::gs_protocol::server_message::Body as ServerBody;
 use gs_service::gs_protocol::{
     ClientHello, ClientMessage, Heartbeat, HeartbeatAck, LocationUpdate, PrincipalKind, PublishAck,
-    PublishLocation, ServerHello, ServerMessage, StreamError, Subscribe, Unsubscribe,
+    PublishLocation, ServerHello, ServerMessage, StreamError, Subscribe, SubscriptionEndReason,
+    Unsubscribe,
 };
 use gs_service::gs_store::PgPool;
 use gs_service::publishing::{
@@ -56,7 +57,7 @@ use crate::close_codes::{
 };
 use crate::codec::{FrameCodec, FrameError};
 use crate::config::{StreamConfig, StreamLimits as EffectiveLimits};
-use crate::fanout::{ConnHandle, Fanout, Frame, LatestMap, Outbound};
+use crate::fanout::{ActiveConn, ConnHandle, Fanout, Frame, LatestMap, Outbound};
 use crate::subscription::{SubscriptionSet, snapshot_sequences, subscribe_ack, unsubscribe_ack};
 
 /// Metric of open connections (docs/16 §4.2).
@@ -166,6 +167,10 @@ pub struct Connection {
     cancel: CancellationToken,
     /// Publish token buckets per (connection, session) (docs/08 §7.4).
     throttles: std::collections::HashMap<SessionId, PublishThrottle>,
+    /// Sender for session end notifications from fan-out.
+    session_end_tx: mpsc::Sender<(SessionId, SubscriptionEndReason)>,
+    /// Receiver for session end notifications from fan-out.
+    session_end_rx: mpsc::Receiver<(SessionId, SubscriptionEndReason)>,
 }
 
 impl Connection {
@@ -192,6 +197,7 @@ impl Connection {
             device_id: grant.device_id,
             token_epoch: grant.token_epoch,
         };
+        let (session_end_tx, session_end_rx) = mpsc::channel(64);
 
         Ok(Self {
             connection_id,
@@ -211,6 +217,8 @@ impl Connection {
             throttles: std::collections::HashMap::new(),
             outbound,
             cancel: CancellationToken::new(),
+            session_end_tx,
+            session_end_rx,
         })
     }
 
@@ -222,6 +230,16 @@ impl Connection {
     /// Connection id assigned by the server (docs/08 §6.1).
     pub const fn connection_id(&self) -> ConnectionId {
         self.connection_id
+    }
+
+    /// Principal identity for selective security revocations and authz checks (docs/06 §5).
+    pub fn principal(&self) -> &PrincipalIdentity {
+        &self.principal
+    }
+
+    /// Subscriptions of this connection (docs/08 §6.3).
+    pub fn subscriptions(&self) -> &SubscriptionSet {
+        &self.subscriptions
     }
 
     /// Principal kind of the redeemed ticket (docs/06 §5).
@@ -252,6 +270,7 @@ impl Connection {
         stream: &mut futures::stream::SplitStream<WebSocket>,
         state: &StreamState,
         cancel: &CancellationToken,
+        close_signal_rx: &mut mpsc::Receiver<u16>,
     ) -> ConnectionOutcome {
         let started = Instant::now();
         let hello_deadline = started + self.config.hello_timeout;
@@ -259,6 +278,7 @@ impl Connection {
         // The state was checked at the upgrade, so the first revalidation comes after one full
         // TTL of the cache (docs/06 §7).
         let mut authz_deadline = started + state.authz.ttl();
+        let mut close_signal_closed = false;
 
         loop {
             if self.auth_expires_at <= OffsetDateTime::now_utc() {
@@ -280,6 +300,25 @@ impl Connection {
             }
 
             let frame = tokio::select! {
+                code = close_signal_rx.recv(), if !close_signal_closed => {
+                    match code {
+                        Some(code) => {
+                            self.close(code);
+                            return self.outcome();
+                        }
+                        None => {
+                            close_signal_closed = true;
+                            continue;
+                        }
+                    }
+                }
+                end = self.session_end_rx.recv() => {
+                    if let Some((session_id, _reason)) = end {
+                        self.subscriptions.remove(session_id);
+                        self.throttles.remove(&session_id);
+                    }
+                    continue;
+                }
                 frame = stream.next() => frame,
                 // The state machine of docs/08 §5: no hello in time closes with 4002, no frame
                 // at all during `idle_timeout` closes with 4408.
@@ -1029,6 +1068,8 @@ impl Connection {
             subprotocol: self.codec.subprotocol(),
             outbound: self.outbound.clone(),
             cancel: self.cancel.clone(),
+            principal: self.principal.clone(),
+            session_end_tx: self.session_end_tx.clone(),
         }
     }
 
@@ -1123,8 +1164,26 @@ pub async fn run_session(session: AcceptedSession, state: Arc<StreamState>) {
 
     // The reader and the writer own different halves of the socket (docs/04 §8).
     let (sink, mut stream) = socket.split();
+    let (active_close_tx, mut close_signal_rx) = mpsc::channel::<u16>(1);
+    state.fanout.set_authz(Arc::clone(&state.authz));
+    state
+        .fanout
+        .register_active_conn(ActiveConn {
+            connection_id,
+            principal: connection.principal().clone(),
+            close_tx: active_close_tx,
+        })
+        .await;
+
     let writer = spawn_writer(sink, control_rx, close_rx, latest, notify, cancel.clone());
-    let outcome = connection.serve(&mut stream, state.as_ref(), &cancel).await;
+    let outcome = connection
+        .serve(&mut stream, state.as_ref(), &cancel, &mut close_signal_rx)
+        .await;
+
+    for session_id in connection.subscriptions().sessions() {
+        state.fanout.unsubscribe(session_id, connection_id);
+    }
+    state.fanout.unregister_active_conn(connection_id);
 
     // The close frame is written by the owner of the socket, before it goes away (docs/08 §8).
     let close = CloseFrame {

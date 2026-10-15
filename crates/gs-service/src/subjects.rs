@@ -168,6 +168,26 @@ pub async fn revoke_subject_tokens(
     Ok(res)
 }
 
+/// Revokes all tokens for a subject and publishes `GlobalBusEvent::SubjectTokensRevoked` on `{key_prefix}:bus:global`
+/// (docs/06 §7, docs/08 §9, FR-AUTH-005).
+pub async fn revoke_tokens_with_bus<B: Bus>(
+    pool: &PgPool,
+    bus: &B,
+    key_prefix: &str,
+    tenant_id: TenantId,
+    subject_id: SubjectId,
+    now: OffsetDateTime,
+) -> Result<SubjectResource, SubjectUseCaseError> {
+    let res = revoke_subject_tokens(pool, tenant_id, subject_id, now).await?;
+    let event = crate::control::GlobalBusEvent::SubjectTokensRevoked {
+        tenant_id: tenant_id.to_string(),
+        subject_id: subject_id.to_string(),
+        at: crate::control::format_rfc3339(now),
+    };
+    let _ = crate::control::publish_global_bus_event(bus, key_prefix, &event).await;
+    Ok(res)
+}
+
 /// Fetches a device by identifier (`docs/07` §9.5, OpenAPI `getDevice`).
 ///
 /// If `caller_subject_id_if_device` is provided (caller is a device), enforces `own_subject_device`:
@@ -304,6 +324,15 @@ pub async fn deactivate_device<E: EphemeralStore, B: Bus>(
         .unwrap_or_default();
         let _ = bus.publish(&ctl_topic, &payload).await;
     }
+
+    // Publish DeviceDeactivated on bus:global (docs/06 §7, docs/08 §9, FR-AUTH-005)
+    let global_event = crate::control::GlobalBusEvent::DeviceDeactivated {
+        tenant_id: tenant_id.to_string(),
+        device_id: device_id.to_string(),
+        subject_id: Some(device.subject_id.to_string()),
+        at: crate::control::format_rfc3339(now),
+    };
+    let _ = crate::control::publish_global_bus_event(bus, key_prefix, &global_event).await;
 
     Ok(())
 }
