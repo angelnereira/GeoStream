@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F4-10 — Snapshot REST | Angel Nereira (con agente de código) | 2026-10-14 | `crates/gs-service`, `crates/gs-api` | FR-INT-002; leer `07` §9.6 |
+| T-F4-11 — Runner de escenarios | Angel Nereira (con agente de código) | 2026-10-15 | `crates/gs-testkit` | FR-PRV-001; leer `18` §6, `contracts/README` §5 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
