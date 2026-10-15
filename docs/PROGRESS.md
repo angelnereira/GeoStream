@@ -16,7 +16,7 @@
 
 | Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
 |---|---|---|---|---|
-| T-F4-09 — AuthExpiring / AuthRefresh | Angel Nereira (con agente de código) | 2026-10-14 | `crates/gs-stream` | FR-AUTH-007; leer `08` §6.6, `06` §4.3 |
+| T-F4-10 — Snapshot REST | Angel Nereira (con agente de código) | 2026-10-14 | `crates/gs-service`, `crates/gs-api` | FR-INT-002; leer `07` §9.6 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -35,7 +35,7 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal), T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado), T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks), T-F4-06 (fan-out por bus con coalescencia y backpressure), T-F4-07 (eventos de control y revocación en vivo), T-F4-08 (presencia, gracia de desconexión y conexión única) y T-F4-09 (AuthExpiring / AuthRefresh) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
+| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal), T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado), T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks), T-F4-06 (fan-out por bus con coalescencia y backpressure), T-F4-07 (eventos de control y revocación en vivo), T-F4-08 (presencia, gracia de desconexión y conexión única), T-F4-09 (AuthExpiring / AuthRefresh) y T-F4-10 (snapshot REST) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
 | F5 (M2) | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
@@ -48,6 +48,13 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-15 — T-F4-10 — Snapshot REST (`GET /v1/sessions/{id}/snapshot`)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Rama: `feat/T-F4-10-session-snapshot`.
+- Requisitos: FR-INT-002.
+- Evidencia: implementación completa del endpoint `GET /v1/sessions/{id}/snapshot` según `docs/07_REST_API.md` §9.6, `docs/03_REQUIREMENTS.md` (FR-INT-002) y OpenAPI 3.1 (`getSnapshot`). Permite consultar las últimas ubicaciones retenidas de los miembros activos que tienen la compartición encendida (`sharing=true`). Autorización estricta: aplicaciones requieren el scope `locations:read` (403 `INSUFFICIENT_SCOPE`), y dispositivos requieren ser miembros activos de la sesión con la capacidad `read` habilitada (404 `NOT_FOUND` para no miembros y 403 `PERMISSION_DENIED` para miembros sin `read`). Si la sesión está cerrada responde 409 `SESSION_CLOSED`; si está expirada o vencida responde 409 `SESSION_EXPIRED`. Si la sesión tiene `snapshot_ttl_seconds = 0`, la retención de snapshots está desactivada y devuelve la lista de items vacía (`[]`). Para cada miembro con compartición activa que cuenta con snapshot en el almacén efímero, se proyecta su última muestra con `LocationSample` validado y conforme a OpenAPI, `received_at` en RFC 3339 y `age_ms` calculado dinámicamente (`generated_at - captured_at` en milisegundos). Si el almacén efímero falla, responde 503 `TEMPORARILY_UNAVAILABLE`. Todas las respuestas exitosas devuelven la cabecera `Cache-Control: no-store` y `X-Request-Id`. Pruebas: 10 pruebas de integración en `crates/gs-api/tests/sessions_test.rs` (14 pruebas en total en el archivo, todas pasando). Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (421 pruebas, 0 fallos; base en `main`: 411 → +10), `cargo deny check`, `cargo run -p geostream-tools -- all`: todos OK.
 
 ### 2026-10-14 — T-F4-09 — Renovación de autenticación en vivo (`AuthExpiring`, `AuthRefresh`, `AuthRefreshAck`)
 - Autor/agente: Angel Nereira (con agente de código).

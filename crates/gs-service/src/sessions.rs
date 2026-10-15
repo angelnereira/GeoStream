@@ -20,8 +20,10 @@ use gs_store::repos::{SessionRepository, SessionUpdate};
 use gs_store::{PgPool, StoreError};
 
 use crate::audit::record_audit;
+use prost::Message as _;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use time::OffsetDateTime;
 
 /// Errors of the session use cases, mapped to the catalog of `docs/09` §6.
 #[derive(Debug, Error)]
@@ -45,6 +47,18 @@ pub enum SessionUseCaseError {
     /// The session is not `ACTIVE` (INV-SES-1).
     #[error("session is not active")]
     InactiveSession,
+
+    /// The session is closed (docs/07 §9.6).
+    #[error("session is closed")]
+    SessionClosed,
+
+    /// The session is expired (docs/07 §9.6).
+    #[error("session is expired")]
+    SessionExpired,
+
+    /// Ephemeral store is unavailable (docs/07 §9.6).
+    #[error("ephemeral store unavailable: {0}")]
+    Ephemeral(String),
 
     /// `If-Match` did not match the current version (docs/07 §9.2).
     #[error("session version does not match the If-Match header")]
@@ -75,6 +89,9 @@ impl AsErrorCode for SessionUseCaseError {
             Self::PermissionDenied => ErrorCode::PermissionDenied,
             Self::NotFound => ErrorCode::NotFound,
             Self::InactiveSession | Self::Domain(_) => ErrorCode::Conflict,
+            Self::SessionClosed => ErrorCode::SessionClosed,
+            Self::SessionExpired => ErrorCode::SessionExpired,
+            Self::Ephemeral(_) => ErrorCode::TemporarilyUnavailable,
             Self::PreconditionFailed => ErrorCode::PreconditionFailed,
             Self::MaxMembersConflict | Self::SessionFull => ErrorCode::Conflict,
             Self::Store(_) => ErrorCode::Internal,
@@ -958,6 +975,257 @@ pub async fn verify_device_manage_capability(
     }
 }
 
+/// Verifies that a device's subject is an active member with read capability (docs/07 §9.6, FR-INT-002).
+pub async fn verify_device_read_capability(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    subject_id: SubjectId,
+) -> Result<(), SessionUseCaseError> {
+    match gs_store::repos::MembershipRepository::find_active_by_session_and_subject(
+        pool, tenant_id, session_id, subject_id,
+    )
+    .await?
+    {
+        Some(membership) => {
+            if membership.capabilities.read {
+                Ok(())
+            } else {
+                Err(SessionUseCaseError::PermissionDenied)
+            }
+        }
+        None => Err(SessionUseCaseError::NotFound),
+    }
+}
+
+/// Position matching OpenAPI `Position` schema (docs/07 §9.6).
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+pub struct PositionModel {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub horizontal_accuracy_m: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub altitude_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vertical_accuracy_m: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_mps: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed_accuracy_mps: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_deg: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_accuracy_deg: Option<f64>,
+}
+
+impl std::fmt::Debug for PositionModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PositionModel { <redacted> }")
+    }
+}
+
+/// Location quality matching OpenAPI `LocationQuality` schema.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocationQualityModel {
+    pub source: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_mock: Option<bool>,
+    pub motion: String,
+}
+
+/// Location sample matching OpenAPI `LocationSample` schema.
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocationSampleModel {
+    pub sequence: u64,
+    pub captured_at: String,
+    pub position: PositionModel,
+    pub quality: LocationQualityModel,
+}
+
+impl std::fmt::Debug for LocationSampleModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocationSampleModel")
+            .field("sequence", &self.sequence)
+            .field("captured_at", &self.captured_at)
+            .field("position", &"<redacted>")
+            .field("quality", &self.quality)
+            .finish()
+    }
+}
+
+/// Item in a session snapshot matching OpenAPI `SnapshotItem` schema.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SnapshotItemModel {
+    pub member_id: String,
+    pub external_subject_id: String,
+    pub sample: LocationSampleModel,
+    pub received_at: String,
+    pub age_ms: u64,
+}
+
+/// Session snapshot matching OpenAPI `SessionSnapshot` schema (FR-INT-002, docs/07 §9.6).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionSnapshotModel {
+    pub session_id: String,
+    pub generated_at: String,
+    pub items: Vec<SnapshotItemModel>,
+}
+
+fn location_source_to_str(source: i32) -> &'static str {
+    match gs_protocol::LocationSource::try_from(source) {
+        Ok(gs_protocol::LocationSource::Gnss) => "GNSS",
+        Ok(gs_protocol::LocationSource::Network) => "NETWORK",
+        Ok(gs_protocol::LocationSource::Fused) => "FUSED",
+        Ok(gs_protocol::LocationSource::Manual) => "MANUAL",
+        Ok(gs_protocol::LocationSource::ExternalDevice) => "EXTERNAL_DEVICE",
+        _ => "UNSPECIFIED",
+    }
+}
+
+fn location_kind_to_str(kind: i32) -> &'static str {
+    match gs_protocol::LocationKind::try_from(kind) {
+        Ok(gs_protocol::LocationKind::Measured) => "MEASURED",
+        Ok(gs_protocol::LocationKind::Filtered) => "FILTERED",
+        Ok(gs_protocol::LocationKind::Interpolated) => "INTERPOLATED",
+        Ok(gs_protocol::LocationKind::Predicted) => "PREDICTED",
+        Ok(gs_protocol::LocationKind::MapMatched) => "MAP_MATCHED",
+        _ => "MEASURED",
+    }
+}
+
+fn motion_activity_to_str(motion: i32) -> &'static str {
+    match gs_protocol::MotionActivity::try_from(motion) {
+        Ok(gs_protocol::MotionActivity::Stationary) => "STATIONARY",
+        Ok(gs_protocol::MotionActivity::Walking) => "WALKING",
+        Ok(gs_protocol::MotionActivity::Running) => "RUNNING",
+        Ok(gs_protocol::MotionActivity::Cycling) => "CYCLING",
+        Ok(gs_protocol::MotionActivity::Automotive) => "AUTOMOTIVE",
+        _ => "UNSPECIFIED",
+    }
+}
+
+/// Retrieves the live snapshot of a session (FR-INT-002, docs/07 §9.6).
+pub async fn get_session_snapshot<E: EphemeralStore + ?Sized>(
+    pool: &PgPool,
+    ephemeral: &E,
+    key_prefix: &str,
+    tenant_id: TenantId,
+    session_id: SessionId,
+    now: OffsetDateTime,
+) -> Result<SessionSnapshotModel, SessionUseCaseError> {
+    let session = get_session(pool, tenant_id, session_id).await?;
+
+    match session.status {
+        SessionStatus::Closed => return Err(SessionUseCaseError::SessionClosed),
+        SessionStatus::Expired => return Err(SessionUseCaseError::SessionExpired),
+        SessionStatus::Active if session.expires_at <= now => {
+            return Err(SessionUseCaseError::SessionExpired);
+        }
+        SessionStatus::Active => {}
+    }
+
+    let generated_at_str = format_rfc3339(now);
+
+    // If snapshot_ttl_seconds is 0, snapshot is disabled and returns empty items (FR-INT-002)
+    if session.snapshot_ttl_seconds == 0 {
+        return Ok(SessionSnapshotModel {
+            session_id: session_id.to_string(),
+            generated_at: generated_at_str,
+            items: Vec::new(),
+        });
+    }
+
+    let page = gs_store::repos::MembershipRepository::list_active_by_session(
+        pool,
+        tenant_id,
+        session_id,
+        i64::from(session.max_members),
+        None,
+    )
+    .await?;
+
+    let mut items = Vec::new();
+    for member in page.members {
+        if !member.membership.sharing {
+            continue;
+        }
+
+        let snap_key = format!("{key_prefix}:snap:{session_id}:{}", member.membership.id);
+        let maybe_bytes = ephemeral
+            .get_snapshot(&snap_key)
+            .await
+            .map_err(|e| SessionUseCaseError::Ephemeral(e.to_string()))?;
+
+        if let Some(bytes) = maybe_bytes
+            && let Ok(update) = gs_protocol::LocationUpdate::decode(bytes.as_slice())
+            && let Some(sample) = update.sample
+        {
+            let captured_instant = sample
+                .captured_at
+                .as_ref()
+                .map(|ts| {
+                    OffsetDateTime::from_unix_timestamp(ts.seconds)
+                        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+                        + time::Duration::nanoseconds(i64::from(ts.nanos))
+                })
+                .unwrap_or(now);
+
+            let age_ms = (now - captured_instant).whole_milliseconds().max(0) as u64;
+
+            let received_instant = update
+                .received_at
+                .as_ref()
+                .map(|ts| {
+                    OffsetDateTime::from_unix_timestamp(ts.seconds)
+                        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+                        + time::Duration::nanoseconds(i64::from(ts.nanos))
+                })
+                .unwrap_or(now);
+
+            let pos = sample.position.unwrap_or_default();
+            let position_model = PositionModel {
+                latitude: pos.latitude,
+                longitude: pos.longitude,
+                horizontal_accuracy_m: pos.horizontal_accuracy_m,
+                altitude_m: pos.altitude_m,
+                vertical_accuracy_m: pos.vertical_accuracy_m,
+                speed_mps: pos.speed_mps,
+                speed_accuracy_mps: pos.speed_accuracy_mps,
+                heading_deg: pos.heading_deg,
+                heading_accuracy_deg: pos.heading_accuracy_deg,
+            };
+
+            let qual = sample.quality.unwrap_or_default();
+            let quality_model = LocationQualityModel {
+                source: location_source_to_str(qual.source).to_string(),
+                kind: location_kind_to_str(qual.kind).to_string(),
+                is_mock: qual.is_mock,
+                motion: motion_activity_to_str(qual.motion).to_string(),
+            };
+
+            items.push(SnapshotItemModel {
+                member_id: member.membership.id.to_string(),
+                external_subject_id: member.external_subject_id,
+                sample: LocationSampleModel {
+                    sequence: sample.sequence,
+                    captured_at: format_rfc3339(captured_instant),
+                    position: position_model,
+                    quality: quality_model,
+                },
+                received_at: format_rfc3339(received_instant),
+                age_ms,
+            });
+        }
+    }
+
+    Ok(SessionSnapshotModel {
+        session_id: session_id.to_string(),
+        generated_at: generated_at_str,
+        items,
+    })
+}
+
 /// Expires the sessions past their expiry (worker job, FR-SES-005, docs/10 §8.3).
 pub async fn expire_due_sessions(
     pool: &PgPool,
@@ -1219,6 +1487,18 @@ mod tests {
         assert_eq!(
             SessionUseCaseError::SessionFull.error_code(),
             ErrorCode::Conflict
+        );
+        assert_eq!(
+            SessionUseCaseError::SessionClosed.error_code(),
+            ErrorCode::SessionClosed
+        );
+        assert_eq!(
+            SessionUseCaseError::SessionExpired.error_code(),
+            ErrorCode::SessionExpired
+        );
+        assert_eq!(
+            SessionUseCaseError::Ephemeral("store down".to_string()).error_code(),
+            ErrorCode::TemporarilyUnavailable
         );
     }
 }

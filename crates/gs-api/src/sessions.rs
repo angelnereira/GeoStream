@@ -27,8 +27,9 @@ use gs_service::migrate::PgPool;
 use gs_service::sessions::{
     CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,
     SessionUseCaseError, UpdateSessionRequest, close_session_with_bus, create_session, get_session,
-    list_sessions_for_application, list_sessions_for_subject, update_session_with_bus,
-    verify_device_active_member, verify_device_manage_capability,
+    get_session_snapshot, list_sessions_for_application, list_sessions_for_subject,
+    update_session_with_bus, verify_device_active_member, verify_device_manage_capability,
+    verify_device_read_capability,
 };
 
 use crate::pagination::parse_pagination_query;
@@ -266,6 +267,10 @@ pub fn sessions_router(state: SessionApiState) -> axum::Router {
         .route(
             "/v1/sessions/{session_id}/close",
             axum::routing::post(close_session_handler),
+        )
+        .route(
+            "/v1/sessions/{session_id}/snapshot",
+            axum::routing::get(get_snapshot_handler),
         )
         .merge(crate::members::members_routes())
         .merge(crate::invitations::invitations_routes())
@@ -842,6 +847,75 @@ pub async fn close_session_handler(
                 };
 
             let mut resp = (StatusCode::OK, Json(resource)).into_response();
+            if let Ok(v) = axum::http::HeaderValue::from_str(&request_id) {
+                resp.headers_mut().insert(REQUEST_ID_HEADER, v);
+            }
+            resp
+        }
+        Err(err) => session_error_to_response(err, &request_id),
+    }
+}
+
+/// `GET /v1/sessions/{session_id}/snapshot` (OpenAPI `getSnapshot`, FR-INT-002, docs/07 §9.6).
+pub async fn get_snapshot_handler(
+    State(state): State<SessionApiState>,
+    Path(raw_session_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authenticate_caller(&state, &headers, &request_id).await {
+        Ok(c) => c,
+        Err(resp) => return *resp,
+    };
+
+    let session_id = match SessionId::from_str(&raw_session_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return ProblemResponse::new(
+                Problem::new(ErrorCode::NotFound, &request_id)
+                    .with_detail(format!("session '{raw_session_id}' not found")),
+            )
+            .into_response();
+        }
+    };
+
+    let tenant_id = caller.tenant_id();
+
+    // Authorization:
+    // Device check: must be active member with read capability (docs/07 §9.6, FR-INT-002)
+    if let CallerPrincipal::Device(ref dev) = caller {
+        if let Err(err) =
+            verify_device_read_capability(&state.pool, tenant_id, session_id, dev.subject.id).await
+        {
+            return session_error_to_response(err, &request_id);
+        }
+    } else if let CallerPrincipal::Application(ref app) = caller
+        && !app.api_key.scopes.iter().any(|s| s == "locations:read")
+    {
+        return ProblemResponse::new(
+            Problem::new(ErrorCode::InsufficientScope, &request_id)
+                .with_detail("application requires locations:read scope"),
+        )
+        .into_response();
+    }
+
+    let now = OffsetDateTime::now_utc();
+    match get_session_snapshot(
+        &state.pool,
+        state.ephemeral.as_ref(),
+        &state.redis_key_prefix,
+        tenant_id,
+        session_id,
+        now,
+    )
+    .await
+    {
+        Ok(snapshot) => {
+            let mut resp = (StatusCode::OK, Json(snapshot)).into_response();
+            resp.headers_mut().insert(
+                header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store"),
+            );
             if let Ok(v) = axum::http::HeaderValue::from_str(&request_id) {
                 resp.headers_mut().insert(REQUEST_ID_HEADER, v);
             }

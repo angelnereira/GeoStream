@@ -60,12 +60,13 @@ pub use publishing::{
     publish_batch,
 };
 pub use sessions::{
-    CreateSessionRequest, SessionFilters, SessionPage, SessionPolicy, SessionResource,
-    SessionUseCaseError, UpdateSessionRequest, close_session, close_session_with_actor,
+    CreateSessionRequest, LocationQualityModel, LocationSampleModel, PositionModel, SessionFilters,
+    SessionPage, SessionPolicy, SessionResource, SessionSnapshotModel, SessionUseCaseError,
+    SnapshotItemModel, UpdateSessionRequest, close_session, close_session_with_actor,
     close_session_with_bus, create_session, expire_due_sessions, expire_due_sessions_with_bus,
-    get_session, list_sessions_for_application, list_sessions_for_subject, update_session,
-    update_session_with_actor, update_session_with_bus, verify_device_active_member,
-    verify_device_manage_capability,
+    get_session, get_session_snapshot, list_sessions_for_application, list_sessions_for_subject,
+    update_session, update_session_with_actor, update_session_with_bus,
+    verify_device_active_member, verify_device_manage_capability, verify_device_read_capability,
 };
 pub use subjects::{
     DeactivateDeviceParams, DeviceResource, SubjectListResource, SubjectResource,
@@ -96,3 +97,4 @@ pub use gs_ephemeral;
 pub use gs_protocol;
 pub use gs_store;
 pub use pbjson_types;
+pub use prost;

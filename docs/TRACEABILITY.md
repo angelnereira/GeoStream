@@ -104,7 +104,7 @@ Reglas:
 | FR-WHK-004 | MUST | F8 | Protección SSRF | — | pendiente |
 | FR-WHK-005 | MUST | F8 | Sin coordenadas | — | pendiente |
 | FR-INT-001 | MUST | F8 | Consumidor del lado servidor | — | pendiente |
-| FR-INT-002 | MUST | F4 | Snapshot REST | — | pendiente |
+| FR-INT-002 | MUST | F4 | Snapshot REST | `crates/gs-api/tests/sessions_test.rs::test_fr_int_002_*` | cumplido |
 | FR-INT-003 | SHOULD | F8 | CORS por aplicación | — | pendiente |
 | FR-INT-004 | MUST | F8 | Guía de integración | — | pendiente |
 | FR-GEO-001 | MUST | F11 | Gestión de geocercas | — | pendiente |

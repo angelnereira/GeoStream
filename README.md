@@ -3,7 +3,8 @@
 **Infraestructura de ubicación en tiempo real, privada por defecto, multi-inquilino y de alto rendimiento para integrar en aplicaciones móviles y sistemas backend.**
 
 > **Estado actual:** **Fase F4 — Stream en nodo único (Hito M1)** en desarrollo activo.
-> Fases F0, F1, F2 y F3 completadas y verificadas con suite integral de 399 pruebas automatizadas.
+> Fases F0, F1, F2 y F3 completadas; Fase F4 con 10 tareas completadas (tickets, conexión WS, AuthzCache, suscripción gap-free, publicación CAS, fan-out coalescido, control y revocación en vivo, presencia con gracia de desconexión, renovación AuthExpiring/AuthRefresh, y snapshot REST).
+> Suite integral de 421 pruebas automatizadas verdes sin advertencias.
 > Repositorio gobernado por documentación ([`AGENTS.md`](AGENTS.md), [`docs/00_INDEX.md`](docs/00_INDEX.md)).
 
 ---
@@ -64,9 +65,98 @@ El plan de trabajo avanza conforme a [`docs/21_ROADMAP.md`](docs/21_ROADMAP.md):
 | **F1** | Núcleo de dominio | **Completada** | Modelos puros, invariantes de negocio, CAS, property testing (>90% cobertura en `gs-domain`). |
 | **F2** | Base de plataforma | **Completada** | PostgreSQL con migraciones, tokens JWT Ed25519, API keys, observabilidad JSON, CLI admin. |
 | **F3** | Plano de control REST | **Completada** | CRUD completo de sesiones, miembros, invitaciones Base32, compartición, conformidad OpenAPI. |
-| **F4** | Stream en nodo único | **En curso (M1)** | Handshake WS, tickets, caché authz con bus, suscripción con snapshot, publicación CAS, fan-out coalescido, control y revocación en vivo. |
+| **F4** | Stream en nodo único | **En curso (M1)** | Handshake WS, tickets de un solo uso, caché authz con bus, suscripción sin huecos con snapshot, publicación CAS deduplicada, fan-out coalescido, control y revocación en vivo, presencia con gracia de desconexión, conexión única (`Supersede`), renovación de auth (`AuthExpiring`/`AuthRefresh`) y snapshot REST. |
 | **F5** | SDK Flutter (M2) | Pendiente | Cliente Flutter en Dart, gestión de ubicación en segundo plano, reconexión y cola offline. |
 | **F6–F12** | Escalamiento y Ecosistema | Pendiente | Redis/Valkey multinodo, geocercas, webhooks, adaptadores de mapas (MapLibre/Google Maps) y auditoría. |
+
+---
+
+## 🔄 Ciclo de Vida del Protocolo de Streaming (WebSockets)
+
+GeoStream implementa un protocolo de streaming bidireccional sobre WebSockets (`docs/08_STREAM_PROTOCOL.md`) diseñado para garantizar entrega oportuna, baja latencia, privacidad por diseño y contrapresión eficiente:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Dispositivo / App
+    participant REST as API REST (/v1)
+    participant WS as WebSocket (/v1/stream)
+    participant Eph as Almacén Efímero
+    participant Bus as Bus Interno
+
+    Client->>REST: POST /v1/stream/tickets (Bearer token)
+    REST->>Eph: Guarda digest SHA-256 (TTL 30s)
+    REST-->>Client: 201 Created { ticket: "gst_...", stream_url }
+
+    Client->>WS: Upgrade GET /v1/stream?ticket=gst_...
+    WS->>Eph: Canje atómico del ticket (get-and-delete)
+    WS-->>Client: 101 Switching Protocols (gs.v1.proto / gs.v1.json)
+
+    Client->>WS: ClientHello { protocol_version, client_info }
+    WS->>Eph: Registra presencia {prefix}:presence:{device_id}
+    WS-->>Client: ServerHello { connection_id, server_time, sequence_floor, auth_expires_at }
+
+    Client->>WS: Subscribe { session_id }
+    WS->>Eph: Lee snapshots retenidos de miembros activos
+    WS-->>Client: SubscribeAck { session_info, members, snapshot }
+
+    Client->>WS: PublishLocation { samples: [ ... ] }
+    WS->>Eph: CAS de secuencia atómico + guarda {prefix}:snap:{session}:{member}
+    WS->>Bus: Difunde LocationUpdate en {prefix}:bus:loc:{session}
+    WS-->>Client: PublishAck { results: [ ACCEPTED, ... ] }
+    Bus-->>WS: Fan-out coalescido hacia otros suscriptores
+    WS-->>Client: LocationUpdate { session_id, member_id, sample }
+
+    Note over WS,Client: Ventana próxima a expirar (lead = 60s)
+    WS-->>Client: AuthExpiring { auth_expires_at } (unsolicited, request_id=0)
+    Client->>WS: AuthRefresh { access_token }
+    WS-->>Client: AuthRefreshAck { auth_expires_at }
+```
+
+---
+
+## 📍 API REST de Snapshots de Ubicación (`GET /v1/sessions/{id}/snapshot`)
+
+Permite a aplicaciones backend autorizadas (scope `locations:read`) y a dispositivos participantes activos (capacidad `read`) consultar el último estado espacial retenido de todos los miembros de una sesión sin mantener abierta una conexión WebSocket permanente:
+
+- **Privacidad estricta (`INV-SHR-1`):** Miembros con compartición desactivada (`sharing=false`) nunca aparecen en la respuesta.
+- **Retención configurable:** Si la sesión se configuró con `snapshot_ttl_seconds = 0`, la respuesta devuelve inmediatamente una lista vacía de items (`[]`).
+- **Frescura garantizada:** Cada elemento incluye `age_ms = generated_at - captured_at` en milisegundos para evaluar la actualidad de la muestra.
+- **Redacción total (`NFR-SEC-003`):** Coordenadas y muestras son omitidas de todos los logs, métricas y mensajes de error.
+
+Ejemplo de respuesta (`200 OK`, cabecera `Cache-Control: no-store`):
+
+```json
+{
+  "session_id": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+  "generated_at": "2026-10-15T00:00:05.123Z",
+  "items": [
+    {
+      "member_id": "mem_0192b6c0a1e47c3f9d2a7b5e8f1c0d3b",
+      "external_subject_id": "courier-123",
+      "received_at": "2026-10-15T00:00:01.456Z",
+      "age_ms": 4123,
+      "sample": {
+        "sequence": 105,
+        "captured_at": "2026-10-15T00:00:01.000Z",
+        "position": {
+          "latitude": -12.0464,
+          "longitude": -77.0428,
+          "horizontal_accuracy_m": 5.0,
+          "altitude_m": 120.5,
+          "speed_mps": 3.2,
+          "heading_deg": 180.0
+        },
+        "quality": {
+          "source": "GNSS",
+          "kind": "MEASURED",
+          "motion": "AUTOMOTIVE"
+        }
+      }
+    }
+  ]
+}
+```
 
 ---
 
@@ -151,7 +241,7 @@ cargo fmt --all -- --check
 # 2. Análisis estático y linter sin advertencias
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# 3. Ejecutar toda la suite de pruebas del workspace (399 pruebas)
+# 3. Ejecutar toda la suite de pruebas del workspace (421 pruebas)
 cargo test --workspace
 
 # 4. Auditoría de dependencias, licencias y avisos de seguridad
