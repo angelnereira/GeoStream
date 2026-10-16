@@ -267,6 +267,8 @@ Leyenda: ✗ = principal no permitido (403 `PERMISSION_DENIED`); — = sin requi
 | `Heartbeat` | — | — |
 | `AuthRefresh` | ✗ (las conexiones de aplicación se renuevan reconectando) | token válido del **mismo** `did` |
 
+**Orden de entrega garantizado.** Cuando un mensaje produce **dos** efectos —un `StreamError` y un cierre, como `AuthRefresh` con el token de otro dispositivo— la respuesta correlacionada se escribe **antes** del close frame, siempre. No es una preferencia: sin ese orden, un cliente que recibe solo el 4403 no puede distinguir «te rechazé el token» de «la sesión expiró». La escritura de la conexión drena la cola de control antes de emitir el cierre (`08` §4 y §8).
+
 **Minimización en `MemberStatus`:** `availability` y `attributes` de sesiones `POOL` solo se proyectan a principales de aplicación. Para una conexión de dispositivo se omiten siempre (INV-PRS-2), aunque la membresía tenga `read`.
 
 ## 9. Protección de autenticación

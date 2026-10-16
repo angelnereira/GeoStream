@@ -317,6 +317,7 @@ async fn test_nfr_priv_002_immediate_snapshot_deletion_on_stop_revoke_leave_and_
                 app_version: "1.0.0".to_string(),
                 last_sequence: 0,
                 client_time: None,
+                core_version: String::new(),
             }),
             Duration::from_secs(5),
         )

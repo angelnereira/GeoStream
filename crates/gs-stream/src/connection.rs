@@ -621,6 +621,9 @@ impl Connection {
                 .subject_id
                 .map(|id| id.to_string())
                 .unwrap_or_default(),
+            // Sampling policy (E3) is not sent until its phase exists; a client
+            // that receives no policy uses its own defaults (docs/22 §3.4).
+            sampling: None,
             device_id: self
                 .grant
                 .device_id
@@ -1627,6 +1630,7 @@ fn spawn_writer(
             }
 
             tokio::select! {
+                biased;
                 // Control frames are never discarded (docs/08 §10).
                 frame = control_rx.recv() => {
                     let Some(frame) = frame else {
@@ -1643,6 +1647,19 @@ fn spawn_writer(
                     let Some(close) = close else {
                         return;
                     };
+                    // Drain everything already queued as control before closing.
+                    // docs/08 §6.6 promises the client a correlated `StreamError`
+                    // before the close frame; without this drain, a select that
+                    // happens to take the close branch loses the error and the
+                    // client sees only the code. The `biased;` above makes this
+                    // branch ordering deterministic instead of leaving it to the
+                    // random choice of a non-biased select.
+                    while let Ok(frame) = control_rx.try_recv() {
+                        if !write_frame(&mut sink, &frame).await {
+                            cancel.cancel();
+                            return;
+                        }
+                    }
                     let _ = sink.send(Message::Close(Some(close))).await;
                     return;
                 }
@@ -1729,6 +1746,7 @@ fn message_type(message: &ServerMessage) -> String {
         Some(ServerBody::AuthExpiring(_)) => "auth_expiring",
         Some(ServerBody::ServerNotice(_)) => "server_notice",
         Some(ServerBody::GeofenceEvent(_)) => "geofence_event",
+        Some(ServerBody::TrackEvent(_)) => "track_event",
         Some(ServerBody::Error(_)) => "error",
         None => "none",
     }
@@ -1762,6 +1780,7 @@ mod tests {
             platform: 0,
             last_sequence: 0,
             client_time: None,
+            core_version: String::new(),
         }
     }
 

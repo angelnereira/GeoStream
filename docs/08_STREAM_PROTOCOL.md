@@ -159,6 +159,8 @@ El cliente:
 - Aplicación: no hay `AuthRefresh` (→ `StreamError{PERMISSION_DENIED}`); reconecta con un ticket nuevo antes de `auth_expires_at`.
 - Al llegar `auth_expires_at` sin renovación → cierre 4401.
 
+**Orden de entrega (obligatorio).** En los casos con dos efectos, el `StreamError` se escribe **antes** del close frame: la cola de control se drena por completo antes de emitir el cierre (§4, §8). Un cliente que solo recibiera el 4403 no podría distinguir «rechacé tu token» de «la sesión expiró», que es justo la información que necesita para decidir si reintenta o si su sesión está muerta.
+
 ### 6.7 Conexión única por dispositivo
 Tras el hello de un dispositivo se publica `Supersede{device_id, connection_id}` en `{p}:bus:dev:{device_id}`. Toda otra conexión del mismo dispositivo, en cualquier instancia, se cierra con 4409. Las conexiones de aplicación no tienen esta restricción.
 
@@ -218,6 +220,8 @@ Si un cliente publica una muestra con `kind = PREDICTED` o `INTERPOLATED`, el se
 | 4503 | TRY_AGAIN | Drenaje / sobrecarga | Reconectar tras `reconnect_after_ms` si se recibió `ServerNotice`; si no, backoff |
 
 El servidor incluye en el *reason* del cierre solo el nombre (p. ej. `SUPERSEDED`), nunca detalles sensibles.
+
+**El close frame va siempre después.** Cuando una operación produce además un mensaje (un `StreamError`, un `AuthExpiring`, un `ServerNotice`), ese mensaje se escribe **antes** del close frame: la cola de control se drena por completo y el cierre espera a que esté vacía. El orden es normativo porque el código de cierre solo dice *qué* pasó, no *por qué* en el caso concreto; el mensaje correlacionado es el que lleva la explicación accionable.
 
 ## 9. Revocación en vivo
 

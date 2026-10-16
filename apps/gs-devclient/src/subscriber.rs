@@ -41,6 +41,7 @@ pub async fn run_subscriber(config: SubscriberConfig) -> Result<()> {
                 app_version: "1.0.0".to_string(),
                 last_sequence: 0,
                 client_time: None,
+                core_version: String::new(),
             }),
             Duration::from_secs(5),
         )
@@ -75,6 +76,7 @@ pub async fn run_subscriber(config: SubscriberConfig) -> Result<()> {
             ClientBody::Subscribe(Subscribe {
                 session_id: config.session_id.clone(),
                 skip_snapshot: false,
+                replay_trace: false,
             }),
             Duration::from_secs(5),
         )

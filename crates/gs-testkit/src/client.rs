@@ -440,6 +440,7 @@ pub fn server_message_matches(
         ServerBody::AuthExpiring(_) => "auth_expiring",
         ServerBody::ServerNotice(_) => "server_notice",
         ServerBody::GeofenceEvent(_) => "geofence_event",
+        ServerBody::TrackEvent(_) => "track_event",
         ServerBody::Error(_) => "error",
     };
 

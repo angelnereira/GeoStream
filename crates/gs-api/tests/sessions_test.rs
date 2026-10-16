@@ -637,6 +637,7 @@ async fn test_fr_int_002_application_reads_snapshot_with_locations_read() {
             nanos: 0,
         }),
         delivery: gs_service::gs_protocol::DeliveryKind::Live as i32,
+        estimate: None,
     };
     let snap_key = format!("gs:snap:{session_id}:{member_id}");
     fixture
@@ -776,6 +777,7 @@ async fn test_fr_int_002_device_with_read_capability_reads_snapshot() {
             nanos: 0,
         }),
         delivery: gs_service::gs_protocol::DeliveryKind::Live as i32,
+        estimate: None,
     };
     let snap_key = format!("gs:snap:{session_id}:{owner_member_id}");
     fixture
@@ -1027,6 +1029,7 @@ async fn test_fr_int_002_session_with_snapshot_ttl_zero_returns_empty_items() {
             nanos: 0,
         }),
         delivery: 2,
+        estimate: None,
     };
     let snap_key = format!("gs:snap:{session_id}:{member_id}");
     fixture
@@ -1130,6 +1133,7 @@ async fn test_fr_int_002_non_sharing_member_is_excluded_from_snapshot() {
             nanos: 0,
         }),
         delivery: 2,
+        estimate: None,
     };
     let snap_key = format!("gs:snap:{session_id}:mem_fake");
     fixture

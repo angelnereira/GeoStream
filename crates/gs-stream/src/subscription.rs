@@ -197,6 +197,8 @@ fn session_info(view: &SessionInfoView) -> gs_service::gs_protocol::SessionInfo 
         max_members: view.max_members,
         stale_after_seconds: view.stale_after_seconds,
         snapshot_ttl_seconds: view.snapshot_ttl_seconds,
+        // History mode (E6) is OFF until its phase exists (docs/05 §4.1).
+        history_mode: gs_service::gs_protocol::HistoryMode::Off as i32,
     }
 }
 
@@ -216,6 +218,12 @@ fn member_status(view: &gs_service::subscriptions::MemberStatusView) -> MemberSt
                 seconds: instant.unix_timestamp(),
                 nanos: instant.nanosecond() as i32,
             }),
+        // Pool fields (E4) and consent purposes (E6) are omitted until their
+        // phases exist. For a device principal they are omitted unconditionally
+        // (INV-PRS-2, docs/05 §8).
+        availability: gs_service::gs_protocol::Availability::Unspecified as i32,
+        attributes: ::std::collections::HashMap::new(),
+        purposes: Vec::new(),
     }
 }
 
@@ -386,6 +394,7 @@ mod tests {
             }),
             received_at: None,
             delivery: gs_service::gs_protocol::DeliveryKind::Live as i32,
+            estimate: None,
         };
         let newer = LocationUpdate {
             sample: Some(gs_service::gs_protocol::LocationSample {
@@ -417,6 +426,7 @@ mod tests {
             }),
             received_at: None,
             delivery: gs_service::gs_protocol::DeliveryKind::Live as i32,
+            estimate: None,
         };
         subscription.retain_location(member, &update.encode_to_vec());
 

@@ -354,6 +354,7 @@ async fn test_the_snapshot_only_contains_members_that_share() {
         }),
         received_at: None,
         delivery: DeliveryKind::Snapshot as i32,
+        estimate: None,
     };
     let snapshot_key = format!(
         "{prefix}:snap:{session}:{member}",
@@ -436,6 +437,7 @@ async fn test_a_member_that_does_not_share_is_minimized() {
         }),
         received_at: None,
         delivery: DeliveryKind::Live as i32,
+        estimate: None,
     };
     ephemeral
         .set_snapshot(

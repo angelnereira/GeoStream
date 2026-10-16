@@ -95,6 +95,7 @@ mod tests {
                 app_version: "1.0.0".to_string(),
                 last_sequence: 41,
                 client_time: None,
+                core_version: String::new(),
             })),
         }
     }

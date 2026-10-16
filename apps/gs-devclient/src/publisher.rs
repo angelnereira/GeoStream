@@ -49,6 +49,7 @@ pub async fn run_publisher(
                 app_version: "1.0.0".to_string(),
                 last_sequence: 0,
                 client_time: None,
+                core_version: String::new(),
             }),
             Duration::from_secs(5),
         )

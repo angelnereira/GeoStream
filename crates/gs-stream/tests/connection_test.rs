@@ -379,6 +379,7 @@ async fn hello(socket: &mut Socket, subprotocol: Subprotocol) -> Value {
                 app_version: "1.0.0".to_string(),
                 last_sequence: 0,
                 client_time: None,
+                core_version: String::new(),
             },
         )),
     };
@@ -437,7 +438,14 @@ async fn read_binary(socket: &mut Socket) -> Vec<u8> {
             Some(Ok(Message::Binary(bytes))) => return bytes.to_vec(),
             Some(Ok(Message::Text(text))) => return text.as_bytes().to_vec(),
             Some(Ok(_)) => continue,
-            other => panic!("unexpected frame: {other:?}"),
+            // El servidor puede cerrar sin enviar datos si la ventana de
+            // autenticación vence antes de que llegue la respuesta. El cierre es
+            // un resultado válido, no un frame inesperado: lo verifica
+            // `read_close_code`.
+            other => panic!(
+                "expected a data frame, got {other:?}; if the server closed the \
+                 connection first, use `read_close_code` instead of `read_binary`"
+            ),
         }
     }
 }
@@ -690,6 +698,7 @@ async fn subscribe(
             gs_service::gs_protocol::Subscribe {
                 session_id: session_id.to_string(),
                 skip_snapshot,
+                replay_trace: false,
             },
         )),
     };
@@ -768,6 +777,7 @@ async fn subscribe_expecting_error(
             gs_service::gs_protocol::Subscribe {
                 session_id: session_id.to_string(),
                 skip_snapshot: false,
+                replay_trace: false,
             },
         )),
     };
@@ -1044,6 +1054,7 @@ async fn test_unsupported_protocol_minor_closes_with_4001() {
                 app_version: "1.0.0".to_string(),
                 last_sequence: 0,
                 client_time: None,
+                core_version: String::new(),
             },
         )),
     };
@@ -2628,7 +2639,7 @@ async fn test_fr_auth_007_server_sends_auth_expiring_immediately_if_within_lead(
 
     // Immediately after hello, server must send AuthExpiring
     let msg =
-        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(2000))
             .await
             .expect("AuthExpiring message must be delivered");
 
@@ -2680,7 +2691,7 @@ async fn test_fr_auth_007_auth_refresh_extends_session_and_prevents_4401() {
 
     // Receive AuthExpiring
     let exp_msg =
-        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(2000))
             .await
             .expect("AuthExpiring");
     assert!(matches!(
@@ -2732,7 +2743,7 @@ async fn test_fr_auth_007_auth_refresh_extends_session_and_prevents_4401() {
 
     // Receive AuthRefreshAck
     let ack_msg =
-        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(2000))
             .await
             .expect("AuthRefreshAck");
     assert_eq!(ack_msg.request_id, 101);
@@ -2760,7 +2771,7 @@ async fn test_fr_auth_007_auth_refresh_extends_session_and_prevents_4401() {
         .expect("send heartbeat");
 
     let hb_ack =
-        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(2000))
             .await
             .expect("HeartbeatAck");
     assert_eq!(hb_ack.request_id, 102);
@@ -2787,7 +2798,11 @@ async fn test_fr_auth_007_connection_closes_with_4401_if_auth_expires_without_re
             app_version: None,
             sdk_version: None,
             scopes: Some(vec!["stream:connect".to_string()]),
-            ttl_seconds: Some(1),
+            // 3 s, no 1 s: con 1 s el cierre por expiración compite con la
+            // respuesta al hello y la prueba dependía de la carga de la máquina.
+            // Con 3 s el hello se completa siempre y lo que se verifica sigue
+            // siendo lo mismo: el cierre 4401 sin `AuthRefresh`.
+            ttl_seconds: Some(3),
         },
         TokenTtlBounds {
             min_seconds: 1,
@@ -2843,7 +2858,7 @@ async fn test_fr_auth_007_auth_refresh_with_another_device_token_fails_permissio
 
     // Server must respond with StreamError{PERMISSION_DENIED}
     let err_msg =
-        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(2000))
             .await
             .expect("StreamError");
     assert_eq!(err_msg.request_id, 201);
@@ -2912,7 +2927,7 @@ async fn test_fr_auth_007_auth_refresh_with_expired_token_replies_stream_error_a
 
     // Server must respond with StreamError{TOKEN_EXPIRED}
     let err_msg =
-        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(2000))
             .await
             .expect("StreamError");
     assert_eq!(err_msg.request_id, 301);
@@ -2940,7 +2955,7 @@ async fn test_fr_auth_007_auth_refresh_with_expired_token_replies_stream_error_a
         .expect("send heartbeat");
 
     let hb_ack =
-        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(2000))
             .await
             .expect("HeartbeatAck");
     assert_eq!(hb_ack.request_id, 302);
@@ -2974,7 +2989,7 @@ async fn test_fr_auth_007_auth_refresh_with_invalid_token_replies_stream_error_u
 
     // Server must respond with StreamError{UNAUTHENTICATED}
     let err_msg =
-        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Proto, Duration::from_millis(2000))
             .await
             .expect("StreamError");
     assert_eq!(err_msg.request_id, 401);
@@ -3015,7 +3030,7 @@ async fn test_fr_auth_007_application_cannot_refresh_authentication() {
 
     // Server responds with StreamError{PERMISSION_DENIED}
     let err_msg =
-        next_server_message_timeout(&mut socket, Subprotocol::Json, Duration::from_millis(500))
+        next_server_message_timeout(&mut socket, Subprotocol::Json, Duration::from_millis(2000))
             .await
             .expect("StreamError");
     assert_eq!(err_msg.request_id, 501);

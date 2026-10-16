@@ -345,6 +345,10 @@ pub async fn publish_batch<E: EphemeralStore + ?Sized>(
             sample: Some(proto_sample(sample)),
             received_at: Some(to_proto_timestamp(now)),
             delivery: DeliveryKind::Live as i32,
+            // The tracking engine (E2) is not implemented yet: `estimate` stays
+            // absent, which the contract allows without affecting acceptance
+            // (docs/09 §4, P-E3).
+            estimate: None,
         };
         results.push(SampleResult::accepted(validated.sequence));
         accepted.push(update);

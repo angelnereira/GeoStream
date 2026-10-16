@@ -73,7 +73,10 @@ pub enum GlobalBusEvent {
 }
 
 /// Session-scoped control events published to `{prefix}:bus:ctl:{session_id}` (docs/04 §6.1, docs/05 §10, docs/08 §9).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Eq` is not derived: `ProtoMemberStatus` carries a `map` for the pool
+/// attributes (E4), and a map is not comparable with `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event")]
 pub enum SessionControlEvent {
     /// A session was closed. Subscribers receive `SessionEvent{CLOSED}` and `SubscriptionEnded{SESSION_CLOSED}`.
@@ -205,6 +208,9 @@ pub fn to_proto_session_info(
         max_members,
         stale_after_seconds,
         snapshot_ttl_seconds,
+        // History mode (E6) is fixed at OFF until the phase that implements it.
+        // `OFF` is not a placeholder: it is the guarantee that nothing is stored.
+        history_mode: gs_protocol::HistoryMode::Off as i32,
     }
 }
 
@@ -235,6 +241,12 @@ pub fn to_proto_member_status(
             manage: capabilities.manage,
         }),
         sharing,
+        // Pool fields (E4) and consent purposes (E6) are fixed until their phases
+        // exist. `Availability::Unspecified` means «not exposed», and per
+        // INV-PRS-2 they are omitted for device principals regardless (docs/05 §8).
+        availability: gs_protocol::Availability::Unspecified as i32,
+        attributes: ::std::collections::HashMap::new(),
+        purposes: Vec::new(),
         connectivity: match connectivity {
             Connectivity::Unspecified => ProtoConnectivity::Unspecified as i32,
             Connectivity::Online => ProtoConnectivity::Online as i32,

@@ -349,6 +349,7 @@ pub async fn run_scenario(
                     app_version: "1.0.0".to_string(),
                     last_sequence: last_seq,
                     client_time: None,
+                    core_version: String::new(),
                 };
 
                 let hello_id = client.next_id().await;
