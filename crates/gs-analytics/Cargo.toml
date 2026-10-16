@@ -1,0 +1,10 @@
+[package]
+name = "gs-analytics"
+description = "Analytics aggregation, k-anon suppression, heatmaps (E6/E7)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+[dependencies]
+gs-domain.workspace = true
+gs-geo.workspace = true

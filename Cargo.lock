@@ -1608,6 +1608,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gs-analytics"
+version = "0.0.0"
+dependencies = [
+ "gs-domain",
+ "gs-geo",
+]
+
+[[package]]
 name = "gs-api"
 version = "0.0.0"
 dependencies = [
@@ -1739,6 +1747,15 @@ dependencies = [
  "thiserror",
  "time",
  "uuid",
+]
+
+[[package]]
+name = "gs-edge"
+version = "0.0.0"
+dependencies = [
+ "gs-domain",
+ "hmac",
+ "sha2 0.11.0",
 ]
 
 [[package]]
