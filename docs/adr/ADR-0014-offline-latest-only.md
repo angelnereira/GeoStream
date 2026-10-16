@@ -1,6 +1,6 @@
 # ADR-0014: Política offline del SDK: solo la última muestra
 
-- **Estado:** Aceptado (baseline v0.2.0)
+- **Estado:** Sustituido por [ADR-0025](ADR-0025-encrypted-offline-buffered-queue.md) (mantiene `latestOnly` para sesiones sin historial)
 - **Fecha:** 2026-10-11
 - **Responsable:** propietario del proyecto
 - **Requisitos afectados:** FR-SDK-008 (sustituye el FR-033 de la propuesta v0.1.0)

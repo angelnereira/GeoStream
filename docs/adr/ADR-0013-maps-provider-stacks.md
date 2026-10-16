@@ -1,6 +1,6 @@
 # ADR-0013: Mapas como adaptadores agrupados en stacks; MapLibre primero
 
-- **Estado:** Aceptado (baseline v0.2.0)
+- **Estado:** Aceptado (baseline v0.2.0; ampliado por [ADR-0028](ADR-0028-server-provider-gateway-byok.md))
 - **Fecha:** 2026-10-11
 - **Responsable:** propietario del proyecto
 - **Requisitos afectados:** FR-MAP-*, NFR-RES-001, NFR-COST-001

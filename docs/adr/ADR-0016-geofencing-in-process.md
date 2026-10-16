@@ -1,6 +1,6 @@
 # ADR-0016: Geocercas evaluadas en proceso con R-tree; Tile38 y H3 diferidos
 
-- **Estado:** Aceptado (baseline v0.2.0)
+- **Estado:** Sustituido parcialmente por [ADR-0026](ADR-0026-h3-and-rtree-spatial-indexing.md) (mantiene R-tree en proceso para polígonos de geocercas)
 - **Fecha:** 2026-10-11
 - **Responsable:** propietario del proyecto
 - **Requisitos afectados:** FR-GEO-001..004

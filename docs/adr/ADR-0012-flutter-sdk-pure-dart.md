@@ -1,6 +1,6 @@
 # ADR-0012: SDK Flutter en Dart puro sobre plugins de plataforma, sin núcleo Rust en v1
 
-- **Estado:** Aceptado (baseline v0.2.0)
+- **Estado:** Sustituido por [ADR-0022](ADR-0022-shared-rust-client-core.md) y [ADR-0031](ADR-0031-ffi-surface-and-language-bindings.md)
 - **Fecha:** 2026-10-11
 - **Responsable:** propietario del proyecto
 - **Requisitos afectados:** FR-SDK-*, NFR-COMPAT-001

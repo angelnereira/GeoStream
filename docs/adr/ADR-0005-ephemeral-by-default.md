@@ -1,6 +1,6 @@
 # ADR-0005: Ubicación efímera por defecto
 
-- **Estado:** Aceptado (baseline v0.2.0)
+- **Estado:** Sustituido por [ADR-0024](ADR-0024-opt-in-history-and-k-anonymous-analytics.md) (mantiene ubicación efímera por defecto cuando el historial no está activo)
 - **Fecha:** 2026-10-11
 - **Responsable:** propietario del proyecto
 - **Requisitos afectados:** NFR-PRIV-001, NFR-PRIV-002, FR-PRV-001
