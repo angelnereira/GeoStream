@@ -33,6 +33,8 @@ enum Commands {
     Requirements,
     /// Verify auth matrix parity between 06 §8.2 and OpenAPI
     AuthMatrix,
+    /// Verify x-gs-phase, scopes and ID prefixes against the normative docs
+    Phases,
     /// Verify relative markdown links across the repository
     MarkdownLinks,
     /// Verify CHANGELOG.md format and optional PR update
@@ -109,6 +111,12 @@ fn run_all(root: &Path) -> bool {
     }) {
         all_ok = false;
     }
+    if !run_check(
+        "Phases, Scopes and ID Prefixes (21, 06, 05 vs contracts)",
+        || phases::check_phases_and_scopes(root),
+    ) {
+        all_ok = false;
+    }
     if !run_check("Markdown Relative Links", || {
         markdown_links::check_markdown_links(root)
     }) {
@@ -155,6 +163,10 @@ fn main() -> ExitCode {
         Commands::AuthMatrix => run_check("Auth Matrix Consistency (06 §8.2 vs OpenAPI)", || {
             auth_matrix::check_auth_matrix(&root)
         }),
+        Commands::Phases => run_check(
+            "Phases, Scopes and ID Prefixes (21, 06, 05 vs contracts)",
+            || phases::check_phases_and_scopes(&root),
+        ),
         Commands::MarkdownLinks => run_check("Markdown Relative Links", || {
             markdown_links::check_markdown_links(&root)
         }),

@@ -1,7 +1,8 @@
 # 21 — Hoja de ruta de implementación
 
-**ID:** GS-RMP-001 · **Versión:** 0.2.0
-De repositorio vacío a **GeoStream v1.0 GA** (F0–F12) y pistas posteriores (F13–F16).
+**ID:** GS-RMP-001 · **Versión:** 0.3.0**
+De repositorio vacío a **GeoStream v1.0 GA** (F0–F12), pistas posteriores (F13–F16)
+y la **pista E** de motor de ubicación y movilidad (E0–E9).
 
 ## 1. Reglas
 - El roadmap define **secuencia**, no comportamiento: el comportamiento está en los documentos citados.
@@ -9,6 +10,7 @@ De repositorio vacío a **GeoStream v1.0 GA** (F0–F12) y pistas posteriores (F
 - Una fase se cierra cuando se cumplen **todos** sus criterios de salida y queda registrado en `PROGRESS.md` con evidencia (enlaces a CI, informes).
 - Estimaciones orientativas para un desarrollador con agentes de código; no son compromisos.
 - "Adelantable" = puede empezar antes de cerrar la fase anterior si sus dependencias están cerradas.
+- **La pista E no se mezcla con la línea base.** Solo un PR toca `contracts/` a la vez, y E0 (documentación, contratos y ADR) no escribe código de producción (`20` §4).
 
 ## 2. Mapa de fases e hitos
 
@@ -31,6 +33,7 @@ flowchart LR
   F6 --> F11[F11 Geocercas]
   F10 --> F12[F12 Producción<br/>M5: v1.0 GA]
   F11 --> F12
+  M5 -.->|v1.1 a v1.5| E0["Pista E: motor de ubicación<br/>y movilidad (E0–E9)"]
 ```
 
 | Hito | Al cerrar | Significado | Release |
@@ -41,8 +44,9 @@ flowchart LR
 | M3 | F7 | Beta privada: Android + iOS, multi-nodo, benchmarks | `server-v0.5.0-beta.1`, `sdk-flutter-v0.5.0-beta.1` |
 | M4 | F9 | Integrable: webhooks, consumidores de servidor, ingesta, mapas | `-rc.1` |
 | M5 | F12 | **v1.0 GA** | `server-v1.0.0`, `sdk-flutter-v1.0.0` |
+| M6..M11 | E2, E3, E5, E7, E8, E9 | Capacidades del motor, por versión | `server-v1.1.0` … `server-v1.5.0` |
 
-Estimación total F0–F12: 32–45 semanas.
+Estimación total F0–F12: 32–45 semanas. Pista E1–E9: 26–38 semanas adicionales.
 
 ---
 
@@ -284,13 +288,279 @@ Adelantable: puede empezar al cerrar F6.
 
 ---
 
-## Pistas posteriores a GA
+---
+
+## Pista E — Motor de ubicación y movilidad (E0–E9)
+
+**Estado:** E0 en curso. Documentos: `22` (trayectoria), `23` (movilidad),
+`24` (historial y analítica), `25` (dispositivos edge), `26` (núcleo y bindings).
+Decisiones: ADR-0021..0032. Origen archivado:
+`docs/proposals/GeoStream_Addendum_A02_Motor_Ubicacion_Movilidad.md`.
+
+### Por qué esta pista está separada
+
+La línea base F0–F12 construye **compartición en tiempo real**. La pista E construye
+**el motor** alrededor: decide cuándo publicar, estima la trayectoria, ofrece
+pools y ETA, guarda historial con consentimiento, aprende del mapa y llega a
+dispositivos sin internet.
+
+Está separada del roadmap principal por una razón concreta, no estética:
+
+> **La línea base no se toca.** Cada capacidad nueva es aditiva, está detrás de un
+> interruptor de política del tenant apagado por defecto, y un cliente escrito
+> antes de la pista E sigue funcionando sin cambios (`NFR-COMPAT-003`, SCN-026).
+
+Si la pista E se mezclara con F5–F12, cada PR de la línea base tendría que
+reevaluar si algo de lo que hace sigue siendo válido, y la promesa de «v1.0 es un
+producto que se puede integrar y ya está» dejaría de ser cierta.
+
+### Mapa de fases de la pista E
+
+```mermaid
+flowchart LR
+  E0["E0 Documentación,<br/>contratos y ADR"] --> E1["E1 Núcleo Rust<br/>compartido"]
+  E1 --> E2["E2 Motor de<br/>trayectoria"]
+  E1 --> E3["E3 Núcleo de<br/>dispositivo"]
+  E2 --> E4["E4 Pools"]
+  E3 --> E4
+  E3 --> E8["E8 Dispositivos<br/>edge"]
+  E4 --> E5["E5 Herramientas<br/>y BYOK"]
+  E2 --> E6["E6 Historial<br/>y analítica"]
+  E5 --> E7["E7 Capa de mapa<br/>aprendida"]
+  E6 --> E7
+  E7 --> E9["E9 Bindings<br/>multilingüe"]
+  E8 --> E9
+```
+
+| Fase | Entregable | Requisitos | Depende |
+|---|---|---|---|
+| **E0** | Documentación `22`–`26`, ADR-0021..0032, contrato ampliado, vectores y escenarios | — (documental) | — |
+| **E1** | `gs-geo`, `gs-client-core`, `gs-client-runtime`, `gs-ffi` esqueleto, compilación multiarquitectura | FR-CORE-001..003, FR-OPS-007 | E0 |
+| **E2** | `gs-track` en el servidor: Kalman, plausibilidad, odómetro, paradas | FR-TRK-001..007, NFR-QUAL-001..003 | E1 |
+| **E3** | Muestreo adaptativo, publicación por cambio, cola cifrada, predicción local, SDK Flutter sobre el núcleo | FR-SMP-001..006, FR-CORE-001..003, FR-BND-001..003 | E1 |
+| **E4** | `SessionMode.POOL`, índice espacial vivo, `nearby`/`rings`/`density` | FR-POOL-001..006 | E2, E3 |
+| **E5** | ETA, asignación, Provider Gateway BYOK, geocercas extendidas, grafo vial propio | FR-MOB-001..003, FR-GEO-005..007, FR-LRN-004 | E4 |
+| **E6** | Historial opt-in, triple llave, k-anonimato, viajes, exportaciones | FR-HIS-001..003, FR-HIS-005..007, FR-ANA-001..004 | E2 |
+| **E7** | Capa de mapa aprendida, lugares DBSCAN, map-matching, perfil de velocidad | FR-LRN-001..003, FR-HIS-004 | E5, E6 |
+| **E8** | Tags BLE, red GeoStream Beacon, DULT, LPWAN, relevo en el cliente | FR-EDGE-001..008 | E3 |
+| **E9** | Bindings TypeScript, Go y Ruby + conformidad multilingüe | FR-BND-004..007, NFR-COMPAT-003 | E7, E8 |
+
+Estimación E1–E9: 26–38 semanas con dos personas y agentes de código. **No son
+compromisos** y las fases E5, E6 y E8 son truncables: el motor sigue siendo útil
+sin ellas.
+
+### E0 — Documentación, contratos y ADR (en curso)
+
+Sin código de producción. Cierra el marco que las demás fases implementan.
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E0-01 | `docs/01` v0.3.0: dos mitades, G-11..G-15, NG-4/5/6, UC-09..13, P-E1..10, criterios de GA | — | 01, ADR-0021 | — |
+| T-E0-02 | `docs/03` + `TRACEABILITY`: ~70 requisitos nuevos, `FR-MAP-005` enmendado, `FR-NAT-001` retirado | todos los `*-E` | 03, ADR-0021..0032 | T-E0-01 |
+| T-E0-03 | ADR-0021..0032; `ADR-0005/0012/0014/0016` sustituidos; `0013` ampliado | — | 19, 00 | T-E0-01 |
+| T-E0-04 | `docs/22`..`26` con el detalle técnico normativo de la pista | — | 00 §1 | T-E0-03 |
+| T-E0-05 | Enmiendas a `docs/02` y `docs/05`–`docs/20` | — | 22–26 | T-E0-04 |
+| T-E0-06 | `contracts/`: protos, OpenAPI, vectores `TRK/SMP/POOL/ETA/PRD/ASG/EDGE`, SCN-014..026 | NFR-COMPAT-003 | contracts/README, 20 §4 | T-E0-05 |
+| T-E0-07 | Este roadmap: pista E, criterios de GA y re-alcance de F5/F13/F15 | — | 01 §9, 22–26 | T-E0-06 |
+| T-E0-08 | `tools/`: fases `E<n>`, scopes nuevos en la matriz de auth, reglas de crates, prefijos `tag_`/`trp_`/`plc_`/`exp_`/`lpw_` | — | 18 §10.1 | T-E0-06 |
+
+**Criterios de salida (E0):** `geostream-tools all` verde con las ocho
+comprobaciones; `buf lint` y `buf breaking` contra `main` sin errores;
+`oasdiff` sin cambios incompatibles; los ocho documentos normativos
+aproximadamente completos; ninguna tarea de la pista E empieza sin haber leído
+`22`–`26`.
+
+**Lo que E0 NO hace, a propósito:** no escribe una línea de `gs-track`,
+`gs-mobility` ni `gs-history`. Un contrato sin implementación es reversible; una
+implementación sobre un contrato que cambia es trabajo rehecho.
+
+### E1 — Núcleo Rust compartido (4–5 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E1-01 | `gs-geo`: haversine, geodesia, Douglas-Peucker, rumbo; radio terrestre declarado | — | 26 §1, 17 §2.11 | E0 |
+| T-E1-02 | `gs-client-core`: traits de puerto, máquina de estados, suavizado de rumbo, muestreo; sin I/O ni tokio | FR-CORE-001 | 26 §1 | T-E1-01 |
+| T-E1-03 | `gs-client-runtime`: implementación de puertos con `tokio` + plataforma | FR-CORE-002 | 26 §1 | T-E1-02 |
+| T-E1-04 | `gs-ffi`: superficie `extern "C"` mínima, handles opacos, `catch_unwind`, `// SAFETY:` en cada bloque `unsafe` | FR-CORE-003 | 26 §3.2, 19 §6.2.1 | T-E1-03 |
+| T-E1-05 | Compilación multiarquitectura Linux en CI y matriz de objetivos | FR-OPS-007 | 26 §2, 26 §5 | T-E1-03 |
+| T-E1-06 | Propiedades de `gs-client-core`: idempotencia de publicación, límite de intervalo, conservación de la última muestra | NFR-QUAL-001 | 18 §3 | T-E1-02 |
+
+**Criterios de salida:** `#![forbid(unsafe_code)]` se mantiene en todo el
+workspace salvo `gs-ffi`; la suite de conformidad verde; `cargo deny` con las
+dependencias nuevas (ADR por cada una).
+
+### E2 — Motor de trayectoria en el servidor (3–4 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E2-01 | Migración `0003_engine_state.sql` (`sessions.history_mode`, `memberships.consent_purposes`) | FR-TRK-006 | 11 §2.0 | E1 |
+| T-E2-02 | Estado del filtro en el almacén efímero con control de versión y checkpoint | FR-TRK-006 | 22 §2.1, 11 §3.1 | T-E2-01 |
+| T-E2-03 | Puerta de plausibilidad y `PlausibilityFlag`; vectores `TRK-PLAUS-*` | FR-TRK-002 | 22 §2.2 | T-E2-02 |
+| T-E2-04 | Filtro de Kalman de velocidad constante y ZUPT; vectores `TRK-FILT-*` | FR-TRK-001, FR-TRK-003, NFR-QUAL-001 | 22 §2.3–§2.4 | T-E2-03 |
+| T-E2-05 | Odómetro con puente de huecos; vectores `TRK-ODO-*` | FR-TRK-004, NFR-QUAL-002 | 22 §2.5 | T-E2-04 |
+| T-E2-06 | Paradas online y `TrackEvent`; vectores `TRK-STOP-*` | FR-TRK-005, NFR-QUAL-003 | 22 §2.6 | T-E2-05 |
+| T-E2-07 | Paso de estimación en el algoritmo de aceptación (4-bis de `09` §4); SCN-014, SCN-015 | FR-TRK-001, FR-LOC-006 | 09 §4, 08 §6.4 | T-E2-06 |
+| T-E2-08 | Presupuesto por muestra medido (P-TRK) y modo degradado | NFR-PERF-005, NFR-PERF-006 | 18 §8.3, 22 §2.8 | T-E2-07 |
+| T-E2-09 | Webhooks `track.stop_*` sin coordenadas | FR-TRK-007, FR-WHK-005 | 07 §10.2 | T-E2-06 |
+
+**Criterios de salida:** SCN-014 y SCN-015 verdes en ambos subprotocolos;
+presupuesto por muestra **medido** y publicado en `docs/benchmarks/`; la
+aceptación no depende en ningún caso de la disponibilidad del motor.
+
+### E3 — Núcleo de dispositivo: muestreo, cola y predicción (3–4 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E3-01 | Muestreo adaptativo por zonas; vectores `SMP-INT-*` | FR-SMP-001 | 22 §3.2 | E1 |
+| T-E3-02 | Publicación por cambio significativo; vectores `SMP-PUB-*` | FR-SMP-002 | 22 §3.3 | T-E3-01 |
+| T-E3-03 | `SamplingPolicy` en `ServerHello` + acotamiento en cliente; vectores `SMP-CLAMP-*` | FR-SMP-003 | 22 §3.4, 08 §6.1 | T-E3-02 |
+| T-E3-04 | Cola sin conexión cifrada y entrega por lotes; vectores `SMP-OFF-*` | FR-SMP-006 | 22 §3.5, 12 §13.2 | T-E3-02 |
+| T-E3-05 | Predicción visual local; vectores `SMP-PRED-*`; rechazo de `PREDICTED`/`INTERPOLATED` publicados | FR-SMP-005 | 22 §3.6, 08 §7.6 | T-E3-02 |
+| T-E3-06 | Despertar por región del sistema operativo y geocercas asistidas en el dispositivo | FR-SMP-004, FR-GEO-007 | 22 §3.7 | T-E3-01 |
+| T-E3-07 | Ahorro del muestreo adaptativo y tiempo de reacción, **medidos** en dispositivo real | NFR-MOB-002, NFR-MOB-003, NFR-MOB-005 | 18 §9 | T-E3-02 |
+| T-E3-08 | SDK Dart: `geostream_core` (FFI) con implementación Dart equivalente, más bindings Kotlin y Swift | FR-BND-001, FR-BND-002, FR-BND-003 | 26 §3.1, 12 §3 | T-E3-04, T-E1-04 |
+
+**Criterios de salida:** SCN-026 verde; el cliente antiguo sin cambios; batería
+**medida** en dispositivo real, con informe.
+
+### E4 — Pools de disponibilidad (3–4 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E4-01 | `SessionMode.POOL`, `INV-POOL-1`, validación de capacidades | FR-POOL-001 | 05 §4.2.1 | E2 |
+| T-E4-02 | Índice espacial vivo con H3 y R-tree; borrado síncrono | FR-POOL-003 | 23 §2, ADR-0026 | T-E4-01 |
+| T-E4-03 | `nearby` y `rings` con prefiltrado de ETA | FR-POOL-004, FR-POOL-005 | 23 §3.1–§3.2 | T-E4-02 |
+| T-E4-04 | `density` con desplazamiento, cuantización de rumbo y retraso | FR-POOL-006 | 23 §3.3 | T-E4-02 |
+| T-E4-05 | `availability` y `attributes` con minimización en `MemberStatus` | FR-POOL-002 | 23 §1.1, 05 §8 | T-E4-01 |
+| T-E4-06 | SCN-016, SCN-017, SCN-018 verdes | INV-POOL-1, INV-PRS-2 | contracts/README §5.1.1 | T-E4-05 |
+| T-E4-07 | P-POOL medido con 50 000 conductores en línea | NFR-PERF-007 | 18 §8.3 | T-E4-06 |
+
+**Criterios de salida:** los tres escenarios verdes en los cuatro modos del
+runner; p99 de `nearby` **medido**; documentado que el índice exige afinidad de
+sesión (`16` §7).
+
+### E5 — Herramientas de movilidad y BYOK (3–4 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E5-01 | Estimador de ETA propio (distancia, modo, circunvalidad, matriz aprendida) | FR-MOB-001 | 23 §4 | E4 |
+| T-E5-02 | Asignación: Hungarian y min-cost-flow, con capacidad | FR-MOB-002, NFR-PERF-008 | 23 §5 | T-E5-01 |
+| T-E5-03 | Provider Gateway: configuración BYOK cifrada en reposo, manifiesto de términos, caché acotada | FR-MOB-003 | 13 §8, ADR-0028 | T-E5-01 |
+| T-E5-04 | Minimización estricta de la petición al proveedor (T-29) y prueba de que no filtra identificadores | FR-MOB-003, FR-PRV-004 | 13 §8.1, 10 T-29 | T-E5-03 |
+| T-E5-05 | `PROVIDER_UNAVAILABLE` sin degradación silenciosa; SCN-022, SCN-023 | FR-MOB-001 | 09 §6, 07 §9.10 | T-E5-03 |
+| T-E5-06 | Geocercas extendidas: `DWELL` y proximidad dinámica; prohibición en `POOL` | FR-GEO-005..007 | 14 §5.1 | T-E4-01 |
+| T-E5-07 | Grafo vial propio: herramienta `geostream graph build`, carga, R-tree, jerarquías de contracción | FR-LRN-004 | 23 §7, ADR-0032 | T-E5-01 |
+
+**Criterios de salida:** SCN-022 y SCN-023 verdes; los tres casos `*_DEG-*` de
+`mobility_tools.json` verdes; revisión legal de las obligaciones de ODbL cerrada
+antes de distribuir bases derivadas.
+
+### E6 — Historial opt-in y analítica k-anónima (4–5 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E6-01 | **Revisión de DPIA y textos de consentimiento por propósito** | FR-HIS-001 | 10 §9 | E0 |
+| T-E6-02 | Migración `0004_history.sql` con `location_points` particionada | FR-HIS-001 | 11 §2.0 | T-E6-01 |
+| T-E6-03 | Escritor de historial con triple llave, canal acotado y lotes | FR-HIS-001, NFR-PERF-009 | 24 §2 | T-E6-02 |
+| T-E6-04 | `INV-SHR-5`: `consent_purposes` solo del propio subject; SCN-020 | FR-HIS-001, FR-ANA-002 | 05 §7.2, 24 §1 | T-E6-03 |
+| T-E6-05 | Retención por eliminación de particiones y supresión del subject | FR-HIS-005 | 24 §5 | T-E6-03 |
+| T-E6-06 | Viajes, paradas y polilínea `gsp1` simplificada, y consulta de trazas | FR-HIS-003 | 24 §3–§4 | T-E6-03 |
+| T-E6-07 | Trabajo de agregación con supresión k-anónima en el trabajo, no en la consulta | FR-ANA-001, NFR-PRIV-003 | 24 §6 | T-E6-05 |
+| T-E6-08 | Mapas de calor, matriz origen-destino, perfil de movilidad y `replay_trace` | FR-ANA-002, FR-ANA-004, FR-HIS-007 | 24 §4 | T-E6-07 |
+| T-E6-09 | Exportaciones NDJSON/CSV con URL de TTL corto | FR-HIS-006 | 24 §4 | T-E6-06 |
+| T-E6-10 | SCN-019, SCN-021 verdes; P-HIST medido | NFR-PERF-009, NFR-PRIV-003 | 18 §8.3 | T-E6-08 |
+| T-E6-11 | **Revisión legal antes del release de E6** (T-E6-01 no se cierra sin ella) | NFR-PRIV-003 | 10 §9 | T-E6-10 |
+
+**Criterios de salida:** **T-E6-11 cerrada** antes de cualquier release de E6;
+`history_allowed` y `analytics_allowed` siguen en `false` hasta entonces; SCN-019
+y SCN-021 verdes.
+
+> La fase E6 **no se puede publicar** sin la revisión legal. El riesgo no es
+> técnico: es que el historial con consentimiento granular y el perfil de
+> movilidad cambian el marco aplicable, y eso no lo decide un agente.
+
+### E7 — Capa de mapa aprendida (3–4 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E7-01 | Perfiles de velocidad por celda H3 y franja, con supresión | FR-LRN-001 | 24 §3.1 | E6 |
+| T-E7-02 | Lugares aprendidos con DBSCAN (`eps_m`, `min_points`), derivados y anónimos | FR-LRN-002 | 24 §3.1 | T-E7-01 |
+| T-E7-03 | Lugares aprendidos y perfiles de velocidad: API de consulta y pruebas de k-anonimato | FR-LRN-001, FR-LRN-002, NFR-PRIV-003 | 07 §9.11 | T-E7-01, T-E7-02 |
+| T-E7-04 | Eventos de conducción estimados (aceleración y frenada) | FR-ANA-003 | 24 §3.2 | T-E7-01 |
+| T-E7-05 | Map-matching con retardo fijo sobre grafo; calibración **medida** de σ y β | FR-LRN-003, FR-HIS-004 | 24 §3.3 | T-E7-01, T-E5-07 |
+| T-E7-06 | Medición de la calibración (sin valores aflotados sin dato) | FR-HIS-004 | 20 §9.1 | T-E7-05 |
+| T-E7-07 | Routear sobre el grafo vial propio (`POST /v1/tools/routes` con `OWN_GRAPH`) | FR-LRN-004 | 07 §9.10 | T-E7-05 |
+
+**Criterios de salida:** toda constante de map-matching **medida** en una
+región real y registrada con su entorno en `docs/benchmarks/`; sin celdas por
+debajo de *k* en ninguna respuesta.
+
+### E8 — Dispositivos edge: tags BLE y LPWAN (4–5 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E8-01 | Migración `0005_edge.sql` (`tags`, `edge_reports`, `edge_lpwan_integrations`) sin columna `EIK` | FR-EDGE-001 | 11 §2.0 | E3 |
+| T-E8-02 | Aprovisionamiento y registro de tags; la `EIK` no sale del dispositivo | FR-EDGE-001 | 25 §2.2 | T-E8-01 |
+| T-E8-03 | Identificador efímero y rotación; estado `SEPARATED` | FR-EDGE-001 | 25 §2.3 | T-E8-02 |
+| T-E8-04 | Trama BLE, reporte del buscador cifrado de extremo a extremo y **relevo en el núcleo del cliente** | FR-EDGE-002, FR-EDGE-003 | 25 §2.4–§2.5 | T-E8-03 |
+| T-E8-05 | Almacenamiento opaco y consulta del dueño; SCN-024; no vinculable al buscador | FR-EDGE-002, NFR-PRIV-004 | 25 §2.6–§2.7 | T-E8-04 |
+| T-E8-06 | **Protección DULT completa antes de cualquier release de E8** | FR-EDGE-004 | 25 §3 | T-E8-04 |
+| T-E8-07 | Puente opcional de `25` §2.8, explícito y auditado | FR-EDGE-007 | 25 §2.8 | T-E8-05 |
+| T-E8-08 | Ingesta LPWAN con firma HMAC y decodificador por modelo | FR-EDGE-005 | 25 §4 | T-E8-01 |
+| T-E8-09 | Firmware de referencia del tag (COULD) y P-EDGE medido | FR-EDGE-006, FR-EDGE-008 | 25 §5, 18 §8.3 | T-E8-06 |
+
+**Criterios de salida:** SCN-025 verde; **T-E8-06 cerrada** antes de cualquier
+release de E8; el servidor nunca almacena la `EIK`, verificado por inspección del
+esquema y no por confianza.
+
+> E8 es la fase con más superficie regulatoria y de seguridad. Las protecciones
+> DULT son **obligatorias**, no un extra: sin ellas el producto no se libera.
+
+### E9 — Bindings multilingüe (4–6 semanas)
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-E9-01 | Empaquetado y publicación de los objetivos ya implementados en E3 (Kotlin, Swift, Dart) | FR-BND-001, FR-BND-002, FR-BND-003 | 26 §2–§3.2 | E7, E8 |
+| T-E9-02 | TypeScript (WASM), Go (cgo) y Ruby (FFI) | FR-BND-004, FR-BND-005, FR-BND-006 | 26 §2 | T-E9-01 |
+| T-E9-03 | Conformidad cruzada en los seis lenguajes con tolerancias declaradas | FR-BND-007, NFR-COMPAT-003 | 26 §4, DR-20261012-03 | T-E9-02 |
+| T-E9-04 | Fuzzing de la frontera FFI | NFR-SEC-005 | 18 §10.4 | T-E9-01 |
+| T-E9-05 | Documentación de onboarding por lenguaje y ejemplos ejecutables | NFR-DX-001 | 15 §6.1 | T-E9-03 |
+
+**Criterios de salida:** los seis lenguajes producen la misma salida en los
+vectores `SMP-*` dentro de la tolerancia declarada; ningún `panic` cruza la
+frontera; fuzzing sin hallazgos.
+
+### Criterios de salida de GA por versión
+
+| Versión | Alcance | Requisito de entrada |
+|---|---|---|
+| **v1.0 (M5)** | Línea base F0–F12, sin nada de la pista E | — |
+| **v1.1** | E1, E2, E3: trayectoria, muestreo adaptativo, cola cifrada | E0 cerrada; P-TRK y batería **medidos** |
+| **v1.2** | E4, E5, E7: pools, herramientas, capa de mapa | E1–E3 cerradas; revisión de ODbL |
+| **v1.3** | E6: historial y analítica | **T-E6-11 cerrada**; DPIA y textos aprobados |
+| **v1.4** | E8: dispositivos edge | **T-E8-06 cerrada**; revisión de seguridad |
+| **v1.5** | E9: bindings multilingües | E7 y E8 cerradas |
+
+Las versiones de la pista E **no invalidan** el número de versión del contrato:
+todo es aditivo bajo `/v1` y `gs.v1`. El minor del protocolo sube solo si alguna
+vez se necesita un campo que no se puede añadir de forma aditiva, y eso requiere
+un ADR (`08` §11).
+
+### Qué cambia en el resto del roadmap
+
+| Fase | Cambio | Motivo |
+|---|---|---|
+| **F5** | El SDK Flutter pasa a ser **un** binding más. La lógica de cliente pasa a `gs-client-core`. `T-F5-08` (`PublishPipeline`) se reduce a la integración de plataforma. | ADR-0022 sustituye a ADR-0012 |
+| **F13** | **Se elimina como fase.** Era «historial opt-in, cola offline acumulada cifrada, consulta de historial, calidad de trayectoria y map-matching». Todo eso es E3, E6 y E7, con contratos y ADR propios. | Evitar dos documentos normativos para lo mismo |
+| **F15** | Los SDKs nativos dejan de ser una pista: son E9, porque comparten el núcleo Rust. Se conservan aquí solo `FR-AUTH-009`, `FR-ADM-004` y `FR-INV-004`. | ADR-0022, ADR-0031 |
+| **F14 (MQTT)** | Sigue en pie, pero depende de E8: el mismo modelo de tags y reportes hace el MQTT mucho más barato. | ADR-0029 |
+| **F16 (E2EE)** | Sigue en pie y ahora es **parcialmente falso**: los tags Beacon ya tienen E2EE. La sesión y REST siguen sin ella. | `10` T-22 |
 
 Cada pista requiere, antes de empezar: un caso de uso real de al menos un integrador, un ADR aprobado y, cuando aplique, una revisión legal o de seguridad.
 
 | Fase | Pista | Requisitos | Criterio de entrada específico |
 |---|---|---|---|
-| F13 | Historial opt-in, cola offline acumulada cifrada, consulta de historial, calidad de trayectoria y map-matching (Valhalla) | FR-HIS-001, FR-HIS-002, FR-HIS-003, FR-HIS-004 | ADR de base legal, retención y costo; tabla particionada por día |
+| F13 | **Eliminada.** Sus cuatro elementos son ahora E3 (cola cifrada), E6 (historial), E2 (calidad de trayectoria) y E7 (map-matching), cada uno con su propio ADR y su propia fase. | — | — |
 | F14 | Puente MQTT para IoT | FR-IOT-001 | ADR de broker y autenticación de dispositivos |
-| F15 | SDKs nativos Kotlin/Swift (reevaluar núcleo Rust compartido), geocercas en dispositivo, API de administración, tokens firmados por el integrador, aprobación de solicitudes de unión | FR-NAT-001, FR-AUTH-009, FR-ADM-004, FR-INV-004 | Demanda medida; ADR por cada elemento |
-| F16 | Modo E2EE y transporte P2P WebRTC | FR-E2E-001, FR-P2P-001 | Revisión criptográfica externa; aceptación explícita de perder snapshots en claro y geocercas del servidor |
+| F15 | **Parcialmente eliminada.** Los SDKs nativos son ahora E9 y las geocercas en dispositivo son E3 (`FR-GEO-007`): comparten el núcleo Rust y no tienen sentido como pista aparte. Quedan aquí la API de administración, los tokens firmados por el integrador y la aprobación de solicitudes de unión. | FR-AUTH-009, FR-ADM-004, FR-INV-004 | Demanda medida; ADR por cada elemento |
+| F16 | Modo E2EE y transporte P2P WebRTC | FR-E2E-001, FR-P2P-001 | Revisión criptográfica externa; aceptación explícita de perder snapshots en claro y geocercas del servidor. Ojo: los tags Beacon de E8 **ya** tienen E2EE (`10` T-22), así que esta pista cubre sesión y REST, no el producto entero |

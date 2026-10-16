@@ -6,26 +6,30 @@
 
 | Campo | Valor |
 |---|---|
-| Fase activa | **F4 — Stream en nodo único** (M1) |
-| Último hito alcanzado | Cierre de Fase F3 (plano de control REST) — 2026-10-13 |
-| Paquete documental | v0.2.0 (2026-10-11) |
-| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. DR-20261012-02 (ubicación de las pruebas de invariantes de persistencia, `05` §11). DR-20261012-03 (resolución de tenant en `geostream admin`, `16` §3 vs `05` §3 INV-TEN-1) — implementado con la lectura de operador, pendiente de confirmación del propietario. DR-20261012-04 (`gs-observability` inalcanzable desde `geostream` según `tools/check_crate_deps`, frente a la frase de `04` §4.1 que lo permite) — bloquea cablear los logs JSON en `serve`. **DR-20261013-01** (cómo obtiene `geostream serve` su configuración: `04` §5 documenta `--config path.toml`, pero el diagrama de `04` §4.1 que codifica `tools/check_crate_deps` no permite que `geostream` dependa de `gs-config`) — bloquea montar `/v1` y `/v1/stream` en el binario |
+| Fase activa | **E0 — Documentación, contratos y ADR** de la pista E (motor de ubicación y movilidad) |
+| Último hito alcanzado | **M1 — Cierre de Fase F4** (stream en nodo único) — 2026-10-15 |
+| Paquete documental | v0.3.0 (2026-10-15), con la adopción del addendum A-02 |
+| Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. Ninguna otra: las cuatro DR del addendum A-02 están **aceptadas** con Opción 1 (2026-10-15) |
 | Disponibilidad de nombres | crates.io (`geostream`, `gs-protocol`, `geostream-sdk`, `geostream-server`) y pub.dev (`geostream`, `geostream_flutter`): todos disponibles (verificado 2026-10-12) |
 
 ## Tareas en curso
 
-| Tarea | Agente / persona | Desde | Crates/paquetes que posee | Notas |
-|---|---|---|---|---|
-| T-F4-12 — gs-devclient | Angel Nereira (con agente de código) | 2026-10-15 | `apps/gs-devclient` | `04` §4, demo M1 (dos publicadores y un lector) |
+Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
+
+| Tarea | Estado |
+|---|---|
+| T-E0-01 … T-E0-08 | completadas (Fase E0) |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
-| ID | Tarea | Resumen | Abierta |
-|---|---|---|---|
-| DR-20261012-02 | T-F2-02 | `05` §11 solo admite pruebas de invariantes en `gs-domain` o `gs-service`; las cuatro invariantes de persistencia (`INV-TEN-1`, `INV-SUB-1`, `INV-DEV-1`, `INV-DEV-2`) las hace cumplir el esquema y se prueban en `gs-store`. Pendiente de amendar `05` §11 | 2026-10-12 |
-| DR-20261012-03 | T-F2-03 | `16` §3 documenta `app disable --app`, `key create/list --app` y `key revoke --key` sin `--tenant`, mientras INV-TEN-1 exige filtrar por `tenant_id`. Implementado con resolución de tenant desde la entidad (operador) y mutaciones acotadas al tenant resuelto; pendiente de confirmación | 2026-10-12 |
-| DR-20261012-04 | T-F2-06 | El diagrama de `04` §4.1 (que codifica `tools/check_crate_deps`) impide que `geostream` dependa de `gs-observability`, pero la frase siguiente del mismo §4.1 dice que «puede ser usado por cualquier crate excepto `gs-domain`». Los logs JSON quedan implementados y probados en el crate, sin cablear en `serve` | 2026-10-12 |
-| DR-20261013-01 | T-F4-02 | `04` §5 documenta `geostream serve --config path.toml` y el montaje de `/v1/stream` según el rol activo, pero el diagrama de `04` §4.1 (codificado en `tools/check_crate_deps`) no permite que `geostream` dependa de `gs-config`, que es donde vive `ServerConfig`. Opciones: permitir `geostream` → `gs-config` (recomendada), mover la carga a `gs-api`, o parsear entorno ad hoc en `main.rs` duplicando `17` §2. Bloquea montar el router REST y el de stream en el binario | 2026-10-13 |
+Ninguno abierto. Las cuatro decisiones que bloqueaban F4 están resueltas.
+
+| ID | Tarea | Estado | Decisión | Fecha |
+|---|---|---|---|---|
+| DR-20261012-02 | T-F2-02 | **aceptada** | Opción 1: las invariantes que hace cumplir el esquema PostgreSQL basta con probarlas en `gs-store` contra una base real, además de la prueba de dominio. Enmendado en `05` §11 | 2026-10-15 |
+| DR-20261012-03 | T-F2-03 | **aceptada** | Opción 1: resolución de tenant desde la entidad, con mutaciones acotadas al tenant resuelto | 2026-10-15 |
+| DR-20261012-04 | T-F2-06 | **aceptada** | Opción 1: `geostream` puede depender de `gs-observability`; `tools/src/crate_deps.rs` actualizado | 2026-10-15 |
+| DR-20261013-01 | T-F4-02 | **aceptada** | Opción 1: `geostream` → `gs-config` permitido, y `serve` monta `/v1` y `/v1/stream` según los roles activos | 2026-10-15 |
 
 ## Fases
 
@@ -35,8 +39,18 @@
 | F1 | completada | 2026-10-12 | Vectores de dominio verdes (ids, location, invitation, stream), invariantes INV-* con 19 pruebas nombradas, gs-domain puro sin I/O, property tests con proptest, cobertura de líneas 90.76 % (>= 85 % NFR-MAINT-002) |
 | F2 | completada | 2026-10-12 | Tokens emitidos y verificados con los casos negativos de `06` §4.3 (paso 4 incluido: tenant/aplicación desactivados, época de subject y dispositivo desactivado), migraciones idempotentes, `/health/*` y `/metrics` operativos en el listener de administración, verificador de captura de logs activo, TLS de referencia en `deploy/` |
 | F3 | completada | 2026-10-13 | Todas las operaciones con `x-gs-phase` ≤ F3 implementadas y conformes: suite de conformidad OpenAPI con matriz de autorización REST completa y aislamiento de tenants (T-F3-11) |
-| F4 (M1) | en curso | | T-F4-01 (tickets), T-F4-02 (conexión: upgrade, subprotocolos, hello, máquina de estados, heartbeat y cierres), T-F4-03 (AuthzCache con `mver`, invalidación por bus y revalidación del principal), T-F4-04 (suscripción sin huecos, snapshot y `MemberStatus` minimizado), T-F4-05 (publicación con CAS de secuencia, snapshot, rate limit y acks), T-F4-06 (fan-out por bus con coalescencia y backpressure), T-F4-07 (eventos de control y revocación en vivo), T-F4-08 (presencia, gracia de desconexión y conexión única), T-F4-09 (AuthExpiring / AuthRefresh), T-F4-10 (snapshot REST) y T-F4-11 (runner de escenarios y suite e2e SCN-001..010 en `gs-testkit`) completadas con pruebas extremo a extremo contra listener real; resto de tareas pendientes |
-| F5 (M2) | pendiente | | |
+| **F4 (M1)** | **completada** | 2026-10-15 | T-F4-01 a T-F4-13 cerradas. SCN-001..010 verdes en ambos subprotocolos; plazo de revocación medido dentro de NFR-SEC-002; `gs-devclient` con demo M1 (dos publicadores y un lector); suite de privacidad T-F4-13 verde (3/3). Release `server-v0.1.0-alpha.1` |
+| F5 (M2) | pendiente | | El SDK Flutter pasa a ser uno más: la lógica de cliente vive en `gs-client-core` (ADR-0022 sustituye a ADR-0012) |
+| E0 | **completada** | 2026-10-15 | Adopción documental del addendum A-02: `docs/22`–`docs/26`, ADR-0021..0032, enmiendas de `docs/00`–`docs/21`, contrato ampliado, vectores `TRK/SMP/POOL/ETA/PRD/ASG/EDGE` y escenarios SCN-014..026. `geostream-tools all` con 9 comprobaciones en verde |
+| E1 | pendiente | | |
+| E2 | pendiente | | |
+| E3 | pendiente | | |
+| E4 | pendiente | | |
+| E5 | pendiente | | |
+| E6 | pendiente | | **Bloqueada por T-E6-11**: revisión legal y DPIA antes de cualquier release |
+| E7 | pendiente | | |
+| E8 | pendiente | | **Bloqueada por T-E8-06**: protección DULT completa antes de cualquier release |
+| E9 | pendiente | | |
 | F6 | pendiente | | |
 | F7 (M3) | pendiente | | |
 | F8 | pendiente | | |
@@ -48,6 +62,58 @@
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-15 — Defecto corregido — el close frame podía adelantar al `StreamError` que lo acompaña
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: corregido.
+- Requisitos: FR-AUTH-007 (`08` §6.6, §8).
+- Hallazgo: la prueba `test_fr_auth_007_auth_refresh_with_another_device_token_fails_permission_denied_and_closes_4403` fallaba de forma intermitente (≈ 1 de cada 4 ejecuciones). No era una prueba inestable: era un **defecto de producción**. El `select!` del escritor de la conexión (`crates/gs-stream/src/connection.rs`) no era `biased`, así que cuando la cola de control tenía un `StreamError` pendiente **y** el close frame ya estaba en su canal, Rust elegía la rama **al azar**. Si elegía la del cierre, el `StreamError` se quedaba sin escribir y el cliente recibía solo el 4403.
+- Por qué importa: `08` §6.6 promete `StreamError{PERMISSION_DENIED}` y después cierre 4403. Un cliente que recibe únicamente el 4403 no puede distinguir «te rechacé el token» de «la sesión expiró», que es justo lo que necesita para decidir si reintenta. La misma pérdida podía afectar a cualquier mensaje de control seguido de un cierre.
+- Corrección: `select!` pasa a `biased;` con la rama de control primera, y la rama de cierre **drena la cola de control antes de escribir el close frame**. Documentado en `08` §8 («el close frame va siempre después») y en `06` §8.3.
+- Verificación: ocho ejecuciones consecutivas de `cargo test -p gs-stream --test connection_test` en verde (50/50 cada una), frente a 1 fallo en 3 de 4 ejecuciones antes de la corrección. Además se corrigió la causa de la otra prueba intermitente del mismo fichero: `test_fr_auth_007_connection_closes_with_4401_if_auth_expires_without_refresh` competía con un TTL de token de **1 segundo**, de modo que bajo carga el cierre podía llegar antes de la respuesta al hello; ahora usa 3 s y `read_binary` explica con claridad que un cierre no es un frame inesperado.
+
+### 2026-10-15 — T-E0-08 — Verificador de fases, scopes y prefijos de ID (`geostream-tools`)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Requisitos: NFR-DOC-001.
+- Evidencia: nuevo módulo `tools/src/phases.rs` con subcomando `geostream-tools phases`, registrado también en `all`. Comprueba tres cosas que hasta ahora nadie miraba y que una revisión de PR no detecta: (1) todo `x-gs-phase` del OpenAPI corresponde a una fase declarada en `docs/21_ROADMAP.md` —un `E4` en una operación de E5 no rompe nada visible, solo rompe la regla de que una capacidad nueva no se activa por accidente—; (2) todo scope usado en `x-gs-auth` está documentado en `docs/06_IDENTITY_AUTH.md` §3.4 o §6, de modo que un scope que solo existe en el contrato se detecta; (3) los prefijos de ID de `docs/05_DOMAIN_MODEL.md` §2 coinciden con `contracts/test-vectors/ids.json` y con los `pattern:` del OpenAPI, con filtro estricto de la forma pública `<prefijo>_<32 hex>` que descarta `external_subject_id`, `installation_id` y `StreamTicket`. 6 pruebas unitarias propias (`tools/src/phases.rs`). Resultado actual: 80 operaciones, 27 fases, 19 scopes de aplicación, 10 de dispositivo y 15 esquemas de ID. Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace`, `cargo run -p geostream-tools -- all`: 9/9 OK.
+
+### 2026-10-15 — T-E0-07 — Hoja de ruta de la pista E (`docs/21_ROADMAP.md` v0.3.0)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Evidencia: `docs/21_ROADMAP.md` sube a v0.3.0 e incorpora la pista E0–E9 con mapa de fases, 60 tareas `T-E<n>-<NN>`, dependencias y criterios de salida por fase. Los criterios de GA por versión (v1.0 línea base → v1.5) dejan explícito qué versión depende de qué revisión: E6 no se publica sin la revisión legal (T-E6-11) y E8 no se publica sin la protección DULT (T-E8-06). Re-alcance del resto del roadmap: F13 se elimina (era E3 + E6 + E2 + E7), F15 pasa a ser parte de E9 y conserva solo `FR-AUTH-009`, `FR-ADM-004` y `FR-INV-004`, F16 queda parcialmente satisfecha porque los tags Beacon de E8 ya tienen E2EE. Regla de orden añadida a `docs/20` §4: la adopción documental y la implementación no se mezclan en un PR, y solo un PR toca `contracts/` a la vez. Comandos: `cargo run -p geostream-tools -- requirements` OK tras corregir los IDs de la tabla de tareas a los realmente declarados en `03`.
+
+### 2026-10-15 — T-E0-06 — Contrato de la pista E (único PR sobre `contracts/`)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Requisitos: NFR-COMPAT-003.
+- Evidencia: todos los cambios de `contracts/` en un único PR, como exige la regla de orden de `docs/20` §4. **Protobuf** (todo aditivo): `ErrorCode` gana `FEATURE_DISABLED` (26), `CONSENT_REQUIRED` (27) y `PROVIDER_UNAVAILABLE` (28); `LocationUpdate.estimate` (campo 6, opcional, solo `FILTERED` o `MAP_MATCHED`); `TrackEvent` en `ServerMessage.body` (campo 28); `GEOFENCE_TRANSITION_DWELL`; `SESSION_MODE_POOL` (valor 4); `SessionInfo.history_mode` (campo 8); `MemberStatus.availability`/`attributes`/`purposes` (campos 9–11); `ServerHello.sampling` (campo 11); `ClientHello.core_version` (campo 8); `Subscribe.replay_trace` (campo 3); enums `EstimateKind`, `PlausibilityFlag`, `HistoryMode`, `Availability`, `ConsentPurpose`, `ProviderPort` y `SourcePreference`. **Ningún campo existente se renumera ni se elimina.** **OpenAPI**: 22 operaciones nuevas, 63 esquemas y 5 tipos de webhook, todas con `x-gs-phase`. **Vectores**: cinco ficheros nuevos (`TRK-*`, `SMP-*`, `POOL-*`, `ETA-*`/`PRD`/`ASG`/`ANA-*`, `EDGE-*`), cuyos valores sintéticos son también los que el verificador de redacción busca en logs y métricas. **Escenarios**: SCN-014..SCN-026. Comandos: `(cd contracts/proto && buf lint)` OK, `buf breaking --against '.../main...'` **sin errores**, `python3 -c 'yaml.safe_load(...)'` OK (55 paths, 148 esquemas, 9 webhooks), comprobación propia de que no queda ningún `$ref` colgante, `cargo run -p geostream-tools -- error-catalog` OK (28 códigos), `cargo run -p geostream-tools -- auth-matrix` OK (70 operaciones).
+
+### 2026-10-15 — T-E0-05 — Enmiendas a `docs/02` y `docs/05`–`docs/20`
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Evidencia: diecinueve documentos normativos amendados y cinco revisados a fondo. `docs/17_CONFIGURATION.md` recibe **todos** los números nuevos —112 claves `GS_*` y 82 de política, entre ellas §2.10 (motor), §2.11 (constantes no configurables) y §4.1 (política del motor)— porque es el único sitio donde viven; `geostream-tools config-keys` falla si alguno se cita fuera de ahí. `docs/10` incorpora las amenazas T-23 a T-31 y fija la regla que más pesa: una celda H3, una `LocationEstimate`, una polilínea `gsp1`, un centroide de parada, una posición de densidad o un perfil de velocidad de un individuo **son coordenadas a efectos de redacción**. `docs/19` añade el DoD de la pista E (§1.1), la excepción única de `unsafe` en `gs-ffi` (§6.2.1) y las reglas de pureza de los crates (§6.2.2). `docs/20` añade el orden de fases, el mapa de lectura por crate nuevo y cinco reglas anti-alucinación específicas, la más importante: *no afirmar precisión ni comportamiento de un proveedor, un hardware o una API móvil sin medirlo*. Comandos: `cargo run -p geostream-tools -- all` 9/9 OK tras iterar.
+
+### 2026-10-15 — T-E0-01 a T-E0-04 — Visión, requisitos, ADR y documentos `22`–`26`
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completadas.
+- Evidencia: `docs/01_VISION_SCOPE.md` v0.3.0 (motor de dos mitades, G-11..G-15, NG-4/5/6 reescritos, UC-09..UC-13, P-E1..P-E10, criterios de GA). `docs/03_REQUIREMENTS.md` con ~70 requisitos nuevos, `FR-MAP-005` enmendado y `FR-NAT-001` retirado; `TRACEABILITY.md` regenerado con 216 IDs. ADR-0021..0032 aceptados, con ADR-0005, 0012, 0014 y 0016 marcados como sustituidos, ADR-0013 ampliado y `docs/adr/README.md` regenerado. `docs/22`–`docs/26` creados como documentos normativos con el detalle técnico. `docs/00_INDEX.md` v0.3.0 con las filas 22–26 del mapa y la precedencia ampliada. El addendum A-02 pasa a `docs/proposals/` como material de origen archivado, y `docs/20` §9.4 dice que si el código o `22`–`26` lo contradicen, **`22`–`26` mandan**. Comandos: `cargo run -p geostream-tools -- requirements` OK (216 IDs).
+
+### 2026-10-15 — DR-20261012-02, DR-20261012-03, DR-20261012-04 y DR-20261013-01 — Aprobadas
+- Autor/agente: Angel Nereira (propietario).
+- Resultado: las cuatro pasan de `docs/decisions/pending/` a `docs/decisions/accepted/` con **Opción 1** en todas y fecha 2026-10-15. Ninguna deja trabajo pendiente: las tres primeras ya estaban implementadas y solo faltaba la confirmación formal; la cuarta (DR-20261013-01) se resuelve con el cableado de `serve` ya hecho.
+
+### 2026-10-15 — T-F4-13 — Verificación de privacidad de extremo a extremo (`gs-testkit`)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Requisitos: FR-PRV-004, NFR-PRIV-001, NFR-PRIV-002, NFR-SEC-003.
+- Evidencia: `crates/gs-testkit/tests/privacy_test.rs` ejecuta SCN-001/002/003/006 en ambos subprotocolos con un suscriptor de `tracing` que captura todo, falla si aparece un valor prohibido, inspecciona las doce tablas reales del esquema PostgreSQL para confirmar que ninguna contiene coordenadas y comprueba el borrado **síncrono** del snapshot al detener, salir, revocar y cerrar. 3/3 en verde. Es la prueba que convierte `docs/10` §8.2 de una promesa en algo verificable.
+
+### 2026-10-15 — T-F4-12 — `gs-devclient` (con wiring de `serve`)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Requisitos: FR-PRV-004 (parcial), NFR-PRIV-002.
+- Evidencia: dos correcciones en un mismo commit porque las dos tasks estaban bloqueadas por las mismas decisiones. **Wiring de `serve`** (resuelve DR-20261013-01 y DR-20261012-04): `geostream serve` carga `ServerConfig::load_from_map`, inicializa `gs-observability` desde el entorno y monta `/v1` (rol api) y `/v1/stream` (rol stream); añade el rol opcional `analytics`; `tools/src/crate_deps.rs` acepta los crates de la pista E y fija las reglas de pureza y de no-dependencia servidor→cliente. **Demo M1**: corrige payloads (`MANY_TO_MANY` con `metadata.title`, `role: MEMBER`, objeto `capabilities`, `installation_id` UUID, `platform` en mayúsculas) y construye la URL del stream con `ws_base` en lugar de `stream_url`, que resolvía a `geostream.example.com`. **Redacción**: elimina las coordenadas de los logs; `publisher.rs` y `subscriber.rs` ya no registran la `url` con el ticket y las posiciones se muestran como `<redacted>`. Comandos: `cargo test -p geostream` 7/7, `cargo test -p gs-devclient` 3/3, `cargo test -p gs-testkit --test privacy_test` 3/3.
 
 ### 2026-10-15 — T-F4-11 — Runner de escenarios y suite e2e SCN-001..010 (`gs-testkit`)
 - Autor/agente: Angel Nereira (con agente de código).

@@ -163,8 +163,9 @@ Resultado en `docs/device-tests/AAAA-MM-DD-<release>.md`.
    - todo `operationId` de OpenAPI aparece en la matriz de `06` §8.2 con los mismos scopes;
    - enlaces relativos de Markdown válidos;
    - reglas de dependencias entre crates (`04` §4.1);
-   - prefijos de ID documentados (`05` §2) coherentes con el verificador de contratos;
-   - todo `x-gs-phase` de OpenAPI corresponde a una fase declarada en `21_ROADMAP.md`.
+   - **todo `x-gs-phase` de OpenAPI corresponde a una fase declarada en `21_ROADMAP.md`**;
+   - **todo scope usado en `x-gs-auth` está documentado en `06` §3.4 o §6**: un scope que solo existe en el contrato es una capacidad que nadie ha revisado;
+   - **los prefijos de ID de `05` §2 coinciden con `contracts/test-vectors/ids.json` y con los `pattern:` del OpenAPI**.
 4. **Pruebas**: unitarias, propiedades, vectores, integración (PG + Valkey/Redis), contrato, escenarios rápidos, **conformidad FFI**, **redacción**.
 5. **Seguridad**: `cargo deny check` (advisories, licencias, orígenes), `cargo audit`, búsqueda de secretos en el diff.
 6. **Build**: binario de release, imagen de contenedor con SBOM, (SDK) build Android de la app de ejemplo; desde F7 build iOS; desde E9, build de los artefactos de todos los objetivos de `26` §2.

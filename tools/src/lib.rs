@@ -8,4 +8,5 @@ pub mod crate_deps;
 pub mod error_catalog;
 pub mod json;
 pub mod markdown_links;
+pub mod phases;
 pub mod requirements;
