@@ -292,7 +292,10 @@ impl TestStreamClient {
 
     /// Receives the next incoming unsolicited ServerMessage from the inbox, or waits up to `timeout`.
     /// Returns `Ok(None)` if the timeout expires or the connection closes.
-    pub async fn next_message(&self, timeout: Duration) -> Result<Option<ServerMessage>, ClientError> {
+    pub async fn next_message(
+        &self,
+        timeout: Duration,
+    ) -> Result<Option<ServerMessage>, ClientError> {
         let deadline = tokio::time::Instant::now() + timeout;
 
         loop {
