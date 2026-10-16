@@ -77,7 +77,7 @@
     {
       "id": "PRD-REQ-001",
       "description": "La petición al proveedor lleva SOLO coordenadas, nunca identificadores",
-      "params": { "port": "route_matrix", "mode": "DRIVING" },
+      "params": { "port": "ROUTE_MATRIX", "mode": "DRIVING" },
       "expect": {
         "provider_receives": ["origin coords", "destination coords"],
         "provider_never_receives": [
@@ -126,7 +126,7 @@
     {
       "id": "PRD-TERMS-001",
       "description": "Sin `terms.checked_on` no se usa el proveedor",
-      "params": { "port": "route_matrix", "terms_checked_on": null },
+      "params": { "port": "ROUTE_MATRIX", "terms_checked_on": null },
       "expect": { "status": 422, "field": "terms_checked_on" }
     },
     {
@@ -140,7 +140,7 @@
     {
       "id": "PRD-DEG-001",
       "description": "source_preference = PROVIDER y el proveedor no responde: 503 con Retry-After",
-      "params": { "port": "route_matrix", "provider": "down", "source_preference": "PROVIDER" },
+      "params": { "port": "ROUTE_MATRIX", "provider": "down", "source_preference": "PROVIDER" },
       "expect": {
         "status": 503,
         "error_code": "PROVIDER_UNAVAILABLE",
@@ -152,7 +152,7 @@
     {
       "id": "PRD-DEG-002",
       "description": "source_preference ausente y el proveedor no responde: la estimación propia sí es aceptable",
-      "params": { "port": "route_matrix", "provider": "down" },
+      "params": { "port": "ROUTE_MATRIX", "provider": "down" },
       "expect": { "status": 200, "source": "ESTIMATED" },
       "note": "Quien no pidió proveedor no tiene derecho a quejarse de que usó la estimación."
     },

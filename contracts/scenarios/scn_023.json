@@ -14,7 +14,7 @@
       "actor": "backend",
       "op": "http",
       "method": "PUT",
-      "path": "/v1/providers/route_matrix",
+      "path": "/v1/providers/ROUTE_MATRIX",
       "body": {
         "url": "https://provider.test.local/v1",
         "credential": "clave-de-prueba-del-tenant",
@@ -66,7 +66,7 @@
       "actor": "backend",
       "op": "http",
       "method": "DELETE",
-      "path": "/v1/providers/route_matrix",
+      "path": "/v1/providers/ROUTE_MATRIX",
       "expect": { "status": 204 }
     },
     {

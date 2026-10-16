@@ -114,7 +114,7 @@ Labels permitidos: los listados. Prohibidos: cualquier ID de sesión, miembro, d
 | `gs_pool_queries_total` | counter | `kind` | `nearby`, `rings`, `density` |
 | `gs_pool_query_duration_seconds` | histogram | `kind` | |
 | `gs_pool_index_dropped_total` | counter | — | Actualizaciones perdidas por canal lleno |
-| `gs_provider_requests_total` | counter | `port`, `result` | `route_matrix`, `route`, `map_matching`, `geocoding` |
+| `gs_provider_requests_total` | counter | `port`, `result` | `ROUTE_MATRIX`, `ROUTE`, `MAP_MATCHING`, `GEOCODING` (minúsculas en la métrica: los valores de etiqueta Prometheus están en minúsculas) |
 | `gs_provider_duration_seconds` | histogram | `port` | |
 | `gs_provider_cache_total` | counter | `result` | `hit`, `miss`, `stale_policy` |
 | `gs_history_writer_depth` | gauge | — | Profundidad del canal del escritor |

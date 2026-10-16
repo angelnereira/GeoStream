@@ -61,6 +61,10 @@ Las versiones exactas de `buf`, `@redocly/cli` y `oasdiff` se fijan en F0 (`docs
 | Tiempo | `google.protobuf.Timestamp` | `"2026-10-11T21:04:05.123Z"` | igual |
 | Código de error | `ERROR_CODE_SESSION_FULL` | `"ERROR_CODE_SESSION_FULL"` | `"SESSION_FULL"` |
 
+**Convenciones de nombres de enum.** El Protobuf, ante un nombre en `CamelCase`, genera el prefijo en `SCREAMING_SNAKE_CASE`: `PlausibilityFlag` → `PLAUSIBILITY_FLAG_`, `ProviderPort` → `PROVIDER_PORT_`. La forma REST es siempre el valor **sin ese prefijo**, en `SCREAMING_SNAKE_CASE`: `PLAUSIBILITY_FLAG_EXCESSIVE_SPEED` → `EXCESSIVE_SPEED`, `PROVIDER_PORT_ROUTE_MATRIX` → `ROUTE_MATRIX`.
+
+`geostream-tools enums` verifica que el Protobuf, el OpenAPI y la tabla de `docs/` que documenta cada enum digan exactamente lo mismo. Es un control que existe porque una divergencia ahí no rompe la compilación: rompe la lectura, que es peor.
+
 ## 4. Formato de los vectores de prueba
 
 ### 4.1 `location_samples.json`

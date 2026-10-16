@@ -156,7 +156,7 @@ Los cuatro patrones que cambian con la pista E, con su requisito previo.
 4. Se consulta con `history:read` / `analytics:read`, que son scopes distintos y se conceden uno a uno.
 
 ### 6.1.3 BYOK de proveedor (E5)
-1. `PUT /v1/providers/route_matrix` con la credencial **del tenant** y `terms.checked_on`.
+1. `PUT /v1/providers/ROUTE_MATRIX` con la credencial **del tenant** y `terms.checked_on`.
 2. Se revisa `GET /v1/analytics/provider-usage` para controlar coste y volumen.
 3. Si el contrato con el proveedor no es aceptable, se usa el grafo vial propio (`GS_GRAPH_PATHS`) y **ninguna coordenada sale de la infraestructura del tenant**.
 

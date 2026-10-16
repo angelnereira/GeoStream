@@ -9,7 +9,7 @@ Este documento define el comportamiento del motor de trayectoria: la puerta de p
 
 **Límites duros (principios P-E2, P-E3 y P-E4):**
 
-1. El servidor **nunca** modifica, descarta ni sustituye una muestra `MEASURED` aceptada (`FR-LOC-006`). Todo lo derivado viaja en `LocationUpdate.estimate`, etiquetado con su `LocationKind`.
+1. El servidor **nunca** modifica, descarta ni sustituye una muestra `MEASURED` aceptada (`FR-LOC-006`). Todo lo derivado viaja en `LocationUpdate.estimate`, etiquetado con su `EstimateKind`.
 2. Los algoritmos del camino caliente son *online*: estado O(1) por entidad y cero asignaciones de memoria por muestra.
 3. Ningún algoritmo nuevo bloquea la aceptación ni el fan-out. El cómputo inline solo se permite dentro del presupuesto medido de §2.8; en caso contrario pasa a un canal acotado con descarte medido.
 
@@ -30,18 +30,21 @@ Este documento define el comportamiento del motor de trayectoria: la puerta de p
 
 Se evalúa **antes** del filtro sobre cada muestra aceptada. No rechaza ni modifica la muestra: produce banderas `PlausibilityFlag` y una puntuación `plausibility ∈ [0, 1]`.
 
-| Bandera | Condición (parámetros en `17`) |
-|---|---|
-| `IMPLAUSIBLE_SPEED` | `d − k·(σ_prev + σ_new) > v_max(motion)·dt`, donde `d` es la distancia a la estimación previa en el marco ENU local, `σ` son las incertidumbres de posición, `k` es `track_accuracy_sigma_factor` y `v_max(motion)` sale de `track_max_speed_mps` y de la tabla por actividad. |
-| `IMPLAUSIBLE_ACCELERATION` | Con velocidades reportadas: `abs(s_new − s_prev)/dt > track_max_accel_mps2` más el margen de `speed_accuracy_mps`. |
-| `LOW_ACCURACY` | `horizontal_accuracy_m > track_low_accuracy_m`. |
-| `MOCK_REPORTED` | `quality.is_mock == true`. |
-| `FROZEN_FIX` | Posición y precisión idénticas `track_frozen_fix_count` veces seguidas mientras avanza el tiempo y `motion ≠ STATIONARY`. |
-| `NETWORK_ONLY` | `quality.source == NETWORK`. |
-| `FILTER_OUTLIER` | La innovación del filtro supera la puerta de Mahalanobis (§2.3). |
-| `TIME_GAP` | `dt > track_reset_gap_s`. |
+Los nombres de esta tabla son **exactamente** los valores de `PlausibilityFlag` en `contracts/proto/geostream/v1/location.proto`, en su forma REST sin el prefijo `PLAUSIBILITY_FLAG_`. `geostream-tools phases` lo verifica: cambiar un nombre aquí sin cambiarlo en el contrato rompe la compilación.
 
-Puntuación: `plausibility = max(0, 1 − Σ penalización(bandera))`. Las penalizaciones son constantes de `17` con valores iniciales: velocidad 0,8; outlier 0,6; mock 0,5; fix congelado 0,5; aceleración 0,4; baja precisión 0,2; solo red 0,1.
+| Bandera | Condición (parámetros en `17`) | Penalización |
+|---|---|---|
+| `EXCESSIVE_SPEED` | `d − k·(σ_prev + σ_new) > v_max(motion)·dt`, donde `d` es la distancia a la estimación previa en el marco ENU local, `σ` son las incertidumbres de posición, `k` es `track_accuracy_sigma_factor` y `v_max(motion)` sale de `track_max_speed_mps` y de la tabla por actividad. | 0,8 |
+| `OUTLIER_JUMP` | La innovación del filtro supera la puerta de Mahalanobis (§2.3). | 0,6 |
+| `MOCK_FLAGGED` | `quality.is_mock == true`. | 0,5 |
+| `FROZEN_FIX` | Posición y precisión idénticas `track_frozen_fix_count` veces seguidas mientras avanza el tiempo y `motion ≠ STATIONARY`. | 0,5 |
+| `IMPLAUSIBLE_ACCEL` | Con velocidades reportadas: `abs(s_new − s_prev)/dt > track_max_accel_mps2` más el margen de `speed_accuracy_mps`. | 0,4 |
+| `LOW_ACCURACY` | `horizontal_accuracy_m > track_low_accuracy_m`. | 0,2 |
+| `NETWORK_ONLY` | `quality.source == NETWORK`. | 0,1 |
+
+Puntuación: `plausibility = max(0, 1 − Σ penalización(bandera))`. Las penalizaciones son constantes de `17` §2.11.
+
+**Lo que NO es una bandera.** Un hueco temporal (`dt > track_reset_gap_s`) **no** es una bandera de plausibilidad: es un motivo de reinicio, y por eso no está en `PlausibilityFlag`. Va en `TrackResetReason` (§2.3), junto con `OUTLIER_RUN` y `FRAME_REANCHOR`. La razón es de comportamiento interno y no viaja en el contrato; las banderas sí, porque el integrador las necesita para tomar su decisión (D-10).
 
 Las señales son **metadato de bajo nivel** (D-10): GeoStream no puntúa fraude, no lista ni sanciona. La decisión de negocio es del integrador.
 
@@ -51,11 +54,11 @@ Las señales son **metadato de bajo nivel** (D-10): GeoStream no puntúa fraude,
 - **Predicción:** `F(dt)` de velocidad constante; `Q(dt)` de aceleración ruido blanco discreta con `σ_a(motion)` de la tabla `GS_TRACK_PROCESS_NOISE_*`. Valores iniciales en m/s²: quieto 0,05; a pie 0,5; corriendo 1,0; bicicleta 1,0; automóvil 2,0; desconocido 1,5.
 - **Medición de posición:** `z = to_enu(sample)`, `R = (track_accuracy_sigma_factor · horizontal_accuracy_m)² · I₂`.
 - **Medición de velocidad** (opcional): se aplica cuando hay `speed_mps ≥ 1`, `heading_deg` y `speed_accuracy_mps`. `z_v = [s·sin θ, s·cos θ]`, con `R_v` derivado de las precisiones reportadas.
-- **Puerta:** `d² = yᵀ S⁻¹ y` (inversa 2×2 cerrada). Si `d² > track_outlier_chi2` (inicial 13,82, χ² de 2 g.l. al 99,9 %), no se actualiza y se marca `FILTER_OUTLIER`. Tras `track_outlier_reset_count` outliers consecutivos, el filtro se reinicia en la nueva medición: así se recupera de saltos reales como la salida de un túnel o de un estacionamiento subterráneo.
+- **Puerta:** `d² = yᵀ S⁻¹ y` (inversa 2×2 cerrada). Si `d² > track_outlier_chi2` (inicial 13,82, χ² de 2 g.l. al 99,9 %), no se actualiza y se marca `OUTLIER_JUMP`. Tras `track_outlier_reset_count` outliers consecutivos, el filtro se reinicia en la nueva medición: así se recupera de saltos reales como la salida de un túnel o de un estacionamiento subterráneo.
 - **Actualización:** forma de Joseph para estabilidad numérica.
-- **Reinicio:** con `dt > track_reset_gap_s` o al re-anclar el marco (el marco se re-ancla cuando la entidad se aleja más de `track_frame_reanchor_m` de su origen).
-- **Inicialización:** posición medida; velocidad reportada si existe, si no cero con `σ_v0 = 10 m/s`.
+- **Reinicio:** con `dt > track_reset_gap_s` o al re-anclar el marco (el marco se re-ancla cuando la entidad se aleja más de `track_frame_reanchor_m` de su origen). Motivos: `GAP`, `OUTLIER_RUN`, `FRAME_REANCHOR`, `FIRST_FIX`.
 - **Estados:** `INIT`, `TRACKING`, `COASTING` (sin medición válida, solo predicción) y `RESET`.
+- **Inicialización:** posición medida; velocidad reportada si existe, si no cero con `σ_v0 = 10 m/s`.
 
 Pseudocódigo ilustrativo: `docs/proposals/GeoStream_Addendum_A02_Motor_Ubicacion_Movilidad.md` Anexo A.1.
 
@@ -68,7 +71,7 @@ Cuando la entidad está quieta (`motion == STATIONARY` reportado, o el detector 
 Distancia recorrida por miembro dentro de una sesión, sin guardar la ruta.
 
 - **Método del ancla:** se mantiene un punto confirmado `A`. Cada estimación nueva `p` se compara con `A`. Si `fast_distance_m(A, p) ≥ track_odometer_noise_factor · position_std_m(p)`, se suma esa distancia y `A ← p`. Si no, no se suma nada; el movimiento lento acaba sumando porque `A` no se mueve hasta superar el umbral.
-- **Exclusiones:** estimaciones con `IMPLAUSIBLE_SPEED` o `FILTER_OUTLIER`, y estados distintos de `TRACKING`.
+- **Exclusiones:** estimaciones con `EXCESSIVE_SPEED` o `OUTLIER_JUMP`, y estados distintos de `TRACKING`.
 - **Huecos** (túneles, pérdida de señal): si `track_odometer_bridge_gaps = true` y la velocidad implícita del hueco es plausible, se suma la distancia recta y se contabiliza en `odometer_bridged_m`. Es una cota inferior honesta; la corrección por red vial llega con el map-matching (`24` §3).
 - **Reinicio:** al activar la compartición en la sesión, y de forma explícita con `POST /v1/sessions/{session_id}/members/{member_id}/odometer/reset` (aplicación, scope `members:write`).
 
@@ -138,7 +141,7 @@ Se publica la muestra `MEASURED` cuando se cumple **cualquiera** de estas condic
 
 Es la versión *online* de la simplificación de trayectorias: se envía menos sin perder la forma. Los giros se conservan por la regla 2. La muestra enviada es siempre `MEASURED` (P-E3): el filtro local decide **cuándo** enviar, no **qué**.
 
-**Puerta local de calidad.** El dispositivo descarta antes de enviar solo los casos inequívocos: precisión ≤ 0 o NaN (ya en `12` §11) e `IMPLAUSIBLE_SPEED` con incertidumbre previa baja. Cada descarte se cuenta en `invalid_samples_dropped`. Todo lo demás se envía y el servidor lo etiqueta.
+**Puerta local de calidad.** El dispositivo descarta antes de enviar solo los casos inequívocos: precisión ≤ 0 o NaN (ya en `12` §11) e `EXCESSIVE_SPEED` con incertidumbre previa baja. Cada descarte se cuenta en `invalid_samples_dropped`. Todo lo demás se envía y el servidor lo etiqueta.
 
 ### 3.4 Política de muestreo remota
 

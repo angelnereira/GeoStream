@@ -182,7 +182,7 @@ Ver `23_MOBILITY.md` §4–§7. Todos exigen `tools:use` y `tenant.tools_allowed
 
 Los tres aceptan `source_preference ∈ {PROVIDER, LEARNED, ESTIMATED}`. Con `PROVIDER` y el proveedor caído se devuelve `503 PROVIDER_UNAVAILABLE` con `Retry-After`; **nunca** se degrada silenciosamente a la estimación propia, porque el integrador pidió explícitamente el proveedor.
 
-`GET/PUT/DELETE /v1/providers/{port}` (scope `providers:manage`) configuran el Provider Gateway: `port ∈ {route_matrix, route, map_matching, geocoding}`, URL `https://`, credencial BYOK **del tenant** cifrada en reposo. El cuerpo de la petición **nunca** devuelve la credencial; `PUT` con la misma credencial la rota y emite auditoría `provider.rotated` (`23` §8).
+`GET/PUT/DELETE /v1/providers/{port}` (scope `providers:manage`) configuran el Provider Gateway: `port ∈ {ROUTE_MATRIX, ROUTE, MAP_MATCHING, GEOCODING}`, URL `https://`, credencial BYOK **del tenant** cifrada en reposo. El cuerpo de la petición **nunca** devuelve la credencial; `PUT` con la misma credencial la rota y emite auditoría `provider.rotated` (`23` §8).
 
 ### 9.11 Historial y analítica (E6/E7)
 Ver `24_HISTORY_ANALYTICS.md`. Todas exigen la política correspondiente del tenant; sin ella devuelven `403 FEATURE_DISABLED`.

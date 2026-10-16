@@ -9,6 +9,7 @@
 | Fase activa | **E0 — Documentación, contratos y ADR** de la pista E (motor de ubicación y movilidad) |
 | Último hito alcanzado | **M1 — Cierre de Fase F4** (stream en nodo único) — 2026-10-15 |
 | Paquete documental | v0.3.0 (2026-10-15), con la adopción del addendum A-02 |
+| Siguiente fase | **E1 — Núcleo Rust compartido** (`gs-geo`, `gs-client-core`, `gs-client-runtime`, `gs-ffi`), lista para empezar |
 | Decisiones pendientes | ADR-0019 (licencia) — no bloquea la implementación; bloquea publicar paquetes. Ninguna otra: las cuatro DR del addendum A-02 están **aceptadas** con Opción 1 (2026-10-15) |
 | Disponibilidad de nombres | crates.io (`geostream`, `gs-protocol`, `geostream-sdk`, `geostream-server`) y pub.dev (`geostream`, `geostream_flutter`): todos disponibles (verificado 2026-10-12) |
 
@@ -72,6 +73,14 @@ Formato de cada entrada (más reciente arriba):
 - Corrección: `select!` pasa a `biased;` con la rama de control primera, y la rama de cierre **drena la cola de control antes de escribir el close frame**. Documentado en `08` §8 («el close frame va siempre después») y en `06` §8.3.
 - Verificación: ocho ejecuciones consecutivas de `cargo test -p gs-stream --test connection_test` en verde (50/50 cada una), frente a 1 fallo en 3 de 4 ejecuciones antes de la corrección. Además se corrigió la causa de la otra prueba intermitente del mismo fichero: `test_fr_auth_007_connection_closes_with_4401_if_auth_expires_without_refresh` competía con un TTL de token de **1 segundo**, de modo que bajo carga el cierre podía llegar antes de la respuesta al hello; ahora usa 3 s y `read_binary` explica con claridad que un cierre no es un frame inesperado.
 
+### 2026-10-15 — T-E0-08 (ampliación) — Verificador de enums y corrección de `docs/22` §2.2
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Evidencia: al revisar `docs/22` §2.2 contra el contrato antes de abrir E1 se encontró una **contradicción real**: la tabla de banderas de plausibilidad usaba `IMPLAUSIBLE_SPEED`, `IMPLAUSIBLE_ACCELERATION`, `MOCK_REPORTED`, `FILTER_OUTLIER` y `TIME_GAP`, mientras que `location.proto` declara `EXCESSIVE_SPEED`, `IMPLAUSIBLE_ACCEL`, `MOCK_FLAGGED`, `OUTLIER_JUMP` y ninguna `TIME_GAP`. Cuatro documentos contra el contrato, y nada en CI lo detectaba.
+- Corrección: se alinea `docs/22` con el contrato (tres artefactos coincidían: proto, OpenAPI y vectores) y se documenta **por qué** `TIME_GAP` no es una bandera: un hueco temporal es un motivo de reinicio del filtro (`TrackResetReason`: `GAP`, `OUTLIER_RUN`, `FRAME_REANCHOR`, `FIRST_FIX`), no una señal de plausibilidad. La razón es de comportamiento interno y no viaja en el contrato; las banderas sí, porque el integrador las necesita (D-10). Se corrigen también las dos referencias residuales a `LocationKind` donde el contrato define un `EstimateKind` propio, y se tabulan las penalizaciones junto a cada bandera en lugar de en un párrafo aparte.
+- Causa raíz: **no existía ningún control de enums**. `geostream-tools` comprobaba códigos de error, scopes, fases, prefijos de ID, claves de configuración e IDs de requisito, pero nunca que un valor de enum documentado exista en el contrato. Añadido `tools/src/enums.rs` (subcomando `geostream-tools enums`, incluido en `all`, 12 pruebas unitarias), que verifica proto ↔ OpenAPI para los 8 enums con schema REST y docs → contrato para las tablas declaradas, en las dos direcciones: un nombre que no existe y un valor que nadie documentó son ambos fallos.
+- El verificador encontró un segundo defecto **en el momento de activarlo**: `ProviderPort` era `SCREAMING_SNAKE` en el proto y minúsculas en el OpenAPI, los vectores y los escenarios. Corregido en los cuatro sitios, y con ello se fija en `contracts/README.md` §3 la convención de nombres de enum, que antes solo estaba implícita.
+- Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (468 pruebas, 0 fallos), `cargo run -p geostream-tools -- all` (10/10 OK).
 ### 2026-10-15 — T-E0-08 — Verificador de fases, scopes y prefijos de ID (`geostream-tools`)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.

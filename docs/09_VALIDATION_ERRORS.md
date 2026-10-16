@@ -186,7 +186,7 @@ Los campos y tipos exactos están en OpenAPI. Reglas semánticas adicionales:
 | `Assignment.capacity` | ≥ 1 | 422 |
 | `Assignment.algorithm` | `hungarian` (capacity = 1) o `min_cost_flow` | 422 |
 | `Assignment.max_cost` | ≥ 0 | 422 |
-| `Provider.<port>` | `port` ∈ `{route_matrix, route, map_matching, geocoding}`; URL `https://`; clave no vacía y ≤ 4096 | 422 |
+| `Provider.<port>` | `port` ∈ `{ROUTE_MATRIX, ROUTE, MAP_MATCHING, GEOCODING}`; URL `https://`; clave no vacía y ≤ 4096 | 422 |
 | `IngestHistory.samples` | 1..=`max_samples_per_publish_http`; `captured_at` con antigüedad ≤ `history_backfill_max_age_s` | 422 |
 | `IngestHistory` (sesión) | sesión `ACTIVE` o cerrada hace < `history_backfill_grace_s`; `HISTORY ∈ consent_purposes` vigente | 403 `CONSENT_REQUIRED` / 409 |
 | `Trace.from`, `.to` | `from < to`; rango ≤ ventana máxima del tenant | 422 |

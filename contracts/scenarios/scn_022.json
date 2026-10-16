@@ -60,19 +60,19 @@
       "actor": "backend",
       "op": "http",
       "method": "PUT",
-      "path": "/v1/providers/route_matrix",
+      "path": "/v1/providers/ROUTE_MATRIX",
       "body": {
         "url": "https://provider.test.local/v1",
         "credential": "clave-de-prueba-del-tenant",
         "terms_checked_on": "2026-01-10"
       },
-      "expect": { "status": 200, "json": { "port": "route_matrix", "configured": true } }
+      "expect": { "status": 200, "json": { "port": "ROUTE_MATRIX", "configured": true } }
     },
     {
       "actor": "backend",
       "op": "http",
       "method": "GET",
-      "path": "/v1/providers/route_matrix",
+      "path": "/v1/providers/ROUTE_MATRIX",
       "expect": { "status": 200 },
       "assertions": [
         "el cuerpo NO contiene el valor de la credencial",
@@ -95,7 +95,7 @@
     {
       "actor": "backend",
       "op": "assert.provider_request",
-      "for_port": "route_matrix",
+      "for_port": "ROUTE_MATRIX",
       "expect": {
         "received_coordinates": true,
         "received_identifiers": false,

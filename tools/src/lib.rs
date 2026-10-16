@@ -5,6 +5,7 @@ pub mod auth_matrix;
 pub mod changelog;
 pub mod config_keys;
 pub mod crate_deps;
+pub mod enums;
 pub mod error_catalog;
 pub mod json;
 pub mod markdown_links;

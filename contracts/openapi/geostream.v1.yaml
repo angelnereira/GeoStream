@@ -3335,7 +3335,7 @@ components:
       enum: [AVAILABLE, BUSY, PAUSED]
     ProviderPort:
       type: string
-      enum: [route_matrix, route, map_matching, geocoding]
+      enum: [ROUTE_MATRIX, ROUTE, MAP_MATCHING, GEOCODING]
     SourcePreference:
       type: string
       enum: [PROVIDER, LEARNED, ESTIMATED]
