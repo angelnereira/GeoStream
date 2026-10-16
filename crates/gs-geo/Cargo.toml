@@ -1,6 +1,6 @@
 [package]
 name = "gs-geo"
-description = "Geofencing."
+description = "Pure geodesy: distances, bearings, local ENU frames and polyline simplification."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

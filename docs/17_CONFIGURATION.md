@@ -175,15 +175,31 @@ Este es el **único** lugar donde viven los valores por defecto y rangos. Los de
 
 ### 2.11 Constantes del motor (no configurables; fijadas por diseño)
 
+Estas constantes **no** se configuran por entorno ni por tenant: son del modelo
+geodésico o del algoritmo. Viven en `gs-geo` (geodesia) y en el motor que las usa.
+
+**Elipsoide y esfera son cosas distintas y tienen nombres distintos.** Confundirlas
+es la fuente clásica de un error del 0,3 % del que nadie sabe dónde sale.
+
+| Constante | Valor | Qué es | Dónde |
+|---|---|---|---|
+| `EARTH_MEAN_RADIUS_M` | 6 371 008.8 | Radio medio de la esfera equivalente (IUGG, Moritz 2000). Es el que usa la fórmula de haversine. | `gs-geo` |
+| `EARTH_SEMIMAJOR_AXIS_M` | 6 378 137.0 | Semieje mayor del elipsoide WGS84. | `gs-geo` |
+| `EARTH_FLATTENING` | 1 / 298,257 223 563 | Achatamiento del WGS84. | `gs-geo` |
+
+Las distancias **geodésicas** (Vincenty sobre el elipsoide) y las **esféricas**
+(haversine) difieren en hasta un 0,5 % según la latitud. `gs-geo` expone las dos y
+**dice cuál usó** (`DistanceMethod`), en vez de devolver un número sin origen. El
+odómetro y las paradas usan la esférica, que es más barata y suficiente a escala
+local; la calidad de trayectoria y el map-matching usan la geodésica.
+
 | Constante | Valor | Dónde |
 |---|---|---|
-| `EARTH_MEAN_RADIUS_M` (IUGG) | 6 371 008.8 | `gs-geo` (§6.1 del addendum) |
-| `EARTH_MEAN_RADIUS_M` (radio medio 6371 km, para haversine) | 6 371 000.0 | `gs-geo` |
 | Velocidad máxima por defecto de plausibilidad (sin `motion`) | 70.0 m/s | `22` §2.2 |
 | Tabla de penalizaciones de plausibilidad | velocidad 0,8 · outlier 0,6 · mock 0,5 · fix congelado 0,5 · aceleración 0,4 · baja precisión 0,2 · solo red 0,1 | `22` §2.2 |
 | Incertidumbre inicial de velocidad (`σ_v0`) | 10.0 m/s | `22` §2.3 |
-| Velocidades por modo del estimador de ETA | auto 6,9 m/s · moto 8,3 · bicicleta 4,2 · a pie 1,3 | `23` §4 |
-| `gs-geo` paso de simplificación online | Ventana = `offline_simplify_tolerance_m` | `22` §3.5 |
+| Velocidades por modo del estimador de ETA | auto 6,9 m/s · moto 8,3 m/s · bicicleta 4,2 m/s · a pie 1,3 m/s | `23` §4 |
+| Tolerancia de simplificación online | `offline_simplify_tolerance_m`, en **metros**, no en grados | `22` §3.5 |
 
 ## 3. Restricciones por entorno
 
