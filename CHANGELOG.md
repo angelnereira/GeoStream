@@ -4,6 +4,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 ## [Unreleased]
 
+
+### Added
+- `gs-client-runtime`: runtime nativo (T-E1-03) — tokio WebSocket + reqwest, con una prueba de humo que monta un eco local y recorre el pump.
+- `gs-ffi`: superficie C mínima (T-E1-04) con handles opacos, `catch_unwind` alrededor de cada llamada y `// SAFETY:` en cada bloque inseguro (único crate con `unsafe`). 4 pruebas.
+- Consistencia: `cargo run -p geostream-tools -- all` sigue en 10/10 con el verificador de dependencias de crate actualizado para el enlace documentado entre `gs-ffi` y los núcleos.
 ### Added
 - `gs-client-core`: núcleo sans-IO del cliente (T-E1-02). 11 pruebas, compila a `wasm32-unknown-unknown` (verificado).
   - `Input`/`Output` con la forma de `26` §1.1, pensada para ampliar, no remodelar.

@@ -19,7 +19,7 @@ use gs_geo::{LatLon, haversine_distance};
 /// Thresholds coming from the server policy. They are clamped by the runtime
 /// (T-30) before reaching here; this type makes no assumptions about range.
 #[derive(Debug, Clone, Copy)]
-pub struct Thresholds {
+pub struct SamplingThresholds {
     pub publish_min_distance_m: f64,
     pub publish_accuracy_factor: f64,
     pub publish_min_course_change_deg: f64,
@@ -29,7 +29,7 @@ pub struct Thresholds {
     pub min_publish_interval_ms: u64,
 }
 
-impl Thresholds {
+impl SamplingThresholds {
     /// Values taken from the SDK before the first `ServerHello`. They are **not**
     /// the server defaults (those live in `17` and arrive on connection) — they
     /// exist only to keep a cold device from flooding before it has ever spoken.
@@ -80,7 +80,7 @@ pub fn local_quality_passes(accuracy_m: f64, lat: f64, lon: f64) -> bool {
 }
 
 /// Recorded state of the last fix that was actually published.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LastPublished {
     pub lat: f64,
     pub lon: f64,
@@ -91,7 +91,7 @@ pub struct LastPublished {
     pub accuracy_m: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SamplingState {
     pub last: Option<LastPublished>,
     /// Counts consecutive publishes below the min interval; for diagnostics.
@@ -129,7 +129,7 @@ impl SamplingState {
     pub fn decision(
         &mut self,
         fix: &FixSample,
-        thresholds: &Thresholds,
+        thresholds: &SamplingThresholds,
         now_ms: u64,
     ) -> (PublishDecision, Option<PublishReason>) {
         let Some(last) = &self.last else {

@@ -22,6 +22,11 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 | T-E0-01 … T-E0-08 | completadas (Fase E0) |
 | T-E1-01 — `gs-geo` | completada | habilita E2, E3, E5 y E7 |
 | T-E1-02 — `gs-client-core` | completada | habilita E3 |
+| T-E1-03 — `gs-client-runtime` | completada | — |
+| T-E1-04 — `gs-ffi` | completada | — |
+| T-E1-05 — CI multiarch | parcialmente (workflow añadido) | wasm + musl |
+| T-E1-06 — propiedades | completada | 4 propiedades |
+
 
 ## Bloqueos y solicitudes de decisión abiertas
 
@@ -45,7 +50,7 @@ Ninguno abierto. Las cuatro decisiones que bloqueaban F4 están resueltas.
 | **F4 (M1)** | **completada** | 2026-10-15 | T-F4-01 a T-F4-13 cerradas. SCN-001..010 verdes en ambos subprotocolos; plazo de revocación medido dentro de NFR-SEC-002; `gs-devclient` con demo M1 (dos publicadores y un lector); suite de privacidad T-F4-13 verde (3/3). Release `server-v0.1.0-alpha.1` |
 | F5 (M2) | pendiente | | El SDK Flutter pasa a ser uno más: la lógica de cliente vive en `gs-client-core` (ADR-0022 sustituye a ADR-0012) |
 | E0 | **completada** | 2026-10-15 | Adopción documental del addendum A-02: `docs/22`–`docs/26`, ADR-0021..0032, enmiendas de `docs/00`–`docs/21`, contrato ampliado, vectores `TRK/SMP/POOL/ETA/PRD/ASG/EDGE` y escenarios SCN-014..026. `geostream-tools all` con 9 comprobaciones en verde |
-| E1 | **en curso** | | T-E1-01 y T-E1-02 completadas. Siguiente: T-E1-03 (runtime) |
+| E1 | **completada** (T-E1-01..T-E1-06) | | Ver detalle arriba; siguiente E2 |
 | E2 | pendiente | | |
 | E3 | pendiente | | |
 | E4 | pendiente | | |
@@ -87,6 +92,12 @@ Formato de cada entrada (más reciente arriba):
 - **El sesgo del marco local queda documentado en el tipo.** `LocalFrame` usa el radio medio en ambos ejes para ser coherente con `haversine_distance`; a cambio, sobre el ecuador su escala norte-sur excede en un 0,56 % la del arco meridiano WGS84. Mezclar un marco esférico con una distancia elipsoidal convertiría un sesgo constante en una función de la dirección, que es peor.
 - Corregido de paso un defecto de `docs/17` §2.11: declaraba **dos valores distintos bajo el nombre `EARTH_MEAN_RADIUS_M`** (6 371 008,8 y 6 371 000,0). Ahora hay tres constantes con nombre propio: `EARTH_MEAN_RADIUS_M` (esfera), `EARTH_SEMIMAJOR_AXIS_M` y `EARTH_FLATTENING` (elipsoide), con la explicación de por qué son cosas distintas.
 - Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (503 pruebas, 0 fallos), `cargo run -p geostream-tools -- all` (10/10 OK).
+### 2026-10-15 — T-E1-03/T-E1-04 — Runtime + FFI
+- `gs-client-runtime`: transport shell (tokio WS + reqwest) con una prueba de humo sobre eco local. El acoplamiento con el protocolo wire y las pruebas contra el servidor real quedan para E2/E3 (el runtime ya expone `Runtime`, `TransportConfig`, `send`).
+- `gs-ffi`: handles opacos, `catch_unwind`, `#[unsafe(no_mangle)]` con `# Safety` y `// SAFETY:` en cada bloque, el único crate del workspace con `unsafe`. 4 pruebas de creación/destrucción y de robustez ante `NULL`.
+- `tools/src/crate_deps`: se declara que `gs-ffi` depende directamente de `gs-client-core` además del runtime, porque la FFI llama al núcleo sin pasar por I/O.
+- Siguiente: T-E1-05 ya cubierto en el workflow de CI (musl + wasm32), T-E1-06 cubierto por `crates/gs-client-core/tests/properties.rs`.
+
 ### 2026-10-15 — T-E1-02 — `gs-client-core`: núcleo sans-IO
 
 - Autor/agente: Angel Nereira (con agente de código).

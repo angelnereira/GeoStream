@@ -64,6 +64,28 @@ jobs:
       - name: Ejecutar pruebas
         run: cargo test --workspace --all-features
 
+  stage5-multiarch:
+    name: "Etapa 5: Compilacion multiplataforma (FR-OPS-007, T-E1-05)"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - wasm32-unknown-unknown
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar toolchain
+        run: rustup show
+      - name: Instalar target
+        run: rustup target add ${{ matrix.target }}
+      - name: Compilar crates puros al target (wasm-safe)
+        if: matrix.target == 'wasm32-unknown-unknown'
+        run: cargo build -p gs-geo -p gs-client-core --target wasm32-unknown-unknown
+      - name: Compilar workspace al target (musl)
+        if: matrix.target != 'wasm32-unknown-unknown'
+        run: cargo build --workspace --target ${{ matrix.target }} --all-features --exclude gs-client-runtime --exclude gs-ffi
+
   stage5-security:
     name: "Etapa 5: Seguridad (cargo deny, cargo audit)"
     runs-on: ubuntu-latest

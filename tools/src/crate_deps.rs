@@ -91,7 +91,10 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
         "gs-client-runtime",
         Some(BTreeSet::from(["gs-client-core"])),
     );
-    allowed_internal.insert("gs-ffi", Some(BTreeSet::from(["gs-client-runtime"])));
+    allowed_internal.insert(
+        "gs-ffi",
+        Some(BTreeSet::from(["gs-client-core", "gs-client-runtime"])),
+    );
     allowed_internal.insert("gs-testkit", None);
     allowed_internal.insert("gs-devclient", None);
     allowed_internal.insert("gs-loadgen", None);

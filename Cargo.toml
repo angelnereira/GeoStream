@@ -16,6 +16,8 @@ gs-config = { path = "crates/gs-config" }
 gs-domain = { path = "crates/gs-domain" }
 gs-ephemeral = { path = "crates/gs-ephemeral" }
 gs-geo = { path = "crates/gs-geo" }
+gs-client-core = { path = "crates/gs-client-core" }
+gs-client-runtime = { path = "crates/gs-client-runtime" }
 gs-observability = { path = "crates/gs-observability" }
 gs-protocol = { path = "crates/gs-protocol" }
 gs-service = { path = "crates/gs-service" }

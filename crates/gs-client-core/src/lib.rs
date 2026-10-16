@@ -22,12 +22,6 @@
 #![allow(hidden_glob_reexports)]
 
 use crate::ports::*;
-#[allow(hidden_glob_reexports)]
-use crate::sampler::{
-    FixSample, SamplingState, Thresholds as SamplingThresholds, local_quality_passes,
-};
-#[allow(hidden_glob_reexports)]
-use crate::sequence::SequenceAllocator;
 
 mod clock;
 mod connection;
@@ -40,7 +34,9 @@ pub use crate::clock::*;
 pub use crate::connection::Connection;
 pub use crate::heading::*;
 pub use crate::ports::*;
-pub use crate::sampler::*;
+pub use crate::sampler::{
+    FixSample, LastPublished, PublishReason, SamplingState, SamplingThresholds,
+};
 pub use crate::sequence::*;
 
 /// The core.
@@ -234,7 +230,11 @@ impl ClientCore {
             }
             Input::LocationFix(fix) => {
                 // Local quality gate (`12` §11).
-                if !local_quality_passes(fix.horizontal_accuracy_m, fix.lat, fix.lon) {
+                if !crate::sampler::local_quality_passes(
+                    fix.horizontal_accuracy_m,
+                    fix.lat,
+                    fix.lon,
+                ) {
                     out.push(Output::Emit(ClientEvent::FixDropped(
                         DropReason::LowAccuracy,
                     )));

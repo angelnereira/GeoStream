@@ -1673,6 +1673,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gs-client-runtime"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "gs-client-core",
+ "reqwest",
+ "thiserror",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tracing",
+]
+
+[[package]]
 name = "gs-config"
 version = "0.0.0"
 dependencies = [
@@ -1738,6 +1751,15 @@ dependencies = [
  "redis",
  "thiserror",
  "time",
+ "tokio",
+]
+
+[[package]]
+name = "gs-ffi"
+version = "0.0.0"
+dependencies = [
+ "gs-client-core",
+ "gs-client-runtime",
  "tokio",
 ]
 
