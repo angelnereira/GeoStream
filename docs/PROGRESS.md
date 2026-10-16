@@ -20,7 +20,8 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 | Tarea | Estado |
 |---|---|
 | T-E0-01 … T-E0-08 | completadas (Fase E0) |
-| T-E1-01 — `gs-geo` | **completada**; habilita E2, E3, E5 y E7 |
+| T-E1-01 — `gs-geo` | completada | habilita E2, E3, E5 y E7 |
+| T-E1-02 — `gs-client-core` | completada | habilita E3 |
 
 ## Bloqueos y solicitudes de decisión abiertas
 
