@@ -28,6 +28,7 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
     let mut allowed_internal: BTreeMap<&str, Option<BTreeSet<&str>>> = BTreeMap::new();
     allowed_internal.insert("gs-domain", Some(BTreeSet::new()));
     allowed_internal.insert("gs-edge", Some(BTreeSet::new()));
+    allowed_internal.insert("gs-pools", Some(BTreeSet::from(["gs-domain", "gs-geo"])));
     allowed_internal.insert("gs-protocol", Some(BTreeSet::from(["gs-domain"])));
     allowed_internal.insert("gs-config", Some(BTreeSet::from(["gs-domain"])));
     allowed_internal.insert("gs-observability", Some(BTreeSet::from(["gs-domain"])));

@@ -1,0 +1,11 @@
+[package]
+name = "gs-pools"
+description = "Availability pools: live index and query kernels (E4)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gs-geo.workspace = true
+gs-domain.workspace = true

@@ -1776,6 +1776,14 @@ name = "gs-loadgen"
 version = "0.0.0"
 
 [[package]]
+name = "gs-mobility"
+version = "0.0.0"
+dependencies = [
+ "gs-domain",
+ "gs-geo",
+]
+
+[[package]]
 name = "gs-observability"
 version = "0.0.0"
 dependencies = [
@@ -1793,6 +1801,14 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "zeroize",
+]
+
+[[package]]
+name = "gs-pools"
+version = "0.0.0"
+dependencies = [
+ "gs-domain",
+ "gs-geo",
 ]
 
 [[package]]
