@@ -74,12 +74,10 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         println!("🏢 [2/5] Aprovisionando Tenant 'Logistics Corp' y Application...");
     }
     let run_id = uuid::Uuid::new_v4().to_string();
-    let tenant = gs_service::admin::create_tenant(
-        &server.pool,
-        &format!("Logistics Corp {}", &run_id[..6]),
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("Create tenant error: {e}"))?;
+    let tenant =
+        gs_service::admin::create_tenant(&server.pool, &format!("Logistics Corp {}", &run_id[..6]))
+            .await
+            .map_err(|e| anyhow::anyhow!("Create tenant error: {e}"))?;
 
     let app = gs_service::admin::create_application(
         &server.pool,
@@ -117,8 +115,10 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         .post(&session_url)
         .bearer_auth(&app_token)
         .json(&json!({
-            "title": "M1 Dispatch Center",
-            "mode": "DISPATCH"
+            "mode": "MANY_TO_MANY",
+            "metadata": {
+                "title": "M1 Dispatch Center"
+            }
         }))
         .send()
         .await
@@ -135,14 +135,12 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         .to_string();
 
     // 4. Provision members: Courier Alpha, Courier Beta, Live Dispatcher
-    let add_member = |ext_id: &str, role: &str, caps: &[&str]| {
+    let add_member = |ext_id: &str, can_publish: bool| {
         let s_id = session_id.clone();
         let a_tok = app_token.clone();
         let base = server.http_base.clone();
         let client = http_client.clone();
         let ext_id_owned = ext_id.to_string();
-        let role_owned = role.to_string();
-        let caps_owned: Vec<String> = caps.iter().map(|s| s.to_string()).collect();
 
         async move {
             let url = format!("{base}/v1/sessions/{s_id}/members");
@@ -151,8 +149,13 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
                 .bearer_auth(&a_tok)
                 .json(&json!({
                     "external_subject_id": ext_id_owned,
-                    "role": role_owned,
-                    "capabilities": caps_owned,
+                    "role": "MEMBER",
+                    "capabilities": {
+                        "read": true,
+                        "publish": can_publish,
+                        "invite": false,
+                        "manage": false
+                    },
                 }))
                 .send()
                 .await?;
@@ -166,22 +169,21 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         }
     };
 
-    let mem_alpha_id = add_member("courier-alpha", "CONTRIBUTOR", &["read", "publish"]).await?;
-    let mem_beta_id = add_member("courier-beta", "CONTRIBUTOR", &["read", "publish"]).await?;
-    let _mem_disp_id = add_member("dispatcher", "VIEWER", &["read"]).await?;
+    let mem_alpha_id = add_member("courier-alpha", true).await?;
+    let mem_beta_id = add_member("courier-beta", true).await?;
+    let _mem_disp_id = add_member("dispatcher", false).await?;
 
     // Mint device tokens
     let dev_scopes = Some(vec![
         "stream:connect".to_string(),
         "sharing:write".to_string(),
-        "locations:read".to_string(),
     ]);
 
     let token_alpha = server
         .mint_token(
             &app_token,
             "courier-alpha",
-            "inst-alpha",
+            "00000000-0000-4000-8000-000000000001",
             "ANDROID",
             dev_scopes.clone(),
             Some(3600),
@@ -193,7 +195,7 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         .mint_token(
             &app_token,
             "courier-beta",
-            "inst-beta",
+            "00000000-0000-4000-8000-000000000002",
             "IOS",
             dev_scopes.clone(),
             Some(3600),
@@ -205,9 +207,9 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         .mint_token(
             &app_token,
             "dispatcher",
-            "inst-dispatcher",
+            "00000000-0000-4000-8000-000000000003",
             "WEB",
-            Some(vec!["stream:connect".to_string(), "locations:read".to_string()]),
+            Some(vec!["stream:connect".to_string()]),
             Some(3600),
         )
         .await
@@ -228,7 +230,8 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
 
     // Connect Dispatcher (Subscriber)
     let ticket_disp = request_stream_ticket(&server.http_base, &token_disp).await?;
-    let sub_client = TestStreamClient::connect(&ticket_disp.stream_url, config.subprotocol).await?;
+    let disp_ws_url = format!("{}/v1/stream?ticket={}", server.ws_base, ticket_disp.ticket);
+    let sub_client = TestStreamClient::connect(&disp_ws_url, config.subprotocol).await?;
     let h_id = sub_client.next_id().await;
     sub_client
         .send_with_reply(
@@ -258,19 +261,23 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         )
         .await?;
 
-    if !config.quiet {
-        if let Some(ServerBody::SubscribeAck(ack)) = sub_ack.body {
-            println!(
-                "   ✅ Lector suscrito a sesión '{}' ({} miembros activos)",
-                session_id,
-                ack.members.len()
-            );
-        }
+    if !config.quiet
+        && let Some(ServerBody::SubscribeAck(ack)) = sub_ack.body
+    {
+        println!(
+            "   ✅ Lector suscrito a sesión '{}' ({} miembros activos)",
+            session_id,
+            ack.members.len()
+        );
     }
 
     // Connect Publisher Alpha
     let ticket_alpha = request_stream_ticket(&server.http_base, &token_alpha).await?;
-    let pub_alpha = TestStreamClient::connect(&ticket_alpha.stream_url, config.subprotocol).await?;
+    let alpha_ws_url = format!(
+        "{}/v1/stream?ticket={}",
+        server.ws_base, ticket_alpha.ticket
+    );
+    let pub_alpha = TestStreamClient::connect(&alpha_ws_url, config.subprotocol).await?;
     let h_id = pub_alpha.next_id().await;
     pub_alpha
         .send_with_reply(
@@ -290,7 +297,8 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
 
     // Connect Publisher Beta
     let ticket_beta = request_stream_ticket(&server.http_base, &token_beta).await?;
-    let pub_beta = TestStreamClient::connect(&ticket_beta.stream_url, config.subprotocol).await?;
+    let beta_ws_url = format!("{}/v1/stream?ticket={}", server.ws_base, ticket_beta.ticket);
+    let pub_beta = TestStreamClient::connect(&beta_ws_url, config.subprotocol).await?;
     let h_id = pub_beta.next_id().await;
     pub_beta
         .send_with_reply(
@@ -309,7 +317,10 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         .await?;
 
     if !config.quiet {
-        println!("🚚 [5/5] Transmitiendo coordenadas en tiempo real durante {}s...", config.duration_secs);
+        println!(
+            "🚚 [5/5] Transmitiendo coordenadas en tiempo real durante {}s...",
+            config.duration_secs
+        );
     }
 
     let running = Arc::new(AtomicBool::new(true));
@@ -323,15 +334,10 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
     let s_alpha = Arc::clone(&alpha_sent);
     let sid_alpha = session_id.clone();
     let alpha_task = tokio::spawn(async move {
-        let mut traj = TrajectoryGenerator::new(
-            TrajectoryKind::Circle,
-            -12.0464,
-            -77.0428,
-            12.0,
-            500,
-        )
-        .with_radius(350.0)
-        .with_motion(MotionActivity::Automotive);
+        let mut traj =
+            TrajectoryGenerator::new(TrajectoryKind::Circle, -12.0464, -77.0428, 12.0, 500)
+                .with_radius(350.0)
+                .with_motion(MotionActivity::Automotive);
 
         while r_alpha.load(Ordering::Relaxed) {
             let sample = traj.next_sample();
@@ -346,10 +352,9 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
                     Duration::from_secs(3),
                 )
                 .await
+                && let Some(ServerBody::PublishAck(_)) = reply.body
             {
-                if let Some(ServerBody::PublishAck(_)) = reply.body {
-                    s_alpha.fetch_add(1, Ordering::Relaxed);
-                }
+                s_alpha.fetch_add(1, Ordering::Relaxed);
             }
             sleep(Duration::from_millis(500)).await;
         }
@@ -361,14 +366,9 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
     let s_beta = Arc::clone(&beta_sent);
     let sid_beta = session_id.clone();
     let beta_task = tokio::spawn(async move {
-        let mut traj = TrajectoryGenerator::new(
-            TrajectoryKind::Sine,
-            -12.0400,
-            -77.0400,
-            15.0,
-            500,
-        )
-        .with_motion(MotionActivity::Automotive);
+        let mut traj =
+            TrajectoryGenerator::new(TrajectoryKind::Sine, -12.0400, -77.0400, 15.0, 500)
+                .with_motion(MotionActivity::Automotive);
 
         while r_beta.load(Ordering::Relaxed) {
             let sample = traj.next_sample();
@@ -383,10 +383,9 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
                     Duration::from_secs(3),
                 )
                 .await
+                && let Some(ServerBody::PublishAck(_)) = reply.body
             {
-                if let Some(ServerBody::PublishAck(_)) = reply.body {
-                    s_beta.fetch_add(1, Ordering::Relaxed);
-                }
+                s_beta.fetch_add(1, Ordering::Relaxed);
             }
             sleep(Duration::from_millis(500)).await;
         }
@@ -403,32 +402,30 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
 
     let reader_task = tokio::spawn(async move {
         while r_disp.load(Ordering::Relaxed) {
-            if let Ok(Some(msg)) = sub_client.next_message(Duration::from_millis(300)).await {
-                if let Some(ServerBody::LocationUpdate(update)) = msg.body {
-                    d_rec.fetch_add(1, Ordering::Relaxed);
-                    p_seen.lock().await.insert(update.member_id.clone());
+            if let Ok(Some(msg)) = sub_client.next_message(Duration::from_millis(300)).await
+                && let Some(ServerBody::LocationUpdate(update)) = msg.body
+            {
+                d_rec.fetch_add(1, Ordering::Relaxed);
+                p_seen.lock().await.insert(update.member_id.clone());
 
-                    if !is_quiet {
-                        let sample = update.sample.as_ref();
-                        let pos = sample.and_then(|s| s.position.as_ref());
-                        let seq = sample.map(|s| s.sequence).unwrap_or(0);
-                        let lat = pos.map(|p| p.latitude).unwrap_or(0.0);
-                        let lon = pos.map(|p| p.longitude).unwrap_or(0.0);
-                        let spd = pos.and_then(|p| p.speed_mps).unwrap_or(0.0);
+                if !is_quiet {
+                    let sample = update.sample.as_ref();
+                    let pos = sample.and_then(|s| s.position.as_ref());
+                    let seq = sample.map(|s| s.sequence).unwrap_or(0);
+                    let spd = pos.and_then(|p| p.speed_mps).unwrap_or(0.0);
 
-                        let courier_tag = if update.member_id == alpha_id_str {
-                            "🔵 Courier Alpha (Van)"
-                        } else if update.member_id == beta_id_str {
-                            "🟢 Courier Beta  (Moto)"
-                        } else {
-                            "⚪ Unknown Courier"
-                        };
+                    let courier_tag = if update.member_id == alpha_id_str {
+                        "🔵 Courier Alpha (Van)"
+                    } else if update.member_id == beta_id_str {
+                        "🟢 Courier Beta  (Moto)"
+                    } else {
+                        "⚪ Unknown Courier"
+                    };
 
-                        println!(
-                            "   [DISPATCHER] 📍 {courier_tag:<25} | Seq #{:<3} | Lat: {:>10.6}, Lon: {:>11.6} | Spd: {:>4.1} m/s",
-                            seq, lat, lon, spd
-                        );
-                    }
+                    println!(
+                        "   [DISPATCHER] 📍 {courier_tag:<25} | Seq #{:<3} | Position: <redacted> | Spd: {:>4.1} m/s",
+                        seq, spd
+                    );
                 }
             }
         }
@@ -451,10 +448,22 @@ pub async fn run_demo(config: DemoConfig) -> Result<DemoStats> {
         println!("📊 ===========================================================");
         println!("   Resumen y Estadísticas del Demo M1");
         println!("===========================================================");
-        println!("   📦 Puntos publicados por Courier Alpha: {:>4}", final_alpha);
-        println!("   🛵 Puntos publicados por Courier Beta:  {:>4}", final_beta);
-        println!("   📡 Puntos recibidos por el Dispatcher:  {:>4}", final_disp);
-        println!("   👥 Participantes detectados en stream:  {:>4}", final_seen.len());
+        println!(
+            "   📦 Puntos publicados por Courier Alpha: {:>4}",
+            final_alpha
+        );
+        println!(
+            "   🛵 Puntos publicados por Courier Beta:  {:>4}",
+            final_beta
+        );
+        println!(
+            "   📡 Puntos recibidos por el Dispatcher:  {:>4}",
+            final_disp
+        );
+        println!(
+            "   👥 Participantes detectados en stream:  {:>4}",
+            final_seen.len()
+        );
 
         let both_observed = final_seen.contains(&mem_alpha_id) && final_seen.contains(&mem_beta_id);
         if both_observed && final_alpha > 0 && final_beta > 0 && final_disp > 0 {

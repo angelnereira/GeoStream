@@ -1,13 +1,13 @@
 //! Stream subscriber logic for gs-devclient.
 #![forbid(unsafe_code)]
 
-use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use gs_domain::Subprotocol;
 use gs_protocol::client_message::Body as ClientBody;
 use gs_protocol::server_message::Body as ServerBody;
 use gs_protocol::{ClientHello, Subscribe};
 use gs_testkit::client::TestStreamClient;
+use std::time::Duration;
 
 pub struct SubscriberConfig {
     pub ws_url: String,
@@ -19,7 +19,6 @@ pub struct SubscriberConfig {
 
 pub async fn run_subscriber(config: SubscriberConfig) -> Result<()> {
     tracing::info!(
-        url = %config.ws_url,
         session = %config.session_id,
         subprotocol = config.subprotocol.as_str(),
         "Connecting subscriber..."
@@ -143,13 +142,7 @@ pub async fn run_subscriber(config: SubscriberConfig) -> Result<()> {
 
                         println!(
                             "[SUB #{:<3}] 📍 Member: {:<12} | Seq #{:<4} | Lat: {:>10.6}, Lon: {:>11.6} | Spd: {:>4.1} m/s | Hdg: {:>5.1}°",
-                            received_count,
-                            update.member_id,
-                            seq,
-                            lat,
-                            lon,
-                            spd,
-                            hdg
+                            received_count, update.member_id, seq, lat, lon, spd, hdg
                         );
                     }
                 }

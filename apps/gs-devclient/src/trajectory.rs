@@ -1,11 +1,11 @@
 //! Synthetic trajectory generator for development and testing.
 #![forbid(unsafe_code)]
 
-use std::f64::consts::PI;
 use gs_protocol::pbjson_types::Timestamp;
 use gs_protocol::{
     LocationKind, LocationQuality, LocationSample, LocationSource, MotionActivity, Position,
 };
+use std::f64::consts::PI;
 
 /// Type of synthetic trajectory to generate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

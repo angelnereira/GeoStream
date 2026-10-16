@@ -1,13 +1,13 @@
 //! Stream publisher logic for gs-devclient.
 #![forbid(unsafe_code)]
 
-use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use gs_domain::Subprotocol;
 use gs_protocol::client_message::Body as ClientBody;
 use gs_protocol::server_message::Body as ServerBody;
 use gs_protocol::{ClientHello, PublishLocation};
 use gs_testkit::client::TestStreamClient;
+use std::time::Duration;
 
 use crate::trajectory::TrajectoryGenerator;
 
@@ -25,7 +25,6 @@ pub async fn run_publisher(
     mut trajectory: TrajectoryGenerator,
 ) -> Result<()> {
     tracing::info!(
-        url = %config.ws_url,
         session = %config.session_id,
         subprotocol = config.subprotocol.as_str(),
         interval_ms = config.interval_ms,
@@ -127,11 +126,7 @@ pub async fn run_publisher(
 
                     println!(
                         "[PUB] Seq #{:<4} | Lat: {:>10.6}, Lon: {:>11.6} | Spd: {:>4.1} m/s | Hdg: {:>5.1}° | Results: [{res_str}]",
-                        first_seq,
-                        lat,
-                        lon,
-                        spd,
-                        hdg
+                        first_seq, lat, lon, spd, hdg
                     );
                     sent_count += 1;
                 }
@@ -139,7 +134,11 @@ pub async fn run_publisher(
                     eprintln!("⚠️ Server error on publish: {err:?}");
                     if err.code == 6 {
                         // Rate limited
-                        let retry_ms = if err.retry_after_ms > 0 { err.retry_after_ms } else { 1000 };
+                        let retry_ms = if err.retry_after_ms > 0 {
+                            err.retry_after_ms
+                        } else {
+                            1000
+                        };
                         tokio::time::sleep(Duration::from_millis(retry_ms as u64)).await;
                     }
                 }

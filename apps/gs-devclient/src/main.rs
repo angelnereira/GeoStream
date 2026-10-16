@@ -1,7 +1,6 @@
 //! Development CLI: connect, subscribe and publish synthetic trajectories.
 #![forbid(unsafe_code)]
 
-use std::str::FromStr;
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use gs_devclient::publisher::{PublisherConfig, run_publisher};
@@ -9,6 +8,7 @@ use gs_devclient::subscriber::{SubscriberConfig, run_subscriber};
 use gs_devclient::trajectory::{TrajectoryGenerator, TrajectoryKind};
 use gs_devclient::{demo, rest};
 use gs_domain::Subprotocol;
+use std::str::FromStr;
 
 #[derive(Parser, Debug)]
 #[command(

@@ -8,14 +8,9 @@ use gs_domain::Subprotocol;
 #[test]
 fn test_trajectory_generator_shapes() {
     // 1. Circle
-    let mut circle_gen = TrajectoryGenerator::new(
-        TrajectoryKind::Circle,
-        -12.0464,
-        -77.0428,
-        15.0,
-        500,
-    )
-    .with_radius(250.0);
+    let mut circle_gen =
+        TrajectoryGenerator::new(TrajectoryKind::Circle, -12.0464, -77.0428, 15.0, 500)
+            .with_radius(250.0);
 
     let mut prev_seq = 0;
     for _ in 0..10 {
@@ -32,13 +27,8 @@ fn test_trajectory_generator_shapes() {
     }
 
     // 2. Linear
-    let mut linear_gen = TrajectoryGenerator::new(
-        TrajectoryKind::Linear,
-        40.7128,
-        -74.0060,
-        20.0,
-        1000,
-    );
+    let mut linear_gen =
+        TrajectoryGenerator::new(TrajectoryKind::Linear, 40.7128, -74.0060, 20.0, 1000);
     let s1 = linear_gen.next_sample();
     let s2 = linear_gen.next_sample();
     let pos1 = s1.position.unwrap();
@@ -47,13 +37,7 @@ fn test_trajectory_generator_shapes() {
     assert!(pos2.longitude > pos1.longitude);
 
     // 3. Sine
-    let mut sine_gen = TrajectoryGenerator::new(
-        TrajectoryKind::Sine,
-        51.5074,
-        -0.1278,
-        10.0,
-        1000,
-    );
+    let mut sine_gen = TrajectoryGenerator::new(TrajectoryKind::Sine, 51.5074, -0.1278, 10.0, 1000);
     let mut sine_samples = Vec::new();
     for _ in 0..5 {
         sine_samples.push(sine_gen.next_sample());
