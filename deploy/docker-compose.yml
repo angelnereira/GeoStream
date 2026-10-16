@@ -1,0 +1,65 @@
+# GeoStream — stack completa orquestada: Postgres + Valkey + server
+# Levantar: cd deploy && docker compose up -d --build
+# Readiness:  curl http://127.0.0.1:8080/readyz
+
+name: geostream
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: geostream
+      POSTGRES_PASSWORD: geostream_dev_password
+      POSTGRES_DB: geostream_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geostream -d geostream_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    restart: unless-stopped
+    command: valkey-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  geostream:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      GS_HTTP_ADDR: 0.0.0.0:8080
+      GS_DATABASE_URL: "postgres://geostream:geostream_dev_password@postgres:5432/geostream_dev"
+      GS_AUTO_MIGRATE: "true"
+      GS_JWT_KEYS_DIR: /data/jwt-keys
+      GS_JWT_ACTIVE_KID: dev-key-1
+      GS_JWT_ISSUER: https://geostream.local
+      GS_REDIS_URL: "redis://valkey:6379"
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+    volumes:
+      - geostream_keys:/data/jwt-keys
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 25
+
+volumes:
+  postgres_data:
+    name: geostream_postgres_data
+  geostream_keys:
+    name: geostream_jwt_keys

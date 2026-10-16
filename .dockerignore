@@ -1,0 +1,13 @@
+target/
+**/target/
+.git/
+*.md
+docs/
+# deploy/ needed for entrypoint.sh
+
+# contracts needed by gs-protocol / gs-testkit build scripts
+crates/*/tests/
+node_modules/
+.vscode/
+.idea/
+*.log
