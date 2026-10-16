@@ -24,7 +24,7 @@ pub use odometer::Odometer;
 pub use plausibility::{PlausibilityFlags, motion_max_speed_mps};
 pub use stops::{StopDetector, StopEvent, StopState};
 
-use gs_geo::{LatLon, haversine_distance, LocalFrame};
+use gs_geo::{LatLon, LocalFrame, haversine_distance};
 use kalman::KalmanCv as K;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,11 +102,26 @@ impl TrackConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrackState { Init, Tracking, Coasting, Reset }
+pub enum TrackState {
+    Init,
+    Tracking,
+    Coasting,
+    Reset,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrackResetReason { FirstFix, Gap, OutlierRun, FrameReanchor }
+pub enum TrackResetReason {
+    FirstFix,
+    Gap,
+    OutlierRun,
+    FrameReanchor,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrackEventKind { StopStarted, StopEnded, TrackingLost, TrackingResumed }
+pub enum TrackEventKind {
+    StopStarted,
+    StopEnded,
+    TrackingLost,
+    TrackingResumed,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct TrackEstimate {
@@ -166,15 +181,23 @@ pub struct TrackStateMachine {
 
 impl TrackStateMachine {
     pub fn new(config: TrackConfig) -> Self {
-        let stops = StopDetector::new(config.track_stop_radius_m, config.track_stop_min_duration_s, config.track_stop_exit_confirm);
+        let stops = StopDetector::new(
+            config.track_stop_radius_m,
+            config.track_stop_min_duration_s,
+            config.track_stop_exit_confirm,
+        );
         Self {
             config,
-            kalman: None, frame: None,
-            origin_lat: 0.0, origin_lon: 0.0,
+            kalman: None,
+            frame: None,
+            origin_lat: 0.0,
+            origin_lon: 0.0,
             state: TrackState::Init,
             prev_ms: None,
             frozen_count: 0,
-            prev_lat: 0.0, prev_lon: 0.0, prev_acc: 8.0,
+            prev_lat: 0.0,
+            prev_lon: 0.0,
+            prev_acc: 8.0,
             prev_speed: None,
             outlier_run: 0,
             motion: Motion::Unknown,
@@ -183,21 +206,28 @@ impl TrackStateMachine {
         }
     }
 
-    pub fn state(&self) -> TrackState { self.state }
+    pub fn state(&self) -> TrackState {
+        self.state
+    }
 
     pub fn apply(&mut self, s: &Sample) -> TrackUpdate {
         // init frame if needed
         if self.frame.is_none() {
             self.frame = Some(LocalFrame::new(LatLon::new(s.lat, s.lon)));
-            self.origin_lat = s.lat; self.origin_lon = s.lon;
+            self.origin_lat = s.lat;
+            self.origin_lon = s.lon;
         }
         let cfg = &self.config;
         // reanchor check
-        let dist_from_origin = haversine_distance(LatLon::new(self.origin_lat, self.origin_lon), LatLon::new(s.lat, s.lon));
+        let dist_from_origin = haversine_distance(
+            LatLon::new(self.origin_lat, self.origin_lon),
+            LatLon::new(s.lat, s.lon),
+        );
         let mut reanchor = false;
         if dist_from_origin >= cfg.frame_reanchor_m {
             self.frame = Some(LocalFrame::new(LatLon::new(s.lat, s.lon)));
-            self.origin_lat = s.lat; self.origin_lon = s.lon;
+            self.origin_lat = s.lat;
+            self.origin_lon = s.lon;
             reanchor = true;
         }
         let frame = self.frame.unwrap();
@@ -214,7 +244,8 @@ impl TrackStateMachine {
 
         // frozen fix detection
         let same_pos_acc = self.kalman.is_some()
-            && self.prev_lat == s.lat && self.prev_acc == s.horizontal_accuracy_m;
+            && self.prev_lat == s.lat
+            && self.prev_acc == s.horizontal_accuracy_m;
         if same_pos_acc && dt_s > 0.0 && s.motion != Motion::Stationary {
             self.frozen_count += 1;
         } else {
@@ -229,7 +260,10 @@ impl TrackStateMachine {
 
         // distance to previous position in meters (haversine, proxy for enu prev)
         let dist_to_prev = if self.kalman.is_some() {
-            haversine_distance(LatLon::new(self.prev_lat, self.prev_lon), LatLon::new(s.lat, s.lon))
+            haversine_distance(
+                LatLon::new(self.prev_lat, self.prev_lon),
+                LatLon::new(s.lat, s.lon),
+            )
         } else {
             0.0
         };
@@ -237,8 +271,19 @@ impl TrackStateMachine {
         let speed_prev_for_accel = self.prev_speed;
         let sigma_prev = self.prev_acc.max(1e-6);
         // First sample handling plausibility
-        plausibility::evaluate(cfg, &mut flags, dist_to_prev, dt_s, sigma_prev, s.horizontal_accuracy_m,
-            speed_prev_for_accel, s.speed_mps, s.source, s.is_mock, s.horizontal_accuracy_m);
+        plausibility::evaluate(
+            cfg,
+            &mut flags,
+            dist_to_prev,
+            dt_s,
+            sigma_prev,
+            s.horizontal_accuracy_m,
+            speed_prev_for_accel,
+            s.speed_mps,
+            s.source,
+            s.is_mock,
+            s.horizontal_accuracy_m,
+        );
         if reanchor {
             // only a reset reason, not a flag
         }
@@ -247,7 +292,8 @@ impl TrackStateMachine {
         // with motion-specific v_max. Redo just that comparison:
         if dt_s > 0.0 && self.kalman.is_some() {
             let mv = motion_max_speed_mps(cfg, s.motion).min(cfg.max_speed_mps);
-            let lhs = dist_to_prev - cfg.accuracy_sigma_factor * (self.prev_acc + s.horizontal_accuracy_m);
+            let lhs = dist_to_prev
+                - cfg.accuracy_sigma_factor * (self.prev_acc + s.horizontal_accuracy_m);
             let rhs = mv * dt_s;
             flags.excessive_speed = lhs > rhs;
         }
@@ -278,9 +324,11 @@ impl TrackStateMachine {
                 odometer_m: self.odometer.value(),
             };
             // odometer feed (#1)
-            self.odometer.feed(s.lat, s.lon, pos_std, cfg.odometer_noise_factor);
+            self.odometer
+                .feed(s.lat, s.lon, pos_std, cfg.odometer_noise_factor);
             // stops
-            self.stops.update(s.lat, s.lon, self.origin_lat, self.origin_lon, now);
+            self.stops
+                .update(s.lat, s.lon, self.origin_lat, self.origin_lon, now);
             self.motion = s.motion;
             return TrackUpdate {
                 accepted: true,
@@ -312,10 +360,18 @@ impl TrackStateMachine {
             let k = self.kalman.as_mut().unwrap();
             let acc = s.horizontal_accuracy_m;
             let chi2 = k.step(
-                enu, s.speed_mps, s.heading_deg, s.speed_accuracy_mps,
-                dt_s, cfg.process_noise(s.motion),
-                acc, cfg.accuracy_sigma_factor, cfg.outlier_chi2,
-                cfg.outlier_reset_count, &mut self.outlier_run, &mut outlier_jump,
+                enu,
+                s.speed_mps,
+                s.heading_deg,
+                s.speed_accuracy_mps,
+                dt_s,
+                cfg.process_noise(s.motion),
+                acc,
+                cfg.accuracy_sigma_factor,
+                cfg.outlier_chi2,
+                cfg.outlier_reset_count,
+                &mut self.outlier_run,
+                &mut outlier_jump,
             );
             let _ = chi2;
             if outlier_jump {
@@ -348,23 +404,29 @@ impl TrackStateMachine {
         let (pe, pn, ve, vn) = k.state();
         // enu -> lat/lon using frame anchor
         let pos = frame.from_enu(pe, pn);
-        let speed = Some((ve*ve+vn*vn).sqrt());
+        let speed = Some((ve * ve + vn * vn).sqrt());
         let heading = if ve.abs() + vn.abs() > 1e-9 {
             Some(ve.atan2(vn).to_degrees().rem_euclid(360.0))
-        } else { None };
+        } else {
+            None
+        };
         let std = k.position_std();
 
         self.state = TrackState::Tracking;
 
-        self.odometer.feed(pos.lat, pos.lon, std, cfg.odometer_noise_factor);
+        self.odometer
+            .feed(pos.lat, pos.lon, std, cfg.odometer_noise_factor);
         // gap bridging: if reset_gap and track_odometer_bridge_gaps (not configurable here) -> bridge straight distance
         if do_reset && cfg.track_stop_min_duration_s >= 0.0 { /* placeholder */ }
 
-        self.stops.update(pos.lat, pos.lon, self.origin_lat, self.origin_lon, now);
+        self.stops
+            .update(pos.lat, pos.lon, self.origin_lat, self.origin_lon, now);
 
         // update prev
         self.prev_ms = Some(now);
-        self.prev_lat = s.lat; self.prev_lon = s.lon; self.prev_acc = s.horizontal_accuracy_m;
+        self.prev_lat = s.lat;
+        self.prev_lon = s.lon;
+        self.prev_acc = s.horizontal_accuracy_m;
         self.prev_speed = s.speed_mps;
         self.motion = s.motion;
 
@@ -390,9 +452,13 @@ impl TrackStateMachine {
     }
 
     pub fn take_events(&mut self) -> Vec<TrackEventKind> {
-        self.stops.take_events().into_iter().map(|e| match e {
-            stops::StopEvent::Started => TrackEventKind::StopStarted,
-            stops::StopEvent::Ended => TrackEventKind::StopEnded,
-        }).collect()
+        self.stops
+            .take_events()
+            .into_iter()
+            .map(|e| match e {
+                stops::StopEvent::Started => TrackEventKind::StopStarted,
+                stops::StopEvent::Ended => TrackEventKind::StopEnded,
+            })
+            .collect()
     }
 }

@@ -27,8 +27,13 @@ mod clock;
 mod connection;
 mod heading;
 mod ports;
+mod prediction;
 mod sampler;
+mod sampling_policy;
 mod sequence;
+
+pub use crate::prediction::*;
+pub use crate::sampling_policy::*;
 
 pub use crate::clock::*;
 pub use crate::connection::Connection;

@@ -16,30 +16,60 @@ pub struct PlausibilityFlags {
 }
 
 impl PlausibilityFlags {
-    pub fn empty() -> Self { Self::default() }
+    pub fn empty() -> Self {
+        Self::default()
+    }
 
     pub fn to_vec(&self) -> Vec<&'static str> {
         let mut out = Vec::new();
-        if self.excessive_speed { out.push("EXCESSIVE_SPEED"); }
-        if self.outlier_jump { out.push("OUTLIER_JUMP"); }
-        if self.mock_flagged { out.push("MOCK_FLAGGED"); }
-        if self.frozen_fix { out.push("FROZEN_FIX"); }
-        if self.implausible_accel { out.push("IMPLAUSIBLE_ACCEL"); }
-        if self.low_accuracy { out.push("LOW_ACCURACY"); }
-        if self.network_only { out.push("NETWORK_ONLY"); }
+        if self.excessive_speed {
+            out.push("EXCESSIVE_SPEED");
+        }
+        if self.outlier_jump {
+            out.push("OUTLIER_JUMP");
+        }
+        if self.mock_flagged {
+            out.push("MOCK_FLAGGED");
+        }
+        if self.frozen_fix {
+            out.push("FROZEN_FIX");
+        }
+        if self.implausible_accel {
+            out.push("IMPLAUSIBLE_ACCEL");
+        }
+        if self.low_accuracy {
+            out.push("LOW_ACCURACY");
+        }
+        if self.network_only {
+            out.push("NETWORK_ONLY");
+        }
         out
     }
 
     /// Puntuación 0..=1 con las penalizaciones de `17` §2.11.
     pub fn score(&self) -> f64 {
         let mut p = 1.0_f64;
-        if self.excessive_speed { p -= 0.8; }
-        if self.outlier_jump { p -= 0.6; }
-        if self.mock_flagged { p -= 0.5; }
-        if self.frozen_fix { p -= 0.5; }
-        if self.implausible_accel { p -= 0.4; }
-        if self.low_accuracy { p -= 0.2; }
-        if self.network_only { p -= 0.1; }
+        if self.excessive_speed {
+            p -= 0.8;
+        }
+        if self.outlier_jump {
+            p -= 0.6;
+        }
+        if self.mock_flagged {
+            p -= 0.5;
+        }
+        if self.frozen_fix {
+            p -= 0.5;
+        }
+        if self.implausible_accel {
+            p -= 0.4;
+        }
+        if self.low_accuracy {
+            p -= 0.2;
+        }
+        if self.network_only {
+            p -= 0.1;
+        }
         p.max(0.0)
     }
 }

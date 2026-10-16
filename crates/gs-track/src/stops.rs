@@ -1,10 +1,17 @@
 #![forbid(unsafe_code)]
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopState { Candidate, Stopped, None }
+pub enum StopState {
+    Candidate,
+    Stopped,
+    None,
+}
 
 #[derive(Debug, Clone, Copy)]
-pub enum StopEvent { Started, Ended }
+pub enum StopEvent {
+    Started,
+    Ended,
+}
 
 #[derive(Debug, Clone)]
 pub struct StopDetector {
@@ -26,9 +33,14 @@ pub struct StopDetector {
 impl StopDetector {
     pub fn new(radius_m: f64, min_duration_s: f64, exit_confirm: usize) -> Self {
         Self {
-            radius_m, min_duration_s, exit_confirm,
-            c_lat: 0.0, c_lon: 0.0,
-            c_sum_lat: 0.0, c_sum_lon: 0.0, c_count: 0,
+            radius_m,
+            min_duration_s,
+            exit_confirm,
+            c_lat: 0.0,
+            c_lon: 0.0,
+            c_sum_lat: 0.0,
+            c_sum_lon: 0.0,
+            c_count: 0,
             c_started_ms: None,
             state: StopState::None,
             consecutive_outside: 0,
@@ -36,8 +48,12 @@ impl StopDetector {
         }
     }
 
-    pub fn state(&self) -> StopState { self.state }
-    pub fn take_events(&mut self) -> Vec<StopEvent> { std::mem::take(&mut self.events) }
+    pub fn state(&self) -> StopState {
+        self.state
+    }
+    pub fn take_events(&mut self) -> Vec<StopEvent> {
+        std::mem::take(&mut self.events)
+    }
 
     /// Feed a new estimated position (ENU meters for distance, or use lat/lon haversine).
     /// Here we accept lat/lon and compute distance via origin.
@@ -45,10 +61,15 @@ impl StopDetector {
         // effective radius
         let r_eff = self.radius_m; // + min(acc, radius) would need accuracy; kept simple
         // centroid
-        if self.state == StopState::None || self.state == StopState::Stopped && self.consecutive_outside >= self.exit_confirm {
+        if self.state == StopState::None
+            || self.state == StopState::Stopped && self.consecutive_outside >= self.exit_confirm
+        {
             // start candidate
-            self.c_lat = lat; self.c_lon = lon;
-            self.c_sum_lat = lat; self.c_sum_lon = lon; self.c_count = 1;
+            self.c_lat = lat;
+            self.c_lon = lon;
+            self.c_sum_lat = lat;
+            self.c_sum_lon = lon;
+            self.c_count = 1;
             self.c_started_ms = Some(now_ms);
             self.state = StopState::Candidate;
             self.consecutive_outside = 0;
@@ -56,11 +77,16 @@ impl StopDetector {
         }
         // distance from candidate centroid to new point
         let d = gs_geo::haversine_distance(
-            gs_geo::LatLon::new(self.c_sum_lat / self.c_count as f64, self.c_sum_lon / self.c_count as f64),
+            gs_geo::LatLon::new(
+                self.c_sum_lat / self.c_count as f64,
+                self.c_sum_lon / self.c_count as f64,
+            ),
             gs_geo::LatLon::new(lat, lon),
         );
         if d <= r_eff {
-            self.c_sum_lat += lat; self.c_sum_lon += lon; self.c_count += 1;
+            self.c_sum_lat += lat;
+            self.c_sum_lon += lon;
+            self.c_count += 1;
             self.consecutive_outside = 0;
             // check duration
             if let Some(start) = self.c_started_ms {
@@ -75,8 +101,11 @@ impl StopDetector {
             if self.state == StopState::Stopped && self.consecutive_outside >= self.exit_confirm {
                 self.events.push(StopEvent::Ended);
                 // restart candidate at last point
-                self.c_lat = lat; self.c_lon = lon;
-                self.c_sum_lat = lat; self.c_sum_lon = lon; self.c_count = 1;
+                self.c_lat = lat;
+                self.c_lon = lon;
+                self.c_sum_lat = lat;
+                self.c_sum_lon = lon;
+                self.c_count = 1;
                 self.c_started_ms = Some(now_ms);
                 self.state = StopState::Candidate;
                 self.consecutive_outside = 0;
