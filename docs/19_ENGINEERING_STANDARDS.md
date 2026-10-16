@@ -1,6 +1,6 @@
 # 19 — Estándares de ingeniería (desarrolladores y agentes)
 
-**ID:** GS-ENG-001 · **Versión:** 0.2.0
+**ID:** GS-ENG-001 · **Versión:** 0.3.0
 Obligatorios para todo cambio. Una excepción requiere ADR o justificación escrita aprobada en el PR, según indique cada regla.
 
 ## 1. Definition of Done (toda tarea)
@@ -17,6 +17,27 @@ Una tarea está terminada solo si:
 9. El informe de tarea (`docs/templates/TASK_REPORT.md`) está en la descripción del PR con comandos ejecutados y resultados reales.
 
 "Compila" no es "terminado".
+
+### 1.1 DoD adicional de la pista E
+
+Para cualquier tarea de fase `E<n>`, la Definition of Done anterior se amplía con:
+
+10. **Vectors.** Toda constante nueva del motor aparece en `17` y tiene al menos un vector en `contracts/test-vectors/` que fija su comportamiento. Sin vector, el valor no está fijado.
+11. **Redacción verificada.** Si la tarea toca coordenadas, celdas H3, estimaciones, identificadores de tag o credenciales de proveedor, la suite `gs-testkit --test privacy_test` pasa y el PR lo dice.
+12. **Degradación declarada.** Si la tarea introduce un componente opcional (proveedor, grafo, etiquetas, grafo vial), el comportamiento cuando **no está disponible** está escrito y probado. Una capacidad opcional sin degradación declarada es una capacidad obligatoria disfrazada.
+13. **Presupuesto.** Si la tarea añade trabajo al camino de aceptación (publicación → distribución), hay un perfil de carga de §8.3 y un informe con números reales. «Probablemente sea rápido» no es una medida.
+14. **Compatibilidad.** Si la tarea cambia un contrato, hay una prueba de que un cliente de la versión anterior sigue funcionando (`NFR-COMPAT-003`) y el campo nuevo es opcional o tiene número de campo libre.
+15. **Revisión de privacidad.** Si la tarea cambia qué ve cada parte (`10` §6.3) o qué se conserva (§6.2), la tabla correspondiente está actualizada en el mismo PR.
+
+### 1.2 DoD por lenguaje de binding (E9)
+
+Para los SDK que usan FFI:
+
+- La superficie pública del binding es estable y versionada; cambiar su firma es un cambio mayor del SDK.
+- Existe una prueba de **conformidad cruzada**: los mismos vectores se ejecutan en el lenguaje y en el núcleo Rust, y las salidas coinciden según la matriz de tolerancias de `26` §4.
+- La aplicación de ejemplo compila para el objetivo mínimo soportado (`26` §2), no solo para el de desarrollo.
+- Un `panic` en el núcleo produce un error tipado en el lenguaje, no un cierre de proceso.
+- La documentación del paquete explica cómo se inicializa el runtime y qué se hace con los recursos al disposing, en ese lenguaje.
 
 ## 2. Reglas generales de código
 - Simplicidad: módulos cohesivos, sin abstracciones genéricas prematuras ni capas sin uso.
@@ -81,10 +102,40 @@ Ver `11` §2 y §4. Toda consulta filtra por `tenant_id`. Nada de `SELECT *` en 
 | Red | `ipnet` |
 | Concurrencia | `dashmap` |
 | Geoespacial (F11) | `geo`, `rstar` |
+| **Geoespacial indexado (E2/E4)** | `h3o` (celdas H3, ADR-0026) |
+| **Geometría de trayectorias (E2/E6)** | `geo` (ya aprobado), `geographiclib-rs` solo si `geo` no cubre lo requerido — decisión por ADR |
+| **Criptografía de tags (E8)** | `p256` (o `x25519-dalek` para ECDH si el hardware no acelera P-256; decisión por ADR), `hkdf`, `chacha20poly1305` (si el beacon no puede hacer AES-GCM), `rand_core` |
+| **Serialización de etiquetas (E6/E8)** | `csv`, `postcard` (para el `.gsg` de grafos) |
+| **Asignación (E5)** | Implementación propia sobre `petgraph` (Hungarian y min-cost-flow; ~600 líneas) o `good_lp`; decisión registrada en ADR antes de la primera importación |
 | Pruebas | `proptest`, `testcontainers`, `testcontainers-modules`, `tokio-tungstenite`, `jsonschema`, `criterion` (benchmarks) |
 | Fuzzing (F10) | `libfuzzer-sys` (vía `cargo-fuzz`) |
 
 El OpenAPI se convierte a JSON en CI (`redocly bundle … --ext json`) para que las pruebas lo lean sin un parser YAML.
+
+**Criterio de importación de la pista E.** Las dependencias de arriba no están aprobadas de forma incondicional: cada una pasa por ADR en su tarea, con el mismo formato de §6.1. La razón es que la pista E multiplica el número de crates del workspace y que el coste de salir de una dependencia es proporcional a lo lejos que esté de la lista aprobada.
+
+### 6.2.1 Reglas de `unsafe` y de la frontera FFI (E9)
+
+- `#![forbid(unsafe_code)]` se mantiene **en todo el workspace**, con **una única excepción**: `crates/gs-ffi`, que declara `#![deny(unsafe_code)]` y una lista explícita de módulos permitidos a usarlo.
+- Todo bloque `unsafe` en `gs-ffi` lleva un comentario `// SAFETY:` que justifique por qué se mantienen los invariantes. Sin ese comentario, el clippy falla.
+- Ningún `panic` cruza la frontera: todo punto de entrada valida longitudes antes de construir tipos de dominio y usa `catch_unwind` para convertir un pánico en un error tipado.
+- La superficie pública de la FFI es **estrecha por construcción**: tipos opacos con handle, funciones `extern "C"` sin conversiones implícitas, y `#[no_mangle]` solo en el módulo de la frontera.
+- Revisión obligatoria de cambios en `gs-ffi` por una segunda persona, y fuzzing nocturno de su superficie (`18` §10.4). Es el único punto del sistema donde un fallo de memoria puede tumbar a un proceso ajeno.
+
+### 6.2.2 Reglas de los crates nuevos
+
+| Crate | Regla específica |
+|---|---|
+| `gs-geo` | Puro y sin I/O. Único sitio con fórmulas geodésicas, unidades explícitas y radio terrestre declarado. |
+| `gs-track` | Puro salvo el acceso al almacén efímero, que se inyecta como puerto. `tokio` permitido solo para el bucle; la lógica del filtro es sincrónica y testeable sin runtime. |
+| `gs-mobility` | Puro salvo el índice (trait `SpatialIndex` inyectable). La implementación en memoria y la de Redis cumplen el mismo contrato y se prueban con la misma suite. |
+| `gs-history` | Solo escribe. Nunca lee para decidir nada en el camino de aceptación. |
+| `gs-analytics` | Solo lee. Produce agregados; jamás escribe datos personales. |
+| `gs-client-core` | Sin I/O. Sin `tokio`. Sin dependencias de plataforma. |
+| `gs-client-runtime` | Único crate del cliente con dependencias de plataforma; implementa los puertos de `gs-client-core`. |
+| `gs-ffi` | Único crate con `unsafe`. No contiene lógica de negocio. |
+
+**Regla de pureza.** Ninguno de los crates de la pista E puede depender de `tokio`, `sqlx`, `axum`, `redis` o `reqwest` en su capa de núcleo; solo en su adaptador. El verificador `crate-deps` de `tools/` lo hace cumplir de forma automática (`04` §4.1).
 
 ### 6.3 Lista aprobada — Dart/Flutter
 

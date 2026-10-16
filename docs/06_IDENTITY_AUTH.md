@@ -59,8 +59,17 @@ gsk_<key_id: 32 hex minúscula>.<secret: 43 caracteres base64url sin relleno>
 | `subjects:manage` | Consultar subjects y dispositivos, revocar tokens, desactivar dispositivos, borrar/exportar subjects |
 | `webhooks:manage` | CRUD de webhooks |
 | `geofences:manage` | CRUD de geocercas (F11) |
+| `pools:manage` (E4) | Crear y configurar sesiones `POOL`, `availability` y `attributes` de sus miembros |
+| `pools:query` (E4) | `nearby`, `rings` y `density` de un pool |
+| `pools:density` (E4) | Solo `density` (app del cliente final) |
+| `tools:use` (E5) | ETA, asignación por lotes y ruta sobre grafo propio |
+| `providers:manage` (E5) | Configuración BYOK del Provider Gateway |
+| `history:read` (E6) | Trazas, viajes y exportaciones |
+| `analytics:read` (E6) | Agregados, lugares, perfiles de velocidad, matrices OD y perfil de movilidad |
+| `tags:manage` (E8) | Registro y baja de tags BLE |
+| `lpwan:manage` (E8) | Integraciones LPWAN y asociaciones DevEUI/IMEI |
 
-**Default al crear una key** (si no se especifican): todos excepto `locations:read`. Leer coordenadas desde un backend requiere conceder `locations:read` explícitamente.
+**Default al crear una key** (si no se especifican): los de la línea base **excepto `locations:read`**, y además **ninguno** de los nuevos (`pools:*`, `tools:use`, `providers:manage`, `history:read`, `analytics:read`, `tags:manage`, `lpwan:manage`). Leer coordenadas desde un backend requiere conceder `locations:read` explícitamente; lo mismo aplica a cualquier capacidad de la pista E: **se concede uno a uno, de forma explícita**.
 
 ## 4. Tokens de dispositivo
 
@@ -138,12 +147,19 @@ No se añaden otros claims. Los tokens no contienen datos personales.
 | `sessions:create` | Crear sesiones |
 | `invitations:redeem` | Canjear invitaciones |
 | `stream:connect` | Emitir tickets de stream |
-| `sharing:write` | Activar/detener su propia compartición |
-| `ingest:write` | Ingesta HTTP por lotes (F8); nunca por defecto |
+| `sharing:write` | Activar/detener su propia compartición y **modificar sus `consent_purposes`** (INV-SHR-5) |
+| `ingest:write` | Ingesta HTTP por lotes (F8) y **ingesta de historial** (E6); nunca por defecto |
+| `pools:density` (E4) | `GET /v1/pools/{id}/density` (marcadores aproximados y anónimos) |
+| `tools:use` (E5) | ETA, asignación y ruta; solo si `application.allowed_device_scopes` lo incluye |
+| `tags:manage` (E8) | Registro y baja de tags BLE propiedad del subject |
+| `edge:report` (E8) | Envío de reportes Beacon cifrados |
+| `edge:lookup` (E8) | Consulta y descifrado de reportes de sus propios tags |
+
+Ningún scope nuevo de dispositivo entra en el **default** de `application.allowed_device_scopes`: se habilita explícitamente por aplicación.
 
 Las operaciones de lectura sobre sesiones donde el subject es miembro no requieren scope adicional: las gobiernan las capacidades.
 
-`application.allowed_device_scopes` (default: los cinco) limita lo que una aplicación puede pedir para sus dispositivos. Ejemplo: una app de pasajeros sin `sessions:create`.
+`application.allowed_device_scopes` (default: los cinco de la línea base) limita lo que una aplicación puede pedir para sus dispositivos. Ejemplo: una app de pasajeros sin `sessions:create`.
 
 ## 7. Revocación
 
@@ -155,6 +171,8 @@ Las operaciones de lectura sobre sesiones donde el subject es miembro no requier
 | Desactivar dispositivo | `DELETE /v1/devices/{id}` | ≤ NFR-SEC-002 | Cierre 4401; si era publicador, `sharing=false` | NFR-SEC-002 |
 | Revocar API key | CLI | ≤ NFR-SEC-002 | Cierre 4401 de conexiones de aplicación de esa key | NFR-SEC-002 |
 | Deshabilitar aplicación/tenant | CLI | 403 `ACCOUNT_DISABLED` ≤ NFR-SEC-002 | Cierre 4403 | NFR-SEC-002 |
+| Retirar consentimiento `HISTORY`/`ANALYTICS` | `PUT …/sharing` (propio dispositivo, `sharing:write`) | Inmediato: escrituras de historial y analítica detenidas | — | inmediato, sin coordinación entre instancias |
+| Revocar credencial BYOK de proveedor | `DELETE /v1/providers/{port}` | Inmediato: el gateway deja de usar ese proveedor | — | inmediato |
 | Expiración de token | — | 401 `TOKEN_EXPIRED` | `AuthExpiring`, luego 4401 si no hay `AuthRefresh` | exacto ± leeway |
 
 Revocar tokens **no** cambia la compartición (es una acción de seguridad; el usuario puede volver a autenticarse). Desactivar un dispositivo (cierre de sesión del integrador) **sí** detiene la compartición donde sea publicador.
@@ -209,6 +227,33 @@ Leyenda: ✗ = principal no permitido (403 `PERMISSION_DENIED`); — = sin requi
 | `ingestLocations` (F8) | ✗ | `ingest:write` | `publish` + `sharing` + publicador |
 | `createWebhook`, `listWebhooks`, `getWebhook`, `deleteWebhook`, `testWebhook` (F8) | `webhooks:manage` | ✗ | — |
 | `createGeofence`, `listGeofences`, `getGeofence`, `deleteGeofence` (F11) | `geofences:manage` | — | `manage` (solo geocercas de su sesión) |
+| `createPool` (E4) | `pools:manage` | ✗ | — |
+| `getPool` (E4) | `sessions:read` | ✗ | — |
+| `getPoolNearby` (E4) | `pools:query` | ✗ | — |
+| `getPoolRings` (E4) | `pools:query` | ✗ | — |
+| `getPoolDensity` (E4) | `pools:query` | `pools:density` | — |
+| `setOwnAvailability` (E4) | — | `sharing:write` | `me`, solo en sesión `POOL` |
+| `setPoolMemberAttributes` (E4) | `pools:manage` | ✗ | — |
+| `resetOdometer` (E2) | `members:write` | ✗ | — |
+| `estimateEta` (E5) | `tools:use` | `tools:use` (si está permitido) | — |
+| `assignBatch` (E5) | `tools:use` | `tools:use` (si está permitido) | — |
+| `computeRoute` (E7) | `tools:use` | ✗ | — |
+| `getProvider`, `putProvider`, `deleteProvider` (E5) | `providers:manage` | ✗ | — |
+| `ingestHistory` (E6) | ✗ | `ingest:write` | `publish` + `sharing` + publicador |
+| `getTrace` (E6) | `history:read` | — | `read` y sesión `ACTIVE` |
+| `listTrips`, `getTrip` (E6) | `history:read` | ✗ | — |
+| `getHeatmap` (E6) | `analytics:read` | ✗ | — |
+| `getOdMatrix` (E6) | `analytics:read` | ✗ | — |
+| `getPlaces` (E7) | `analytics:read` | ✗ | — |
+| `getSpeedProfile` (E7) | `analytics:read` | ✗ | — |
+| `getMobilityProfile` (E6) | `analytics:read` | ✗ | — |
+| `createExport`, `getExport` (E6) | `history:read` | ✗ | — |
+| `createTag`, `listTags`, `getTag`, `deleteTag` (E8) | `tags:manage` | `tags:manage` | — |
+| `postEdgeReport` (E8) | ✗ | `edge:report` | — |
+| `lookupEdgeReports` (E8) | ✗ | `edge:lookup` | — |
+| `ingestLpwan` (E8) | — | ✗ | — |
+
+`ingestLpwan` no usa scopes: se autentica con la **firma HMAC de la integración** sobre el cuerpo bruto (`X-Gs-Lpwan-Signature`, `X-Gs-Lpwan-Timestamp`), con el secreto cuyo hash guarda `edge_lpwan_integrations`. La columna de aplicación es `—` (sin scope adicional), no una credencial de tenant: la integración es de red, no un backend.
 | `healthLive`, `healthReady` | sin autenticación | sin autenticación | — |
 
 ### 8.3 Matriz de mensajes de stream
@@ -216,10 +261,13 @@ Leyenda: ✗ = principal no permitido (403 `PERMISSION_DENIED`); — = sin requi
 | Mensaje | Aplicación | Dispositivo |
 |---|---|---|
 | `Subscribe` | `locations:read` (cualquier sesión del tenant) | capacidad `read` |
+| `Subscribe` (`replay_trace = true`, E6) | `locations:read` + `history:read` | capacidad `read` |
 | `Unsubscribe` | — | — |
 | `PublishLocation` | ✗ (`StreamError PERMISSION_DENIED`) | `publish` ∧ `sharing=true` ∧ es `publisher_device_id` |
 | `Heartbeat` | — | — |
 | `AuthRefresh` | ✗ (las conexiones de aplicación se renuevan reconectando) | token válido del **mismo** `did` |
+
+**Minimización en `MemberStatus`:** `availability` y `attributes` de sesiones `POOL` solo se proyectan a principales de aplicación. Para una conexión de dispositivo se omiten siempre (INV-PRS-2), aunque la membresía tenga `read`.
 
 ## 9. Protección de autenticación
 - Fallos de autenticación por IP: límite `GS_AUTH_FAILURE_RPM_PER_IP`; al excederse, 429 durante el resto de la ventana.

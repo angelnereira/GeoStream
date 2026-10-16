@@ -98,6 +98,37 @@ Labels permitidos: los listados. Prohibidos: cualquier ID de sesión, miembro, d
 | `gs_geofence_evaluations_dropped_total` | counter | — | F11 |
 | `gs_geofence_transitions_total` | counter | `transition` | F11 |
 
+**Métricas de la pista E.** Se respeta la misma regla sin excepción: **ninguna etiqueta puede ser una coordenada ni un identificador de persona, dispositivo o sesión** (`10` §8.2). Una celda H3 es una coordenada; una ETA es un dato de un individuo; una posición de densidad es una coordenada. Ninguna de las tres puede aparecer como etiqueta.
+
+| Métrica | Tipo | Labels | Descripción |
+|---|---|---|---|
+| `gs_track_estimates_total` | counter | `kind` | `FILTERED`, `MAP_MATCHED`, `none` (motor no disponible) |
+| `gs_track_duration_seconds` | histogram | — | Presupuesto por muestra (NFR-PERF-005) |
+| `gs_track_state_conflict_total` | counter | — | Choques de versión del estado del filtro; la aceptación nunca depende de él |
+| `gs_track_reset_total` | counter | `reason` | `gap`, `reanchor`, `outliers`, `first_fix` |
+| `gs_track_flagged_total` | counter | `flag` | Valores de `PlausibilityFlag`, **solo el nombre de la bandera** |
+| `gs_track_lost_total` | counter | — | `TRACKING_LOST` emitidos |
+| `gs_sampling_policy_clamped_total` | counter | `field` | Valores de `SamplingPolicy` acotados por el cliente (T-30) |
+| `gs_pool_members_online` | gauge | — | Miembros conectados a todos los pools |
+| `gs_pool_index_size` | gauge | — | Entradas en el índice vivo |
+| `gs_pool_queries_total` | counter | `kind` | `nearby`, `rings`, `density` |
+| `gs_pool_query_duration_seconds` | histogram | `kind` | |
+| `gs_pool_index_dropped_total` | counter | — | Actualizaciones perdidas por canal lleno |
+| `gs_provider_requests_total` | counter | `port`, `result` | `route_matrix`, `route`, `map_matching`, `geocoding` |
+| `gs_provider_duration_seconds` | histogram | `port` | |
+| `gs_provider_cache_total` | counter | `result` | `hit`, `miss`, `stale_policy` |
+| `gs_history_writer_depth` | gauge | — | Profundidad del canal del escritor |
+| `gs_history_rows_written_total` | counter | `result` | `written`, `rejected`, `suppressed` (k-anonimato) |
+| `gs_history_rows_deleted_total` | counter | `job` | Purga; **un total, nunca el contenido** |
+| `gs_history_partitions` | gauge | — | Particiones de `location_points` |
+| `gs_analytics_suppressed_total` | counter | `unit` | Celdas, pares o lugares suprimidos por k-anonimato |
+| `gs_analytics_job_lag_seconds` | histogram | `job` | Retraso del trabajo horario |
+| `gs_edge_reports_total` | counter | `result` | `accepted`, `rejected`, `expired` |
+| `gs_edge_lookups_total` | counter | `result` | |
+| `gs_edge_dult_alerts_total` | counter | — | Alertas de rastreador no deseado generadas |
+
+**El uso del Provider Gateway se contabiliza fuera de Prometheus.** `GET /v1/analytics/provider-usage` (scope `analytics:read`) devuelve el conteo agregado por tenant y hora desde PostgreSQL. Poner `tenant_id` en una etiqueta de métrica convertiría un contador de coste en un mapa de la base de clientes accesible a cualquiera con acceso al Prometheus (`13` §8.3).
+
 Más las métricas de proceso estándar del exportador.
 
 ### 4.3 Logs
@@ -120,17 +151,29 @@ OpenTelemetry OTLP opcional (`GS_OTLP_ENDPOINT`). Spans por petición REST, por 
 | Backlog de webhooks | `gs_webhook_backlog` creciente durante 15 min |
 | Memoria de Redis/Valkey | > 80 % de `maxmemory` |
 | Errores 5xx | > 1 % de peticiones durante 5 min |
+| Presupuesto del filtro excedido | p99 de `gs_track_duration_seconds` > 1 ms durante 15 min |
+| Índice de pools perdiendo | `gs_pool_index_dropped_total` creciente durante 5 min |
+| Proveedor degradado | `gs_provider_requests_total{result="error"}` > 50 % durante 10 min |
+| Retraso de analítica | p99 de `gs_analytics_job_lag_seconds` > 2 h durante 30 min |
+| Escritor de historial saturado | `gs_history_writer_depth` > 80 % de `GS_HISTORY_QUEUE_CAPACITY` durante 5 min |
+| Retención de historial atrasada | `gs_history_partitions` > `GS_HISTORY_PARTITION_LOOKAHEAD_DAYS` + 3 |
+
+Las alertas de la pista E se **activan solo si la capacidad correspondiente está habilitada**: no tiene sentido alertar por el escritor de historial en un tenant que no la usa.
 
 ## 6. Despliegue y apagado
 - Orden en cada release: (1) `geostream migrate` (compatible hacia atrás, `11` §4); (2) despliegue gradual de instancias; (3) verificación de *ready* y métricas.
 - Apagado: SIGTERM → drenaje (`08` §6.8) → salida en ≤ `GS_SHUTDOWN_GRACE_S` + 5 s (NFR-RES-003). El orquestador debe conceder al menos ese tiempo.
 - Nunca desplegar automáticamente cambios incompatibles de protocolo o migraciones destructivas sin aprobación explícita (`19` §8).
+- **Añadir el rol `analytics`**: es un rol nuevo, opcional y escalable por separado. Un despliegue que activa historial sin añadir el rol deja los viajes sin derivar; el trabajo horario es idempotente y reintenta, así que no se pierden datos, pero hay que saberlo al añadir la capacidad.
 
 ## 7. Escalado
 - `api`: por tasa de peticiones y latencia.
 - `stream`: por conexiones, eventos/s, entregas/s, memoria y ancho de banda. El fan-out multiplica el egress: 1 publicación × N suscriptores = N entregas.
 - `worker`: normalmente 1–2 instancias; los jobs son seguros con más.
+- `analytics`: por retraso del trabajo horario y tamaño de `location_points`. Agregación **por tenant y por hora**, así que escala bien.
 - Particionar por tenant/región solo con evidencia (`04` §13).
+
+**El índice de pools vive en la memoria del proceso.** Escala con las instancias de `stream` que mantienen conexiones activas, no con un servicio aparte. Con varias instancias, cada una conoce solo a sus propios clientes; por eso el modelo de despliegue para pools es **sticky sessions por conexión de dispositivo** (una conexión de dispositivo nunca se mueve de instancia mientras esté viva, `08` §6.7). Si el modelo de despliegue es *anycast* sin afinidad, la funcionalidad de pools **no está disponible** y debe documentarse como limitación, no descubrirlo en producción.
 
 ## 8. Runbooks (se redactan completos en F12; resumen normativo)
 
@@ -143,6 +186,10 @@ OpenTelemetry OTLP opcional (`GS_OTLP_ENDPOINT`). Spans por petición REST, por 
 | Rotación de clave de firma JWT | `06` §4.4 |
 | API key comprometida | `geostream admin key revoke`; emitir una nueva; revisar auditoría |
 | Rotación de `GS_DATA_ENCRYPTION_KEY` | Añadir nueva como activa y la anterior en `GS_DATA_ENCRYPTION_KEYS_OLD`; job de re-cifrado (F12); retirar la antigua |
+| **Rotación de credencial BYOK de proveedor** | `DELETE`/`PUT /v1/providers/{port}`; efecto inmediato (el gateway deja de usarlo); auditar `provider.rotated`; **no** hay copia de la credencial en ningún sitio, así que si se pierde hay que emitir una nueva |
+| **Retirada del consentimiento de historial** | Verificar con `gs_history_rows_written_total{result="rejected"}` que las escrituras cesaron; comprobar `gs_history_rows_deleted_total{job="consent"}`; las particiones del subject se eliminan en el siguiente barrido |
+| **Purga de historial atrasada** | Comprobar `gs_history_partitions` frente a `GS_HISTORY_PARTITION_LOOKAHEAD_DAYS`; verificar que el job corre en una instancia con el rol; si el retraso persiste, ejecutar `geostream admin history purge --tenant` en ventana de mantenimiento |
+| **Alerta de rastreador no deseado (E8)** | Localizar el `tag_id` en el evento; confirmar el estado del tag; **no** desactivar la red de forma global — el runbook es de apoyo al usuario, no de moderation de red |
 | Incidente de privacidad | `10` §10 |
 | Restaurar backup | §9 |
 | Deshabilitar un tenant abusivo | `geostream admin tenant disable` (efecto ≤ NFR-SEC-002) |
@@ -150,8 +197,13 @@ OpenTelemetry OTLP opcional (`GS_OTLP_ENDPOINT`). Spans por petición REST, por 
 ## 9. Backups y recuperación
 - PostgreSQL: backup completo diario + archivado continuo de WAL (recuperación a un punto en el tiempo). Objetivos iniciales: RPO ≤ 15 min, RTO ≤ 1 h (a validar).
 - Prueba de restauración al menos trimestral y antes de GA (FR-OPS-006), documentada en `docs/ops/restore-drills/`.
-- Redis/Valkey: sin backups (efímero por diseño). Tras su pérdida: los clientes reconectan, los snapshots se repueblan, las secuencias del SDK siguen creciendo.
+- Redis/Valkey: sin backups (efímero por diseño). Tras su pérdida: los clientes reconectan, los snapshots se repueblan, las secuencias del SDK siguen creciendo, el estado del filtro se reconstruye desde las nuevas muestras y **el índice de pools se repuebla con las reconexiones**.
 - Tras restaurar PostgreSQL a un punto anterior: revocaciones posteriores al punto se pierden; el runbook exige re-ejecutar revocaciones críticas desde la auditoría del integrador.
+- **El historial cambia el perfil de riesgo de los backups.** `location_points` es, con diferencia, la tabla más grande y contiene coordenadas. Por eso:
+  - se **cifra en reposo** y sus copias también (el backup hereda el cifrado de disco; si el gestor de backups no lo garantiza, hay que cifrar la copia aparte);
+  - el RPO del historial es el del tenant, no el del producto: **un backup del servicio no puede usarse para justificar una retención mayor** que la declarada en `history_raw_retention_days`;
+  - el runbook de restauración debe verificar que no se restauran particiones más antiguas que la retención vigente **en el momento de la escritura**, no en el momento del backup.
+- **Los reportes Beacon no son recuperables** por diseño: son blobs cifrados que el servidor no puede leer, con TTL corto. Perderlos significa que se pierden sightings, no una contravención de retención. Es el precio de no tener E2EE roto.
 
 ## 10. Artefactos de despliegue (los crea el agente)
 - `deploy/Dockerfile`: multi-etapa, binario estático o dinámico mínimo, usuario no-root, sin herramientas de compilación en la imagen final, `HEALTHCHECK` contra `/health/live`.

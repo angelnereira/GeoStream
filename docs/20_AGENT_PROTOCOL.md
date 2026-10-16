@@ -34,6 +34,14 @@ Que varios agentes puedan construir GeoStream desde un repositorio vacío sin im
 | 8 | Reportar | Informe `docs/templates/TASK_REPORT.md` en el PR con comandos y resultados **reales** |
 | 9 | Cerrar | Solo con CI verde y criterios de aceptación cumplidos |
 
+**Regla de orden en la pista E (obligatoria).** La adopción de una capacidad nueva sigue tres bloques que **nunca se mezclan en el mismo PR**:
+
+1. **Fase E0 — documentación, contratos y ADR.** Sin código de producción. El PR toca `docs/`, `contracts/` y `docs/adr/`, y nada más.
+2. **Fase E<n> — implementación.** El PR toca código, con sus pruebas y sus vectores, siguiendo `19` §1.1.
+3. **Publicación.** `CHANGELOG.md`, `TRACEABILITY.md` y `PROGRESS.md` en el PR que corresponde.
+
+Además, **solo un PR puede tocar `contracts/` a la vez**. Un contrato es un acuerdo compartido: dos cambios simultáneos producen un contrato que nadie revisó. Si dos tareas necesitan contrato, la segunda espera.
+
 ## 5. Mapa de lectura por área
 
 | Si trabajas en… | Lee además de 00 y 03 |
@@ -48,13 +56,22 @@ Que varios agentes puedan construir GeoStream desde un repositorio vacío sin im
 | `gs-api` | 07, 06 §8, 09, OpenAPI |
 | `gs-stream` | 08, 04 §8, 09 §4, 06 §8.3 |
 | `gs-worker` | 11 §5, 07 §10, 10 §7 |
-| `gs-geo` | 14 |
+| `gs-geo` | 14, 22 §3.5 |
+| `gs-track` | 22, 09 §4, 17 §2.10 y §4.1, 11 §3.1 |
+| `gs-mobility` | 23, 05 §4.2.1, 17 §4.1, 11 §3.1 |
+| `gs-history` | 24 §2, 11 §2.0, 17 §4.1 |
+| `gs-analytics` | 24 §3 y §6, 10 §6.3 |
+| `gs-client-core`, `gs-client-runtime` | 26 §1, 22 §3, 12, 17 §5 |
+| `gs-ffi` y bindings | 26 §3–§4, 19 §6.2.1, 10 T-31 |
 | `gs-observability` | 16 §4, 10 §8 |
 | `gs-testkit`, escenarios | 18, `contracts/README.md` §5 |
 | SDK Flutter | 12, 08, 09, 06 §2, 17 §5 |
 | Adaptadores de mapas | 13 |
+| Dispositivos edge (tags, LPWAN) | 25, 10 T-26..T-28 |
 | Despliegue | 16, 17, 04 §10 |
 | Seguridad (siempre que aplique) | 10 |
+
+**Lectura adicional obligatoria en la pista E.** Cualquier tarea de fase `E<n>` lee, además de su fila: `01` §4 (principios del motor), `21` §pista E, y el documento `22`–`26` de su fase. Los documentos `22`–`26` son normativos con el mismo rango que `03`–`20`; el addendum A-02 es **material de origen archivado**, no documentación vigente.
 
 ## 6. Condiciones de parada (obligatorias)
 
@@ -87,6 +104,14 @@ Mientras espera, puede avanzar en partes de la tarea no afectadas o tomar otra t
 - Los nombres de campos, rutas, códigos y mensajes salen de `contracts/`; no se reescriben de memoria.
 - No suponer comportamiento de plataforma móvil: comprobar documentación oficial vigente y probar en dispositivo.
 - Ante una duda sobre un número, buscarlo en `17`; si no está, parar (§6, condición 2).
+
+**Reglas añadidas para la pista E:**
+
+9.1. **No afirmar precisión ni comportamiento de un proveedor, un hardware o una API móvil sin medirlo.** Si la tarea necesita un dato de ese tipo (precisión de GPS en interiores, cobertura de un proveedor, consumo de batería de un modo BLE), es una **medición pendiente**, y se registra como tal en el informe. No se rellena con un valor plausible.
+9.2. **No afirmar que el comportamiento del mapa o del Location Provider «es estándar» sin citar la plataforma concreta.** «Android hace esto» no es una fuente; lo es la documentación de la versión concreta que se shippea.
+9.3. **No usar cifras de mercado, de usuarios o de prevalencia sin fuente citada y fechada.** Si no hay fuente, el documento dice «no medido».
+9.4. **El addendum A-02 está archivado.** Sus secciones son material de origen. Si el código o `22`–`26` contradicen al addendum, **`22`–`26` mandan**, y la discrepancia se corrige en el addendum archivado o se abre una decisión.
+9.5. **Toda constante nueva nace con un vector.** Un número que aparece en `17` sin vector en `contracts/test-vectors/` es un número que nadie ha comprobado. Si la tarea no puede escribir el vector, no puede fijar el número (§6, condición 2).
 
 ## 10. Seguridad para agentes
 - No escribir secretos reales en ningún archivo; usar valores de desarrollo de `deploy/.env.example`.

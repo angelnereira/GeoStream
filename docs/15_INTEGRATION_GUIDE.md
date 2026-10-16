@@ -139,6 +139,33 @@ function verify(rawBody: Buffer, headers: Record<string, string>, secret: string
 
 El receptor DEBE deduplicar por `GS-Webhook-Id` y responder 2xx rápido (procesar en segundo plano).
 
+## 6.1 Integración de la pista E
+
+Los cuatro patrones que cambian con la pista E, con su requisito previo.
+
+### 6.1.1 Flota con ETA y asignación (E4 + E5)
+1. El backend crea un `POOL` con `pools:manage`.
+2. Cada dispositivo entra solo, activa `sharing` y marca `availability = BUSY` al aceptar un encargo.
+3. El backend llama a `GET /v1/pools/{id}/nearby?rank=eta` con origen y destino, y a `POST /v1/tools/assignments` para repartir las tareas.
+4. El cliente recibe las herramientas por el mismo stream (`SessionView`), no por una llamada extra.
+
+### 6.1.2 Historial y analítica (E6)
+1. El tenant activa `history_allowed` y la DPIA (tarea T-E6-11) está cerrada.
+2. El backend crea sesiones con `history_mode = TRACE_AND_ANALYTICS`.
+3. **El usuario concede el consentimiento** por separado para `HISTORY` y para `ANALYTICS`, desde su dispositivo. El backend no puede concederlo (INV-SHR-5).
+4. Se consulta con `history:read` / `analytics:read`, que son scopes distintos y se conceden uno a uno.
+
+### 6.1.3 BYOK de proveedor (E5)
+1. `PUT /v1/providers/route_matrix` con la credencial **del tenant** y `terms.checked_on`.
+2. Se revisa `GET /v1/analytics/provider-usage` para controlar coste y volumen.
+3. Si el contrato con el proveedor no es aceptable, se usa el grafo vial propio (`GS_GRAPH_PATHS`) y **ninguna coordenada sale de la infraestructura del tenant**.
+
+### 6.1.4 Tags BLE (E8)
+1. El usuario escanea el tag (la `EIK` se queda en el tag).
+2. Se registra con `tags:manage`: modelo, nombre, nada más.
+3. Buscadores autorizados envían reportes cifrados; el servidor los almacena sin poder leerlos.
+4. El dueño consulta sus sightings con `edge:lookup` y los descifra en su cliente.
+
 ## 7. Checklist de producción del integrador
 - [ ] La API key solo existe en el backend (gestor de secretos), con los scopes mínimos.
 - [ ] `external_subject_id` opaco (sin emails ni teléfonos).
@@ -150,6 +177,10 @@ El receptor DEBE deduplicar por `GS-Webhook-Id` y responder 2xx rápido (procesa
 - [ ] Webhooks verificados y deduplicados.
 - [ ] Sesiones cerradas explícitamente al terminar el flujo de negocio.
 - [ ] Manejo de `Superseded` en la app (otra instancia del mismo dispositivo).
+- [ ] **Si usa historial:** DPIA cerrada, textos de consentimiento **por propósito** aprobados, retención declarada y endpoint de borrado funcionando.
+- [ ] **Si usa `POOL`:** la app de conductor nunca recibe `nearby`/`rings`; solo `density` sin identificadores, y el conductor no puede ver a los demás.
+- [ ] **Si usa BYOK:** términos del proveedor revisados y aceptados; coste monitorizado en `provider-usage`.
+- [ ] **Si usa tags:** el texto de privacidad informa del despliegue de la red de búsqueda y ofrece desactivación.
 
 ## 8. Antipatrones
 - Incluir la API key en la app o en el frontend web.
@@ -159,3 +190,13 @@ El receptor DEBE deduplicar por `GS-Webhook-Id` y responder 2xx rápido (procesa
 - Activar `sharing` automáticamente al unirse sin acción del usuario.
 - Mezclar geocodificación de Google con mapas MapLibre.
 - Guardar por su cuenta el historial de ubicaciones recibidas sin base legal ni política de retención.
+
+## 9. Antipatrones de la pista E
+
+Los cinco anteriores siguen siendo antipatrones. Estos se añaden:
+
+- **Conceder `HISTORY` o `ANALYTICS` desde el backend.** Es imposible por diseño (INV-SHR-5) y, si se intenta, falla. El consentimiento es del sujeto, no del tenant.
+- **Gravar una celda H3, una ETA o un perfil como etiqueta de Prometheus.** Enruta el comportamiento de un usuario concreto a un sistema de métricas al que muchos tienen acceso. Los agregados se guardan en PostgreSQL (`13` §8.3).
+- **Degradar en silencio a la estimación propia cuando el proveedor falla.** Devuelve `503 PROVIDER_UNAVAILABLE`: un integrador que eligió proveedor por cobertura necesita distinguir "no hay ruta" de "no supe".
+- **Enviar la predicción visual como si fuera una medición.** Se rechaza con `INVALID_LOCATION`. La predicción es para dibujar; el dato persistente es la medición.
+- **Tratar `density` como `nearby`.** `density` está deliberadamente empobrecido (sin identificadores, con desplazamiento y retraso). Pedir `nearby` para un pasajero es pedir una surveillance de la ubicación de los conductores; por eso exige `pools:query`, que es de aplicación.

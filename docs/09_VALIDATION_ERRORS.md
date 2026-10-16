@@ -105,16 +105,26 @@ fn process_publish(conn, msg: PublishLocation) -> PublishAck:
             Accepted  =>
                 results.push(ACCEPTED(s.sequence))
                 last_accepted = Some(s); max_seq = s.sequence
-                bus.publish(loc_topic(session), LocationUpdate{session, member, s, received_at: now, LIVE})
+                // 4-bis. Paso de estimación (22 §2.8). Solo si policy.track_estimates_enabled.
+                //        La unidad es (device, sequence): una muestra publicada en varias
+                //        sesiones conserva la misma sequence y se estima una sola vez.
+                est = track_cache.get_or_compute(device, s.sequence,
+                          || track.update(track_state(device), s, policy, now))
+                bus.publish(loc_topic(session), LocationUpdate{
+                    session, member, s, received_at: now, LIVE,
+                    estimate: est.for_session(session, member) })
     // 5. Efectos finales
     if let Some(s) = last_accepted:
         if session.snapshot_ttl_seconds > 0: ephemeral.set_snapshot(session, member, update(s), ttl)
         ephemeral.devseq_max(device, max_seq)
         geofence_engine.evaluate(...)   // F11, asíncrono, nunca bloquea
+        history_writer.enqueue(...)     // E6, canal acotado, nunca bloquea (24 §2)
     return PublishAck { session_id, request_error: UNSPECIFIED, results, retry_after_ms: 0 }
 ```
 
 `seq_compare_and_set` DEBE ser atómico (script Lua en Redis/Valkey; mutex en memoria). Semántica: si no existe valor previo → `Accepted`; si `seq > prev` → guardar y `Accepted`; si `seq == prev` → `Duplicate`; si `seq < prev` → `Stale`.
+
+**Invariante del paso de estimación (P-E3 / `FR-LOC-006`).** El paso 4-bis **nunca** modifica ni descarta la muestra `s`: la estimación viaja en el campo aparte `LocationUpdate.estimate`, etiquetada `FILTERED` o `MAP_MATCHED`. Un fallo del motor de trayectoria (por ejemplo, un conflicto de versión del estado en la ingesta HTTP) **no** invalida la aceptación: en ese caso `estimate` va ausente y se incrementa `gs_track_state_conflict_total`. La aceptación nunca depende de la disponibilidad del filtro.
 
 ## 5. Validación de otros recursos
 
@@ -150,6 +160,53 @@ Los campos y tipos exactos están en OpenAPI. Reglas semánticas adicionales:
 | Geocercas | `14_GEOFENCING.md` §3 | 422 |
 | `IngestLocations.samples` | 1..=`max_samples_per_publish_http` | 413 `PAYLOAD_TOO_LARGE` si excede |
 
+### 5.1 Validación de recursos de la pista E
+
+| Recurso | Reglas | Error |
+|---|---|---|
+| `CreateSession.mode = POOL` | solo aplicación; un dispositivo recibe `not_allowed` | 422 / 403 |
+| `CreateSession.history_mode` | enum; `OFF` por defecto; solo aplicación o `manage` | 422 |
+| `UpdateSession.history_mode` | ≠ `OFF` exige `tenant.history_allowed` | 403 `FEATURE_DISABLED` |
+| `SetSharing.purposes` | ⊆ `{HISTORY, ANALYTICS}`; sin duplicados; solo el propio subject (INV-SHR-5) | 422 / 403 `PERMISSION_DENIED` |
+| `SetSharing.purposes = {HISTORY}` | exige `session.history_mode ≠ OFF` | 422 `CONSENT_REQUIRED` |
+| `AddMember.capabilities` en sesión `POOL` | ⊆ `{publish}` (INV-POOL-1) | 422 |
+| `AddMember` en sesión `POOL` por dispositivo | `not_allowed` | 403 `PERMISSION_DENIED` |
+| `SetAvailability` | solo `me`; solo en sesión `POOL`; enum `AVAILABLE`/`BUSY`/`PAUSED` | 403 / 422 |
+| `UpdateMember.availability` / `.attributes` | solo aplicación con `pools:manage`; ≤ `pool_max_attributes` entradas; clave `^[a-z0-9_]{1,32}$`; valor ≤ 64 caracteres | 403 / 422 |
+| `Nearby.center`, `radius_m` | lat/lon válidos; `radius_m` 1..=`pool_query_max_radius_m` | 422 |
+| `Nearby.limit` | 1..=100 | 422 |
+| `Nearby.filter.attributes` | ≤ 3 entradas de igualdad | 422 |
+| `Nearby.rank` | `distance` o `eta`; `eta` exige `pool_eta_prefilter` ≥ 1 | 422 |
+| `Nearby.max_age_s` | ≥ 0 | 422 |
+| `Rings.center`, `ring_step_m` o `k` | exactamente uno de los dos; `max_rings` ≥ 1; `per_ring_limit` 1..=100 | 422 |
+| `Eta.origins`, `.destinations` | ≥ 1 cada uno; `len(origins) × len(destinations) ≤ eta_max_matrix_cells` | 422 |
+| `Eta.mode` | enum de modo de transporte | 422 |
+| `Eta.source_preference` | `PROVIDER`, `LEARNED`, `ESTIMATED` o ausente | 422 |
+| `Assignment.workers`, `.tasks` | ≥ 1 cada uno; `size ≤ assignment_max_size` | 422 / 413 |
+| `Assignment.capacity` | ≥ 1 | 422 |
+| `Assignment.algorithm` | `hungarian` (capacity = 1) o `min_cost_flow` | 422 |
+| `Assignment.max_cost` | ≥ 0 | 422 |
+| `Provider.<port>` | `port` ∈ `{route_matrix, route, map_matching, geocoding}`; URL `https://`; clave no vacía y ≤ 4096 | 422 |
+| `IngestHistory.samples` | 1..=`max_samples_per_publish_http`; `captured_at` con antigüedad ≤ `history_backfill_max_age_s` | 422 |
+| `IngestHistory` (sesión) | sesión `ACTIVE` o cerrada hace < `history_backfill_grace_s`; `HISTORY ∈ consent_purposes` vigente | 403 `CONSENT_REQUIRED` / 409 |
+| `Trace.from`, `.to` | `from < to`; rango ≤ ventana máxima del tenant | 422 |
+| `Trace.simplify_m` | 0..=1000 | 422 |
+| `Trace.format` | `json`, `polyline` o `gsp1` | 422 |
+| `Heatmap.metric` | `presence`, `stops` o `speed` | 422 |
+| `Heatmap.resolution` | 5..=12 y ≥ la resolución mínima del tenant | 422 |
+| `SpeedProfile.cell` / `.bbox` | exactamente uno de los dos; `cell` debe ser una celda H3 de la resolución indicada | 422 |
+| `Export.format` | `ndjson` o `csv` | 422 |
+| `Export.from`, `.to` | `from < to` | 422 |
+| `Tag.model`, `.name` | ≤ 100 caracteres; sin coordenadas ni identificadores de persona | 422 |
+| `EdgeReport.hashed_eid` | 16 bytes en base64url o hex; `time_bucket` ≤ 1 h de antigüedad y ≥ `edge_rotation_s` en el pasado | 422 |
+| `EdgeReport.ciphertext` | 1..=4096 bytes; base64url | 422 |
+| `EdgeReport.finder_ephemeral_pub` | punto P-256 comprimido (33 bytes SEC1) | 422 |
+| `EdgeReportsLookup.hashed_eids` | 1..=`edge_lookup_max_ids` entradas, sin duplicados | 422 |
+| `LpWebhook.fport` | 0..=255; debe existir un decodificador para el modelo registrado | 422 |
+| `SamplingRule.interval_ms` | acotado por el cliente a los rangos de `17` §4.1 (T-30) | aplicado, no error |
+
+**Error de consentimiento.** Si la operación requiere un propósito que el subject no ha otorgado, la respuesta es `403 CONSENT_REQUIRED` (nuevo código, §6). Nunca se degrada a `PERMISSION_DENIED` ni se escribe parcialmente.
+
 ## 6. Catálogo de errores
 
 Fuente del nombre: `ErrorCode` en `common.proto`. En REST, `code` = nombre sin `ERROR_CODE_`.
@@ -181,6 +238,9 @@ Fuente del nombre: `ErrorCode` en `common.proto`. En REST, `code` = nombre sin `
 | `TOO_MANY_SUBSCRIPTIONS` | — | `StreamError` | No | Excede `max_subscriptions` | Reducir suscripciones |
 | `TEMPORARILY_UNAVAILABLE` | 503 + `Retry-After` | `StreamError`, `request_error`, cierre 4503 | Sí | Dependencia caída, drenaje, sobrecarga | Reintentar con backoff |
 | `INTERNAL` | 500 | `StreamError`, cierre 4500 | Sí (con backoff, máx. 3) | Error inesperado | Reintentar; reportar `request_id` |
+| `FEATURE_DISABLED` | 403 | `StreamError` | No | La política del tenant no habilita la capacidad solicitada (pools, historial, analítica, edge, tools) | Detener; revisar la política del tenant |
+| `CONSENT_REQUIRED` | 403 | `StreamError` | No | Falta el propósito de consentimiento del subject (`HISTORY` / `ANALYTICS`) | Solicitar el consentimiento al usuario; reintentar |
+| `PROVIDER_UNAVAILABLE` | 503 + `Retry-After` | — | Sí | Se exigía `source_preference = provider` y el proveedor no respondió | Reintentar o quitar la exigencia de proveedor |
 
 Reglas:
 - El servidor NO DEBE emitir un `code` fuera de este catálogo.

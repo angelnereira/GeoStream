@@ -138,6 +138,81 @@ Ver `14_GEOFENCING.md`.
 - `POST /v1/ingest/locations` — mismas precondiciones que `08` §6.4 (devueltas como Problem con su HTTP) y mismo algoritmo por muestra (`09` §4). Respuesta 200 con `results` alineados con `samples`.
 - Límite de muestras: `max_samples_per_publish_http` (política). Rate limit: el mismo token bucket por (dispositivo, sesión) que el stream, compartido.
 
+### 9.9 Pools de disponibilidad (E4)
+Ver `23_MOBILITY.md`. Todas estas operaciones exigen política de tenant `pools_allowed` y son **aditivas**: no cambian el comportamiento de `/v1/sessions` ni de `/v1/sessions/{id}/members` para los modos existentes.
+
+| Operación | Scope de aplicación | Scope de dispositivo | Notas |
+|---|---|---|---|
+| `POST /v1/pools` | `pools:manage` | ✗ | Crea una sesión con `mode = POOL`. No acepta `owner_external_subject_id` ni `initial_members`; los conductores entran solos. |
+| `GET /v1/pools/{id}` | `sessions:read` | ✗ | Devuelve la `Session` con `mode = POOL`. |
+| `GET /v1/pools/{id}/nearby` | `pools:query` | ✗ | §9.9.1 |
+| `GET /v1/pools/{id}/rings` | `pools:query` | ✗ | §9.9.2 |
+| `GET /v1/pools/{id}/density` | `pools:query` | `pools:density` | §9.9.3; **sin identificadores** |
+| `PUT /v1/pools/{id}/members/{member_id}/availability` | `pools:manage` | `sharing:write` (solo `me`) | `AVAILABLE` / `BUSY` / `PAUSED` |
+| `PUT /v1/pools/{id}/members/{member_id}/attributes` | `pools:manage` | ✗ | Solo aplicación; ≤ `pool_max_attributes` entradas (`09` §5.1) |
+| `POST /v1/pools/{id}/reset-odometer` | `members:write` | ✗ | Reinicia el odómetro de un miembro del pool |
+
+`POST /v1/pools` es un alias de sugar sintáctico de `POST /v1/sessions` con `mode = POOL` forzado: **no** duplica reglas. Su respuesta es la misma `Session` con `ETag`.
+
+#### 9.9.1 `nearby`
+`GET /v1/pools/{id}/nearby?lat=&lon=&radius_m=&limit=&rank=&max_age_s=&filter.attributes[k]=v`
+
+Ordena por `distance` (predeterminado) o por `eta`. Con `rank = eta` se aplica el prefiltrado `pool_eta_prefilter` (los N candidatos más cercanos) antes de estimar el tiempo de llegada. Cada elemento incluye `member_id`, `distance_m`, `age_ms`, `availability`, `attributes` (si los pidió el filtro), `position` y, con `rank = eta`, `eta_s` y `mode`.
+
+Nunca incluye a quien está `PAUSED` ni a quien no está conectado, salvo que `max_age_s` lo permita explícitamente. Límite duro: `pool_query_max_radius_m`.
+
+#### 9.9.2 `rings`
+`GET /v1/pools/{id}/rings?lat=&lon=&ring_step_m=&k=&per_ring_limit=`
+
+Devuelve anillos concéntricos desde el centro. Exactamente uno de `ring_step_m` o `k` debe enviarse. `per_ring_limit` acota cada anillo (1..=100); el resto se omite y la respuesta indica `truncated: true` en el anillo afectado. Solo para aplicación.
+
+#### 9.9.3 `density`
+`GET /v1/pools/{id}/density?lat=&lon=&radius_m=&resolution=`
+
+Devuelve **marcadores aproximados y anónimos**, sin `member_id`, sin `subject_id`, sin `device_id` y sin marcas de tiempo exactas (`FR-POOL-006`). Cada marcador lleva un conteo, un centroide de celda H3 desplazado de forma aleatoria pero acotada, rumbo cuantizado a 8 sectores y `delay_ms ≥ pool_density_delay_s`. Máximo `pool_density_max_markers` marcadores. Es la **única** consulta de pool accesible a un dispositivo, y existe precisamente para que un pasajero no necesite ver conductores individuales.
+
+### 9.10 Herramientas de movilidad (E5)
+Ver `23_MOBILITY.md` §4–§7. Todos exigen `tools:use` y `tenant.tools_allowed`.
+
+| Operación | Descripción |
+|---|---|
+| `POST /v1/tools/eta` | Matriz de tiempos de llegada origen→destino. Requiere scope de aplicación **o** de dispositivo con `tools:use`. |
+| `POST /v1/tools/assignments` | Asignación por lotes de tareas a trabajadores; `hungarian` o `min_cost_flow`. |
+| `POST /v1/tools/routes` | Ruta sobre el grafo vial propio o por Provider Gateway (`GS_GRAPH_PATHS`). |
+
+Los tres aceptan `source_preference ∈ {PROVIDER, LEARNED, ESTIMATED}`. Con `PROVIDER` y el proveedor caído se devuelve `503 PROVIDER_UNAVAILABLE` con `Retry-After`; **nunca** se degrada silenciosamente a la estimación propia, porque el integrador pidió explícitamente el proveedor.
+
+`GET/PUT/DELETE /v1/providers/{port}` (scope `providers:manage`) configuran el Provider Gateway: `port ∈ {route_matrix, route, map_matching, geocoding}`, URL `https://`, credencial BYOK **del tenant** cifrada en reposo. El cuerpo de la petición **nunca** devuelve la credencial; `PUT` con la misma credencial la rota y emite auditoría `provider.rotated` (`23` §8).
+
+### 9.11 Historial y analítica (E6/E7)
+Ver `24_HISTORY_ANALYTICS.md`. Todas exigen la política correspondiente del tenant; sin ella devuelven `403 FEATURE_DISABLED`.
+
+| Operación | Scope | Notas |
+|---|---|---|
+| `POST /v1/sessions/{id}/history` | dispositivo `ingest:write` | Ingesta de muestras retroactivas (`24` §2). |
+| `GET /v1/sessions/{id}/trace?from=&to=&simplify_m=&format=` | `history:read` | Polilínea de la sesión; `format ∈ {json, polyline, gsp1}`. |
+| `GET /v1/sessions/{id}/trips`, `GET /v1/trips/{trip_id}` | `history:read` | Viajes derivados. |
+| `GET /v1/analytics/heatmap` | `analytics:read` | Agregado k-anónimo. |
+| `GET /v1/analytics/od-matrix` | `analytics:read` | Pares origen-destino k-anónimos. |
+| `GET /v1/analytics/speed-profile` | `analytics:read` | Percentiles por celda y franja. |
+| `GET /v1/analytics/mobility-profile` | `analytics:read` | Exige consentimiento `ANALYTICS` del sujeto. |
+| `GET /v1/analytics/places` | `analytics:read` | Lugares aprendidos, k-anónimos. |
+| `POST /v1/exports`, `GET /v1/exports/{id}` | `history:read` | Exportación asíncrona; la URL de descarga caduca (`24` §4). |
+
+Toda respuesta analítica incluye `k_anonymity_applied` y `suppressed_cells` para que el integrador sepa qué se ocultó, sin revelar los valores suprimidos.
+
+### 9.12 Dispositivos edge (E8)
+Ver `25_EDGE_DEVICES.md`. Todas exigen `edge_enabled` en la política del tenant.
+
+| Operación | Scope de aplicación | Scope de dispositivo | Notas |
+|---|---|---|---|
+| `POST /v1/tags`, `GET /v1/tags`, `GET /v1/tags/{id}`, `DELETE /v1/tags/{id}` | `tags:manage` | `tags:manage` | Registro y baja. El cuerpo **nunca** acepta ni devuelve la `EIK` (`FR-EDGE-001`). |
+| `POST /v1/edge/reports` | ✗ | `edge:report` | Reporte cifrado de sightings. |
+| `POST /v1/edge/reports/lookup` | ✗ | `edge:lookup` | Consulta de los propios tags; el servidor entrega los blobs **sin poder descifrarlos**. |
+| `POST /v1/edge/lpwan/{integration_id}/webhook` | ✗ | firma HMAC de integración | Ingesta LPWAN (`25` §4). |
+
+`POST /v1/edge/reports/lookup` responde `429 RATE_LIMITED` con el bucket por (dueño, `hashed_eid`), porque es una operación cara y susceptible de abuso de descubrimiento (`FR-EDGE-005`).
+
 ## 10. Webhooks
 
 ### 10.1 Modelo
@@ -145,6 +220,19 @@ Endpoints registrados por tenant (`/v1/webhooks`). Cada evento de dominio que pr
 
 ### 10.2 Catálogo de tipos
 `session.created`, `session.updated`, `session.closed`, `session.expired`, `member.joined`, `member.updated`, `member.left`, `member.revoked`, `sharing.started`, `sharing.stopped`, `geofence.entered` (F11), `geofence.exited` (F11), `webhook.test`. Esquemas en OpenAPI (`webhooks:`).
+
+**Tipos añadidos por la pista E**, todos **sin coordenadas** (FR-WHK-005):
+
+| Tipo | Cuándo | Qué lleva |
+|---|---|---|
+| `geofence.dwell` (E5) | Permanencia ≥ `geofence_dwell_min_seconds` | `geofence_id`, `member_id`, `entered_at`, `dwell_s` |
+| `track.stop_started`, `track.stop_ended` (E2) | Entrada y salida de parada online | `member_id`, `stop_index`, `duration_s`; **sin** centroide |
+| `trip.completed` (E6) | Cierre de viaje | `trip_id`, `started_at`, `ended_at`, `distance_m`, `stop_count`; **sin** polilínea |
+| `pool.member_online`, `pool.member_offline` (E4) | Conexión y desconexión en un pool | `session_id`, `member_id` |
+| `pool.member_availability_changed` (E4) | Cambio de `availability` | `member_id`, `from`, `to` |
+| `edge.tag_registered`, `edge.tag_removed` (E8) | Alta y baja de tag | `tag_id`, `model`; **nunca** la `EIK` |
+
+Cada tipo lleva en OpenAPI la extensión `x-gs-phase` con la fase que lo introduce (`E2`, `E4`…), de modo que un integrador pueda filtrar por fase sin consultar este documento.
 
 Envoltorio:
 
@@ -180,11 +268,22 @@ Envoltorio:
 ### 10.5 Contenido
 - Ningún webhook contiene coordenadas (FR-WHK-005). Quien necesite la ubicación usa el snapshot o el stream con `locations:read`.
 - `data` contiene el recurso REST completo (`Session`, `Member`) en su estado tras el evento.
+- **Regla derivada del historial (E6/E7/E8):** tampoco contiene una `LocationEstimate`, una polilínea `gsp1`, un centroide de parada, una celda H3 ni un perfil por sujeto. Un webhook describe **qué pasó**, no **dónde**; la ubicación se pide por el canal autorizado que corresponda.
 
 ## 11. Versionado y deprecación
 - Cambios aditivos (campos opcionales nuevos en respuestas, endpoints nuevos, valores de enum nuevos documentados como posibles) no cambian `/v1`. Los clientes DEBEN ignorar campos desconocidos en respuestas y tratar valores de enum desconocidos de forma segura.
 - Cambios incompatibles → `/v2`, conviviendo con `/v1` durante ≥ 6 meses.
 - Endpoints en deprecación responden con `Deprecation: @<unix>` y `Sunset: <fecha HTTP>`.
+
+**Compatibilidad de la pista E (regla dura).** Todas las operaciones E4–E8 son **aditivas bajo `/v1`** y llevan `x-gs-phase` en OpenAPI. Ninguna modifica un contrato existente de forma incompatible:
+
+- `Session.mode` suma el valor `POOL`; los clientes que no lo conocen lo tratan como `UNRECOGNIZED_MODE` y no asumen nada.
+- `Member` suma `availability`, `attributes`, `purposes` y `version`; todos opcionales.
+- `LocationUpdate` suma el campo `estimate` y el mensaje `TrackEvent` (campo 28 de `ServerMessage.body`), sin renumerar ningún campo existente.
+- `ClientMessage.body` suma `Subscribe.replay_trace` sin renumerar.
+- Los errores nuevos (`FEATURE_DISABLED`, `CONSENT_REQUIRED`, `PROVIDER_UNAVAILABLE`) solo aparecen ante peticiones que exigen capacidades nuevas; un cliente que nunca las usa nunca los verá.
+
+Un cliente escrito antes de la pista E debe seguir funcionando **sin cambios** contra un servidor que sí la soporta (`NFR-COMPAT-003`).
 
 ## 12. CORS (F8)
 Solo para orígenes en `application.allowed_origins`. Métodos y cabeceras permitidos: los de esta API. `Access-Control-Allow-Credentials: false` (la autenticación va en cabecera, no en cookies).

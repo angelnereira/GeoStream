@@ -20,13 +20,20 @@ erDiagram
   DEVICE |o--o{ MEMBERSHIP : "publica (publisher_device)"
   TENANT ||--o{ WEBHOOK_ENDPOINT : tiene
   TENANT ||--o{ GEOFENCE : tiene
-  SESSION |o--o{ GEOFENCE : "acota (opcional)"
+  SESSION |o--o{ GEOFENCE : "acorta (opcional)"
+  TENANT ||--o{ TAG : registra
+  SUBJECT ||--o{ TAG : "posee (dueño)"
+  TENANT ||--o{ EDGE_REPORT : "almacena (blob opaco)"
+  SESSION ||--o{ TRIP : "resumen (derivado)"
+  TENANT ||--o{ LOCATION_POINT : "historial (opt-in)"
 ```
+
+Las entidades `Trip`, `LearnedPlace`, `LocationPoint` y `EdgeReport` se describen en `24_HISTORY_ANALYTICS.md` y `25_EDGE_DEVICES.md`; este documento fija solo su identidad y sus invariantes.
 
 ## 2. Identificadores
 
 - Formato público: `<prefijo>_<32 hex minúscula>`, donde los 32 hex son un **UUIDv7** sin guiones (`Uuid::simple()`).
-- Regex general: `^(ten|app|key|sub|dev|ses|mem|inv|whk|evt|geo|con|req|aud)_[0-9a-f]{32}$`.
+- Regex general: `^(ten|app|key|sub|dev|ses|mem|inv|whk|evt|geo|con|req|aud|tag|trp|plc|exp|lpw)_[0-9a-f]{32}$`.
 - En PostgreSQL se almacena el UUID (`uuid`); el prefijo se añade/valida en la frontera (`gs-domain::ids`), con un tipo newtype por entidad (`SessionId`, `MemberId`, …). Un ID con prefijo incorrecto es un error de validación, nunca se reinterpreta.
 - Los IDs no son secretos ni credenciales. UUIDv7 revela el instante de creación; se acepta (ADR-0011).
 - `external_subject_id` (del integrador): `^[A-Za-z0-9._:\-]{1,128}$`. El integrador DEBERÍA usar identificadores opacos, nunca correos ni teléfonos (por eso `@` y `+` no se admiten).
@@ -41,6 +48,11 @@ erDiagram
 | `dev_` | Device | `con_` | Conexión de stream |
 | `ses_` | Session | `req_` | Petición (correlación) |
 | `mem_` | Membership | `aud_` | Registro de auditoría |
+| `tag_` | Tag BLE registrado (`25` §2.2) | `trp_` | Viaje (`24` §3) |
+| `plc_` | Lugar aprendido (`24` §3) | `exp_` | Exportación de historial (`24` §4) |
+| `lpw_` | Integración LPWAN (`25` §4) | | |
+
+`h3_cell` **no** es un ID público: es una celda entera opaca usada como clave de particionado y de agregación, y se trata como coordenada a efectos de redacción (`10` §8.2).
 
 ## 3. Tenant, Application, Subject, Device
 
@@ -72,14 +84,15 @@ Atributos: `id`, `tenant_id`, `subject_id`, `application_id`, `installation_id`,
 |---|---|---|
 | `id` | `SessionId` | |
 | `tenant_id` | `TenantId` | |
-| `mode` | `SessionMode` | `ONE_TO_ONE`, `ONE_TO_MANY`, `MANY_TO_MANY`; inmutable |
+| `mode` | `SessionMode` | `ONE_TO_ONE`, `ONE_TO_MANY`, `MANY_TO_MANY`, `POOL`; inmutable |
 | `status` | `SessionStatus` | `ACTIVE`, `CLOSED`, `EXPIRED` |
 | `owner_subject_id` | `SubjectId?` | presente si la creó un dispositivo; puede cambiar por transferencia |
 | `created_by` | `Actor` | dispositivo o aplicación |
 | `expires_at` | timestamp | obligatorio; ≤ `created_at + max_session_ttl_seconds` y tras extensiones ≤ `now + max_session_ttl_seconds` |
-| `max_members` | u32 | 2 en `ONE_TO_ONE`; en otros modos 2..=`max_members_cap` |
-| `snapshot_ttl_seconds` | u32 | 0..=`snapshot_ttl_max_seconds`; 0 = sin snapshot |
+| `max_members` | u32 | 2 en `ONE_TO_ONE`; en otros modos 2..=`max_members_cap` (en `POOL`, ≤ `max_pool_members_cap`) |
+| `snapshot_ttl_seconds` | u32 | 0..=`snapshot_ttl_max_seconds`; 0 = sin snapshot; default `pool_snapshot_ttl_default_seconds` en `POOL` |
 | `stale_after_seconds` | u32 | 5..=3600; pista para clientes |
+| `history_mode` | `HistoryMode` | `OFF` (por defecto), `TRACE`, `TRACE_AND_ANALYTICS`; visible en `SessionInfo` |
 | `metadata` | mapa string→string | ≤ 32 entradas; clave `^[a-z0-9_.-]{1,64}$`; valor ≤ 512 caracteres UTF-8; NO DEBE contener datos personales |
 | `closed_reason` | enum? | `CLOSED_BY_MEMBER`, `CLOSED_BY_APPLICATION`, `OWNER_LEFT`, `ADMIN` |
 | `version` | u64 | se incrementa en cada cambio; base de ETag |
@@ -91,8 +104,19 @@ Atributos: `id`, `tenant_id`, `subject_id`, `application_id`, `installation_id`,
 | `ONE_TO_ONE` | 2 (fijo) | todas | `publish`, `read` | |
 | `ONE_TO_MANY` | default `default_max_members_one_to_many`, tope `max_members_cap` | todas | `read` | Varios publicadores son posibles si se conceden explícitamente |
 | `MANY_TO_MANY` | default `default_max_members_many_to_many`, tope `max_members_cap` | todas | `publish`, `read` | |
+| `POOL` | default `default_max_members_pool`, tope `max_pool_members_cap` | todas (solo aplicación) | **`publish` únicamente** | Pool de disponibilidad; ver §4.2.1 |
 
 "Por defecto" aplica cuando una invitación o alta directa no especifica capacidades. Las capacidades explícitas siempre prevalecen dentro de las reglas de §5.3.
+
+#### 4.2.1 Modo `POOL` (ADR-0027)
+
+Un pool es una sesión de disponibilidad, no un concepto nuevo: reutiliza membresías, consentimiento, revocación en vivo, publicador único, secuencias, snapshot y el consumidor del lado servidor.
+
+- Solo lo crea un principal de aplicación con el scope `pools:manage`.
+- **INV-POOL-1:** en una sesión `POOL`, ningún miembro **dispositivo** puede tener `read`, `invite` ni `manage`. Los conductores no se ven entre sí. Un intento de alta, invitación o `PATCH` con esas capacidades devuelve `422 VALIDATION_FAILED` con el campo `capabilities`, y un intento de lectura del stream por un conductor devuelve `403 PERMISSION_DENIED`.
+- Poner un conductor en línea = el propio dispositivo activa `sharing = true` (`INV-SHR-1` no cambia). Desconectarse = `sharing = false`, que **borra la entrada del índice vivo de forma síncrona antes de responder** (`23` §2.2).
+- Cada miembro tiene además `availability ∈ {AVAILABLE, BUSY, PAUSED}` (por defecto `AVAILABLE` al ponerse en línea) y `attributes` (mapa de hasta `pool_max_attributes` entradas, clave `^[a-z0-9_]{1,32}$`, valor ≤ 64 caracteres). `availability` y `attributes` **solo** se proyectan a principales de aplicación, nunca en `MemberStatus` para dispositivos (`23` §3.3).
+- Un dispositivo puede estar en un `POOL` y en la sesión de su viaje a la vez; publica la **misma** muestra (misma `sequence`) en ambas y el pool lo muestra como `BUSY`.
 
 ### 4.3 Máquina de estados de sesión
 
@@ -133,6 +157,9 @@ Efectos obligatorios al entrar en `CLOSED` o `EXPIRED` (misma transacción + efe
 | `sharing` | bool, default `false` |
 | `publisher_device_id` | `DeviceId?`; presente si y solo si `sharing=true` |
 | `sharing_changed_at` | timestamp? |
+| `consent_purposes` | conjunto ⊆ `{HISTORY, ANALYTICS}`, default `∅`; **solo el propio subject** puede modificarlo (`INV-SHR-5`) |
+| `availability` | `AVAILABLE`, `BUSY`, `PAUSED`; solo en sesiones `POOL`; default `AVAILABLE` |
+| `attributes` | mapa string→string, ≤ `pool_max_attributes`; clave `^[a-z0-9_]{1,32}$`, valor ≤ 64 caracteres; solo en sesiones `POOL`; **solo la aplicación** puede escribirlo |
 | `joined_at`, `ended_at` | |
 | `joined_via` | `CREATOR`, `DIRECT_ADD`, `INVITATION` (+ `invitation_id`) |
 | `version` | u64 |
@@ -160,6 +187,7 @@ Efectos de `LEFT` / `REVOKED`: `sharing=false`, `publisher_device_id=NULL`, borr
 - INV-MEM-5: retirar `read` termina sus suscripciones con `SubscriptionEnded{PERMISSION_CHANGED}`.
 - INV-MEM-6: a lo sumo una membresía `ACTIVE` por `(session_id, subject_id)`.
 - INV-MEM-7: el número de membresías `ACTIVE` ≤ `max_members` (garantizado con bloqueo de la fila de sesión en la transacción de alta).
+- INV-MEM-8: en una sesión `POOL`, un miembro dispositivo tiene solo `publish` (INV-POOL-1, §4.2.1).
 
 ### 5.4 Salida del propietario (FR-SES-007)
 Cuando el `OWNER` pasa a `LEFT` o `REVOKED`:
@@ -208,9 +236,13 @@ stateDiagram-v2
 - INV-SHR-2: solo el propio subject activa la compartición. Ni la aplicación ni un manager pueden.
 - INV-SHR-3: `PUT sharing=true` cuando ya es `true` desde el mismo dispositivo es idempotente (200, sin eventos).
 - INV-SHR-4: cada transición genera auditoría (`sharing.started` / `sharing.stopped`), outbox y `MemberStatus` a suscriptores.
+- INV-SHR-5: `consent_purposes` solo puede cambiarlo el **propio subject**, desde su propio dispositivo, con `sharing:write`. Ni la aplicación ni un miembro con `manage` pueden otorgar, ampliar ni retirar `HISTORY` o `ANALYTICS` en nombre de otro subject. Un intento devuelve `403 PERMISSION_DENIED`. Los cambios se auditan (`membership.consent_updated`) sin coordenadas.
+- El conjunto `consent_purposes` es independiente del interruptor `sharing`: retirar un propósito **no** detiene la compartición en vivo, pero sí las escrituras de historial y analítica de esa membresía de inmediato (`24` §1).
 
 ### 7.3 Efectos de detener
-Antes de responder: `sharing=false`, `publisher_device_id=NULL`, borrar snapshot, `mver++`, `ctl` `SharingChanged`. Después: `MemberStatus` a suscriptores; las publicaciones en vuelo de ese dispositivo se rechazan con `NOT_SHARING`.
+Antes de responder: `sharing=false`, `publisher_device_id=NULL`, borrar snapshot, borrar `{p}:odo:{session}:{member}` y `{p}:stop:{session}:{member}`, `mver++`, `ctl` `SharingChanged`. Después: `MemberStatus` a suscriptores; las publicaciones en vuelo de ese dispositivo se rechazan con `NOT_SHARING`.
+
+En una sesión `POOL`, detener la compartición borra además la entrada del índice vivo **de forma síncrona, antes de responder** (`23` §2.2, T-25).
 
 ## 8. Presencia y estado de miembro
 
@@ -221,10 +253,13 @@ Antes de responder: `sharing=false`, `publisher_device_id=NULL`, borrar snapshot
 | `sharing` | valor actual |
 | `connectivity` | si `sharing=true`: `ONLINE` si existe presencia del `publisher_device_id`; `OFFLINE` si no existe y ya pasó la gracia; si `sharing=false`: siempre `UNSPECIFIED` |
 | `last_location_at` | `captured_at` del snapshot vigente si `sharing=true` y existe snapshot; si no, ausente |
+| `availability` | `AVAILABLE`, `BUSY` o `PAUSED`; **solo en sesiones `POOL`** y **solo para principales de aplicación**; ausente para dispositivos (`23` §1.1) |
+| `attributes` | mapa de atributos; **solo en sesiones `POOL`** y **solo para principales de aplicación**; ausente para dispositivos |
 
 - El cliente calcula la frescura: `STALE` si `now_servidor − last_location_at > stale_after_seconds`.
-- Se emite `MemberStatus` en: cambio de `sharing`, transición de conectividad (tras gracia) y cambio de capacidades/rol.
+- Se emite `MemberStatus` en: cambio de `sharing`, transición de conectividad (tras gracia), cambio de capacidades/rol y, en `POOL`, cambio de `availability`.
 - INV-PRS-1: nunca se revela si un miembro que no comparte está conectado (FR-PRS-004).
+- INV-PRS-2: `availability` y `attributes` de un miembro de `POOL` no se proyectan nunca a una conexión de dispositivo, con independencia de sus capacidades.
 
 ## 9. Ubicación
 
@@ -252,12 +287,42 @@ Algoritmo de aceptación: `09_VALIDATION_ERRORS.md` §4.
 | MemberRevoked | `MemberEvent{REVOKED}` + `SubscriptionEnded` al propio | `member.revoked` | sí |
 | SharingStarted | `MemberStatus` | `sharing.started` | sí |
 | SharingStopped | `MemberStatus` | `sharing.stopped` | sí |
+| ConsentPurposesUpdated (INV-SHR-5) | — | — | sí (`membership.consent_updated`) |
+| AvailabilityChanged (POOL) | `MemberStatus` (solo aplicación) | `pool.member_availability_changed` | sí |
+| PoolMemberOnline / Offline (POOL) | — | `pool.member_online` / `pool.member_offline` | no |
 | ConnectivityChanged | `MemberStatus` | — | no |
 | LocationAccepted | `LocationUpdate` | — | no (ni métricas con coordenadas) |
+| LocationEstimated (E2) | `LocationUpdate.estimate` | — | no |
+| TrackEvent (E2) | `TrackEvent` (campo `track_event = 28`) | `track.stop_started` / `track.stop_ended` | no |
+| StopStarted / StopEnded (E2) | `TrackEvent` | `track.stop_started` / `track.stop_ended` | no |
+| TripCompleted (E6) | — | `trip.completed` | no |
+| TagRegistered / TagRemoved (E8) | — | `edge.tag_registered` | sí |
 | GeofenceTransition (F11) | `GeofenceEvent` | `geofence.entered` / `geofence.exited` | no |
+| GeofenceDwell (E5) | `GeofenceEvent{DWELL}` | `geofence.dwell` | no |
 | InvitationCreated / Revoked / Redeemed | — | — | sí |
 | TokensRevoked, DeviceDeactivated | cierre 4401 de conexiones afectadas | — | sí |
 
 ## 11. Lista de invariantes a probar
 
-`INV-TEN-1`, `INV-SUB-1`, `INV-DEV-1`, `INV-DEV-2`, `INV-SES-1..3`, `INV-MEM-1..7`, `INV-SHR-1..4`, `INV-PRS-1`. Cada invariante DEBE tener al menos una prueba unitaria en `gs-domain` o una prueba de integración en `gs-service`, con su ID en el nombre de la prueba.
+`INV-TEN-1`, `INV-SUB-1`, `INV-DEV-1`, `INV-DEV-2`, `INV-SES-1..3`, `INV-MEM-1..8`, `INV-SHR-1..5`, `INV-PRS-1..2`, `INV-POOL-1`. Cada invariante DEBE tener al menos una prueba unitaria en `gs-domain` o una prueba de integración en `gs-service`, con su ID en el nombre de la prueba.
+
+**Excepción documentada (DR-20261012-02, Opción 1):** cuando la invariante la hace cumplir el esquema PostgreSQL y no el dominio puro —`INV-TEN-1`, `INV-SUB-1`, `INV-DEV-1` y `INV-DEV-2`— basta además una prueba de integración en `gs-store` contra PostgreSQL real, con el ID en el nombre de la prueba. La suite `crates/gs-store/tests/repos_test.rs` cumple esa condición.
+
+## 12. Entidades derivadas
+
+Estas entidades no son editables por el integrador: las calcula el rol `analytics` o el proceso de aceptación, siempre bajo las reglas de `24` y `25`.
+
+| Entidad | Prefijo | Origen | Regla de privacidad |
+|---|---|---|---|
+| `LocationPoint` | — | Escritor de historial | Solo con triple llave (`24` §1). Particionado por `captured_at`. |
+| `Trip` | `trp_` | Cierre de viaje | Pertenece a `(session_id, member_id)`; se purga con `history_trip_retention_days`. |
+| `TripTrack` | — | Polilínea `gsp1` de `Trip` | Versión simplificada; no contiene más precision que la definida por `trip_simplify_tolerance_m`. |
+| `Stop` | — | Paradas offline de `Trip` | Coordenadas; mismo borrado que `Trip`. |
+| `LearnedPlace` | `plc_` | DBSCAN sobre centros de parada | **Derivado y anónimo**: exige `analytics_k_anonymity` subjects distintos; no guarda IDs de subject ni de sesión. |
+| `EdgeReport` | — | Reportes Beacon | Blob opaco con TTL; sin identidad del buscador (`25` §2.6). |
+| `Tag` | `tag_` | Registro de tags | Solo metadatos; **nunca** la clave `EIK`. |
+
+- INV-HIS-1: un `LocationPoint` existe solo si se cumplieron las tres llaves de `24` §1 en el momento de escribirse.
+- INV-HIS-2: retirar `HISTORY` o `ANALYTICS` de `consent_purposes` detiene las escrituras nuevas en menos de un segundo, sin reinicio ni coordinación con otras instancias.
+- INV-HIS-3: todo agregado expuesto (mapa de calor, matriz OD, perfil de velocidad, lugar aprendido) suprime las unidades con menos de `analytics_k_anonymity` subjects distintos.
+- INV-EDGE-1: el servidor nunca almacena la clave `EIK` de un tag, ni en el alta ni en ninguna operación posterior.

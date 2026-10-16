@@ -75,6 +75,10 @@ Validación del hello:
 
 El servidor responde `ServerHello` con: `connection_id`, `protocol_minor` negociado, `server_time`, `auth_expires_at`, `sequence_floor` (§6.2), `limits` (valores efectivos de `17_CONFIGURATION.md` y de la política del tenant), `principal_kind` e IDs del principal.
 
+**Campo `sampling` (E3).** `ServerHello.sampling` lleva la `SamplingPolicy` del tenant (`version`, `rules[]`, `publish`, `wake_region_radius_m`, `downgrade_confirm_s`, `predict_horizon_ms`) que el cliente usa para su muestreo adaptativo y su publicación por cambio significativo (`22` §3.4). Solo llega por este canal autenticado sobre TLS, y **el cliente acota cada valor a los rangos de `17` §4.1 antes de aplicarlo** (T-30). Un cliente que no lo entienda (versión anterior) lo ignora y usa sus defaults locales.
+
+**Campo `core_version` (E3).** `ClientHello.core_version` informa la versión del núcleo Rust del cliente (por ejemplo `0.1.0`), para diagnóstico y para decidir si el servidor puede activar capacidades que dependen del cliente. El servidor **no** rechaza la conexión por este campo.
+
 Tras el hello del dispositivo: registrar presencia, publicar `Supersede` (§6.7) y, para cada membresía donde este dispositivo sea publicador, emitir conectividad `ONLINE` si estaba `OFFLINE`.
 
 ### 6.2 Sequence floor (ADR-0008)
@@ -84,7 +88,7 @@ Tras el hello del dispositivo: registrar presencia, publicar `Supersede` (§6.7)
 
 ### 6.3 Suscripción
 
-`Subscribe{session_id, skip_snapshot}` → `SubscribeAck` o `StreamError`.
+`Subscribe{session_id, skip_snapshot, replay_trace}` → `SubscribeAck` o `StreamError`.
 
 Autorización: `06` §8.3. Errores posibles: `NOT_FOUND`, `PERMISSION_DENIED`, `SESSION_CLOSED`, `SESSION_EXPIRED`, `TOO_MANY_SUBSCRIPTIONS` (más de `limits.max_subscriptions`), `VALIDATION_FAILED` (ID malformado), `TEMPORARILY_UNAVAILABLE`.
 
@@ -100,6 +104,10 @@ Reglas:
 - Suscribirse dos veces a la misma sesión es idempotente: se responde un `SubscribeAck` nuevo.
 - `Unsubscribe` siempre responde `UnsubscribeAck` (idempotente).
 - Las suscripciones no sobreviven a la conexión.
+
+**`replay_trace` (E6, COULD).** Con `replay_trace = true`, tras `SubscribeAck` el servidor envía la traza simplificada de la sesión activa como `LocationUpdate` con `delivery = REPLAY`, respetando `skip_snapshot`. Requiere autorización de historial (`history:read` para aplicaciones, `HISTORY ∈ consent_purposes` y sesión `ACTIVE` para dispositivos); sin ella responde `CONSENT_REQUIRED` o `PERMISSION_DENIED` **antes** del `SubscribeAck`. Si la política del tenant no habilita historial, el campo se ignora como si fuera `false` (nunca es un error por sí solo).
+
+**Minimización de `MemberStatus` en sesiones `POOL`.** `availability` y `attributes` solo se incluyen en `SubscribeAck` y en `MemberStatus` posteriores cuando el suscriptor es un **principal de aplicación**. Para una conexión de dispositivo se omiten siempre (INV-PRS-2), incluso si el suscriptor tiene capacidad `read`.
 
 ### 6.4 Publicación y acks
 
@@ -126,6 +134,15 @@ El cliente:
 - elimina de su cola local toda muestra con resultado distinto de `REJECTED` por error transitorio;
 - trata `REJECTED` como error de programación del SDK (log + métrica), nunca reintenta la misma muestra;
 - ante `NOT_SHARING`, `NOT_PUBLISHER`, `MEMBER_REVOKED`, `NOT_FOUND`, `SESSION_*`: deja de publicar en esa sesión y notifica a la app.
+
+**Estimación adjunta (E2).** Cuando `policy.track_estimates_enabled` es verdadera, cada `LocationUpdate` aceptada lleva `estimate` (campo 6 de `LocationUpdate`), con la estimación canónica calculada por `gs-track` (`22` §2.7). Reglas invariables:
+
+- El campo `estimate` **nunca** sustituye ni modifica la muestra `sample`, que viaja intacta (P-E3 / `FR-LOC-006`).
+- `estimate.kind` es `FILTERED` o `MAP_MATCHED`; **nunca** `MEASURED` ni `PREDICTED` (la predicción visual es exclusivamente local, §6.9).
+- `estimate.position.horizontal_accuracy_m` representa la desviación típica (1σ) de la posición estimada, no la precisión declarada del dispositivo.
+- Si el motor de trayectoria no puede estimar (conflicto de versión del estado en la ingesta HTTP, almacén efímero degradado), el campo **va ausente** y la aceptación no se ve afectada; se incrementa `gs_track_state_conflict_total`.
+
+**`TrackEvent` (E2).** El servidor emite `TrackEvent` como mensaje no solicitado (`request_id = 0`, campo 28 de `ServerMessage.body`) a los suscriptores autorizados de la sesión: `STOP_STARTED`, `STOP_ENDED`, `TRACKING_LOST` y `TRACKING_RESUMED` (`22` §2.7). Solo `STOP_*` llevan `position` (centroide de la parada) y solo `STOP_ENDED` lleva `duration_s`. **El mismo dato por webhook nunca incluye coordenadas** (`FR-WHK-005`).
 
 ### 6.5 Heartbeat e inactividad
 - El cliente envía `Heartbeat{client_time}` cada `limits.heartbeat_interval_ms` (si no ha enviado otro mensaje en ese intervalo puede igualmente enviarlo; siempre es válido).
@@ -155,7 +172,7 @@ Tras el hello de un dispositivo se publica `Supersede{device_id, connection_id}`
 Algoritmo normativo en `09_VALIDATION_ERRORS.md` §4.
 
 ### 7.2 Construcción de `LocationUpdate`
-`{ session_id, member_id (de la membresía del publicador), sample (tal cual se recibió, ya validada), received_at (reloj del servidor al aceptar), delivery = LIVE }`. El servidor NO DEBE modificar posición, `kind`, `source`, `is_mock` ni `motion`.
+`{ session_id, member_id (de la membresía del publicador), sample (tal cual se recibió, ya validada), received_at (reloj del servidor al aceptar), delivery = LIVE, estimate (E2, opcional) }`. El servidor NO DEBE modificar posición, `kind`, `source`, `is_mock` ni `motion` de `sample`; lo derivado va en `estimate` (§6.4).
 
 ### 7.3 Entrega autorizada
 Las actualizaciones se entregan a todas las suscripciones autorizadas de la sesión, **incluida la del propio publicador** si está suscrito (permite mostrar la posición propia tal como la ven los demás). Antes de depositar una actualización o evento en una conexión, la suscripción debe estar autorizada según la caché de `04` §6.2 con antigüedad ≤ `GS_AUTHZ_CACHE_TTL_MS`; si caducó, se revalida (consulta de `mver` coalescida por sesión). Una suscripción que deja de estar autorizada termina con `SubscriptionEnded` (§9).
@@ -164,7 +181,16 @@ Las actualizaciones se entregan a todas las suscripciones autorizadas de la sesi
 Token bucket por (conexión, sesión): capacidad `publish_burst`, una ficha cada `min_publish_interval_ms` (política del tenant). Un `PublishLocation` consume una ficha independientemente del número de muestras. Sin ficha → `PublishAck{request_error=RATE_LIMITED, retry_after_ms}`. Además, límite global de mensajes entrantes por conexión `GS_STREAM_MAX_INBOUND_MSGS_PER_S`; excederlo de forma sostenida (`GS_STREAM_ABUSE_WINDOW_S`) → cierre 4429.
 
 ### 7.5 Eventos de sesión y miembros
-A cada suscripción activa se envían: `MemberEvent`, `MemberStatus`, `SessionEvent`, `GeofenceEvent` (F11), según la tabla de `05` §10. Un evento por suscriptor afectado y transición.
+A cada suscripción activa se envían: `MemberEvent`, `MemberStatus`, `SessionEvent`, `GeofenceEvent` (F11) y `TrackEvent` (E2), según la tabla de `05` §10. Un evento por suscriptor afectado y transición.
+
+### 7.6 Predicción visual: qué NO viaja por el stream
+La predicción visual (`MemberView.renderPosition`, ADR-0030) es **exclusivamente local del cliente**. El cliente puede dibujar una posición `PREDICTED` o interpolada entre muestras, pero esa posición:
+
+- **nunca** se envía como `LocationSample` ni como `PublishLocation`;
+- **nunca** se guarda en el historial ni en el snapshot;
+- **nunca** se escribe en logs ni se reporta como medición.
+
+Si un cliente publica una muestra con `kind = PREDICTED` o `INTERPOLATED`, el servidor la rechaza con `INVALID_LOCATION` en el campo `quality.kind` (`09` §3.3): el camino de medición solo admite `MEASURED` desde el dispositivo.
 
 ### 7.6 Garantías de orden
 - Por conexión, los mensajes del servidor se entregan en el orden en que se encolan.

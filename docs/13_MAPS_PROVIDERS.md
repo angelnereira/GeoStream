@@ -99,16 +99,38 @@ Matriz de proveedores (consulta inicial; revalidar en F9):
 - Clave de API restringida por paquete Android / bundle iOS; nunca una clave de servidor.
 - Requiere que el integrador acepte y cumpla los términos de Google Maps Platform y gestione la facturación.
 
-## 6. Interpolación visual (FR-MAP-005)
+## 6. Interpolación visual (FR-MAP-005, ampliada por ADR-0030)
 - Solo dentro del renderer: anima el marcador desde la posición mostrada hasta la nueva `LocationUpdate` durante `min(Δt entre updates, 2 s)`, con interpolación lineal de latitud/longitud.
-- **Nunca extrapola** más allá de la última posición recibida (sin predicción).
+- **Nunca extrapola** más allá de la última posición recibida.
 - Las posiciones interpoladas no salen del widget: no se exponen por API, no se publican y no se registran.
 - Desactivable (`interpolate: false`). Si `freshness` pasa a `stale`, la animación se detiene en la última posición real.
+
+**Predicción visual (E3).** La línea base **no** predice. La pista E añade `dead reckoning` opcional (`22` §3.6): si el predictor del cliente está habilitado y hay ≥ 2 muestras recientes, puede extrapolar hasta `predict_horizon_ms` con velocidad decaída, y mezcla el resultado con la posición real durante `predict_blend_ms`. Condiciones obligatorias para extrapolar: velocidad ≥ `predict_min_speed_mps` y plausibilidad ≥ `predict_min_plausibility`.
+
+**La predicción es local y efímera.** Una posición `PREDICTED` nunca se publica, nunca entra en la cola sin conexión, nunca se persiste y nunca se registra (`08` §7.6). Un cliente que publique una muestra con `kind = PREDICTED` o `INTERPOLATED` la verá rechazada con `INVALID_LOCATION` en el campo `quality.kind` (`09` §3.3): la línea de medición solo admite `MEASURED`. Esto no es una preferencia de diseño, es una defensa contra el caso en el que un cliente "optimizado" convierte una suposición en un hecho persistente.
 
 ## 7. Privacidad frente a proveedores de mapas
 - El renderer pide teselas del área visible: el proveedor de teselas puede inferir **qué zona se está mirando**, que suele ser donde están las personas seguidas. Para casos sensibles (familia, seguridad), recomendar teselas propias.
 - La geocodificación inversa de la ubicación de otra persona envía esa coordenada al proveedor: el SDK no lo hace automáticamente nunca; es una llamada explícita del integrador.
 - Estas implicaciones se documentan en la guía de integración y deben reflejarse en la política de privacidad del integrador.
 
-## 8. Servidor
-En v1 el servidor no usa proveedores de mapas. Map-matching y rutas del lado servidor son pistas post-GA (F13) con ADR propio, aislados del camino crítico.
+## 8. Provider Gateway (E5)
+
+El servidor **sí** usa proveedores de mapas y rutas, pero **no los posee**: delega la consulta con la credencial **del tenant** (BYOK). ADR-0028.
+
+### 8.1 Principios
+- **BYOK real.** `GET/PUT/DELETE /v1/providers/{port}` (scope `providers:manage`) configura URL `https://` y credencial del tenant. La credencial se cifra en reposo con `GS_DATA_ENCRYPTION_KEY`, **nunca** aparece en una respuesta ni en un log, y puede rotarse sin reiniciar.
+- **Minimización estricta.** Al proveedor se envía **solo** lo que el cálculo necesita (normalmente un par de coordenadas y, en mapas, puntos de consulta). **Nunca** `subject_id`, `device_id`, `session_id`, `external_subject_id` ni metadatos de sesión.
+- **Sin identificadores en el tráfico.** El proveedor ve IPs de nuestra salida, no identidades de GeoStream. Por eso los parámetros de consulta no llevan identificadores del tenant.
+- **Activación explícita.** `tenant.tools_allowed` y `GS_PROVIDERS_ENABLED` están apagados por defecto. Sin historial, ETA ni map-matching funciona sin ningún proveedor.
+- **Degradación honesta.** Si el integrador pidió `source_preference = provider` y el proveedor falla, la respuesta es `503 PROVIDER_UNAVAILABLE`. **Nunca** se devuelve silenciosamente la estimación propia: un integrador que eligió proveedor por cobertura o por contrato necesita saber que no lo obtuvo.
+
+### 8.2 Manifiesto y términos
+Antes de usar un proveedor, `PUT` exige `terms.checked_on` (fecha en la que el tenant confirmó sus términos). Si algún cambio relevante del manifiesto ocurre después, la respuesta pasa a exigir una nueva confirmación. Además, el gateway aplica la `ContentPolicy` del proveedor: qué categorías de vía se pueden pedir, qué perfil de datos se devuelve y qué se puede almacenar en caché.
+
+### 8.3 Límites y coste
+- Timeout `GS_PROVIDERS_TIMEOUT_MS`, concurrencia `GS_PROVIDERS_MAX_CONCURRENT`, caché hasta `GS_PROVIDERS_MAX_CACHE_TTL_S` (que además nunca excede lo que permitan los términos del proveedor).
+- **El uso se contabiliza por tenant y hora en PostgreSQL**, no como etiqueta Prometheus: una etiqueta con `tenant_id` convertiría un contador de negocio en una fuga de volumen por cliente (`10` §8.2). Se expone en `GET /v1/analytics/provider-usage` para que el tenant lo consulte y lo limite.
+
+### 8.4 Alternativa sin proveedor: grafo vial propio
+`GS_GRAPH_PATHS` carga grafos `.gsg` descargados por región. Habilitan map-matching integrado y, como COULD, `POST /v1/tools/route` sobre el grafo propio (ADR-0032). Con esta alternativa, **ninguna coordenada sale de la infraestructura del tenant**, lo que resuelve de raíz el caso de uso que no puede aceptar el BYOK. La atribución ODbL de los datos OSM es obligatoria (`13` §2); antes de distribuir bases derivadas hace falta revisión legal (`10` §9).

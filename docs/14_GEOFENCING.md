@@ -61,14 +61,34 @@ Para cada muestra aceptada `s` (precisión `a`) y cada geocerca candidata `g`:
 - Webhooks: `geofence.entered` / `geofence.exited` sin coordenadas (FR-WHK-005).
 - Auditoría: no (son eventos de datos, no acciones).
 
+### 5.1 Permanencia y proximidad dinámica (E5)
+
+Dos capacidades nuevas, ambas **aditivas** y apagadas por política del tenant (`geofence_dwell_enabled`):
+
+| Capacidad | Qué añade | Reglas |
+|---|---|---|
+| `DWELL` | Nueva transición `GEOFENCE_TRANSITION_DWELL`, emitida al permanecer `INSIDE` durante `dwell_seconds` (atributo opcional de la geocerca; si se omite, `geofence_dwell_min_seconds`) | Una sola emisión por entrada. Se reinicia al salir. **No** lleva coordenadas. |
+| Geocerca dinámica | Círculo **anclado a un miembro** (`anchor_member_id`) de la misma sesión | Se evalúa cuando se mueve cualquiera de los dos, con la misma histéresis de §4. `GeofenceEvent` lleva `anchor_member_id`. |
+
+- El webhook de permanencia es `geofence.dwell` con `geofence_id`, `member_id`, `entered_at` y `dwell_s` — **sin centroide** (`07` §10.2).
+- Límite de geocercas dinámicas por sesión: `max_dynamic_geofences_per_session`. Una geocerca dinámica **caduca** si su ancla no publica durante `track_lost_after_s`: una geocerca que sigue a alguien que ya no está no debe quedarse flotando en el mapa.
+- **La transición canónica la decide el servidor.** El cliente puede evaluar geocercas cercanas para despertar la app y ahorrar batería (`22` §3.7), pero un `GeofenceEvent` que emite el cliente se descarta: la fuente de verdad es el servidor.
+
+**Riesgo asumido y documentado (T-25/D-09).** La proximidad dinámica revela la distancia entre dos miembros a quien tenga `read` en la sesión. En `POOL` no se permite: INV-POOL-1 impide que un conductor vea al resto, y una geocerca anclada a un conductor revelaría su posición al resto. Las geocercas dinámicas quedan prohibidas en sesiones `POOL` (422 `not_allowed`).
+
 ## 6. Indexación
 - Por tenant, un R-tree en memoria (`rstar`) de cajas envolventes en grados, cargado desde PostgreSQL al arrancar el rol `stream` y actualizado al recibir `GeofencesChanged{tenant_id}` por `bus:global`.
 - Consulta de candidatas: caja del punto expandida por `max(a, geofence_exit_buffer_m)` convertida a grados; luego prueba exacta (§4).
 - La evaluación ocurre en una tarea separada con canal acotado; si el canal se llena, se descartan evaluaciones (métrica `gs_geofence_evaluations_dropped_total`) y **nunca** se retrasa la distribución de ubicaciones.
 - H3 y Tile38 quedan diferidos: se adoptan solo con evidencia (memoria por instancia o latencia fuera de NFR-PERF-001 con los límites de política) y un ADR nuevo.
 
+### 6.1 Extensión de la pista E: H3 para el índice de pools
+
+Para las geocercas la decisión sigue siendo R-tree: son pocas y grandes. Para los **pools** (`23` §2) la decisión es distinta y ya está tomada: son muchas y pequeñas, y se consultan por proximidad constante, así que se usa **H3** (ADR-0026) con `pool_index_resolution` y celdas contiguas agrupadas. Los dos índices no se mezclan: `h3` para el índice de pools, `rstar` para geocercas. `13` §8 y `11` §2.0 no requieren PostGIS en ninguno de los dos casos.
+
 ## 7. Pruebas
 - Unitarias de geometría (bordes, polígonos cóncavos, cerca de los polos, cerca del antimeridiano rechazado).
 - Trayectorias sintéticas con ruido gaussiano (σ = precisión declarada) que cruzan el borde: número exacto de transiciones esperado; sin oscilación dentro de la banda de histéresis (prueba de propiedades).
 - Escenario de extremo a extremo con webhook.
 - Benchmark con `max_geofences_per_tenant` geocercas.
+- **E5:** permanencia con una trayectoria sintética que entra, permanece y sale → exactamente un `DWELL`; geocerca dinámica que sigue a un ancla móvil; **geocerca dinámica rechazada en sesión `POOL`**; caducidad de la dinámica cuando el ancla deja de publicar.

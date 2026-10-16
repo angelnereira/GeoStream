@@ -131,6 +131,60 @@ Este es el **único** lugar donde viven los valores por defecto y rangos. Los de
 | `GS_RETENTION_WEBHOOK_DELIVERIES_D` | dur_d | 30 | 1..=365 | Tras finalizar |
 | `GS_RETENTION_CLOSED_SESSIONS_D` | dur_d | 90 | 1..=3650 | Sesiones cerradas/expiradas (cascada a membresías e invitaciones) |
 
+### 2.10 Motor: trayectoria, pools e historial
+
+> Todos los valores de esta sección son **valores iniciales** migrating desde `docs/proposals/GeoStream_Addendum_A02_Motor_Ubicacion_Movilidad.md` §14.5. Se calibran con medición (P-6) y nunca se afirman sin evidencia.
+
+| Clave | Tipo | Default | Rango | Descripción |
+|---|---|---|---|---|
+| `GS_TRACK_CHECKPOINT_INTERVAL_S` | dur_s | 30 | 5..=300 | Periodicidad del punto de control del filtro (`22` §2.1) |
+| `GS_TRACK_STATE_TTL_S` | dur_s | 600 | 60..=86400 | TTL del estado del filtro en el almacén efímero |
+| `GS_TRACK_PROCESS_NOISE_STATIONARY_MPS2` | float | 0.05 | 0.001..=10.0 | Ruido de proceso con `motion=STATIONARY` |
+| `GS_TRACK_PROCESS_NOISE_WALKING_MPS2` | float | 0.5 | 0.001..=10.0 | Ídem con `motion=WALKING` |
+| `GS_TRACK_PROCESS_NOISE_RUNNING_MPS2` | float | 1.0 | 0.001..=10.0 | Ídem con `motion=RUNNING` |
+| `GS_TRACK_PROCESS_NOISE_CYCLING_MPS2` | float | 1.0 | 0.001..=10.0 | Ídem con `motion=CYCLING` |
+| `GS_TRACK_PROCESS_NOISE_AUTOMOTIVE_MPS2` | float | 2.0 | 0.001..=10.0 | Ídem con `motion=AUTOMOTIVE` |
+| `GS_TRACK_PROCESS_NOISE_UNKNOWN_MPS2` | float | 1.5 | 0.001..=10.0 | Ídem con `motion=UNKNOWN` |
+| `GS_TRACK_ZUPT_SIGMA_MPS` | float | 0.1 | 0.01..=5.0 | σ de la pseudo-medición de velocidad cero (anti-deriva) |
+| `GS_TRACK_SPEED_TABLE_MAX_MPS` | string | `WALKING:2.0,RUNNING:8.0,CYCLING:12.0,AUTOMOTIVE:70.0,UNKNOWN:70.0` | — | `v_max(motion)` para la puerta de plausibilidad |
+| `GS_POOL_INDEX_QUEUE` | int | 65536 | 1024..=1048576 | Capacidad del canal de actualización del índice vivo |
+| `GS_POOL_PRUNE_INTERVAL_S` | dur_s | 30 | 5..=600 | Poda de entradas caducadas del pool |
+| `GS_HISTORY_QUEUE_CAPACITY` | int | 100000 | 1000..=10000000 | Capacidad del canal del escritor de historial |
+| `GS_HISTORY_BATCH_SIZE` | int | 1000 | 10..=100000 | Filas por lote de escritura |
+| `GS_HISTORY_FLUSH_MS` | dur_ms | 500 | 10..=60000 | Intervalo máximo de vaciado del lote |
+| `GS_HISTORY_PARTITION_LOOKAHEAD_DAYS` | int | 7 | 1..=60 | Antelación de creación de particiones diarias |
+| `GS_HISTORY_H3_RESOLUTION` | int | 9 | 5..=12 | Resolución H3 para particionado del historial |
+| `GS_GRAPH_PATHS` | string | (vacío) | — | Rutas de grafos `.gsg` a cargar (separadas por `:`); vacío = sin grafo propio |
+| `GS_MM_SIGMA_Z_M` | float | 4.0 | 0.1..=100.0 | σ de emisión del HMM de map-matching (a calibrar, T-E7-06) |
+| `GS_MM_BETA_M` | float | 0.5 | 0.01..=10.0 | Parámetro de transición exponencial (a calibrar, T-E7-06) |
+| `GS_MM_CANDIDATE_RADIUS_M` | float | 50.0 | 5.0..=500.0 | Radio de búsqueda de candidatos en la vía |
+| `GS_MM_MAX_CANDIDATES` | int | 8 | 1..=64 | Máximo de candidatos por muestra |
+| `GS_MM_MAX_ROUTE_FACTOR` | float | 1.4 | 1.0..=5.0 | Acotación del Dijkstra por ruta |
+| `GS_MM_FIXED_LAG` | int | 5 | 1..=50 | Retardo fijo del map-matching online |
+| `GS_MM_LIVE_MIN_CONFIDENCE` | float | 0.6 | 0.0..=1.0 | Confianza mínima para emitir `MAP_MATCHED` en vivo |
+| `GS_LEARNED_SPEED_RESOLUTION` | int | 9 | 5..=12 | Resolución H3 de los perfiles de velocidad |
+| `GS_LEARNED_PLACES_EPS_M` | float | 80.0 | 5.0..=1000.0 | ε de DBSCAN para lugares aprendidos |
+| `GS_LEARNED_PLACES_MIN_POINTS` | int | 20 | 2..=1000 | `minPts` de DBSCAN |
+| `GS_OD_RESOLUTION` | int | 8 | 4..=12 | Resolución H3 de las matrices origen-destino |
+| `GS_PROVIDERS_ENABLED` | bool | `false` | | Activación global del Provider Gateway |
+| `GS_PROVIDERS_TIMEOUT_MS` | dur_ms | 5000 | 100..=60000 | Timeout por llamada al proveedor |
+| `GS_PROVIDERS_MAX_CONCURRENT` | int | 16 | 1..=256 | Solicitudes concurrentes por proveedor |
+| `GS_PROVIDERS_MAX_CACHE_TTL_S` | dur_s | 3600 | 0..=86400 | TTL máximo de caché de respuestas |
+| `GS_EDGE_FINDER_MAX_ACCURACY_M` | float | 50.0 | 1.0..=500.0 | Precisión máxima del buscador para aportar un reporte |
+| `GS_EDGE_RATE_TTL_S` | dur_s | 60 | 10..=3600 | TTL del contador de sightings por (buscador, `hashed_eid`) |
+
+### 2.11 Constantes del motor (no configurables; fijadas por diseño)
+
+| Constante | Valor | Dónde |
+|---|---|---|
+| `EARTH_MEAN_RADIUS_M` (IUGG) | 6 371 008.8 | `gs-geo` (§6.1 del addendum) |
+| `EARTH_MEAN_RADIUS_M` (radio medio 6371 km, para haversine) | 6 371 000.0 | `gs-geo` |
+| Velocidad máxima por defecto de plausibilidad (sin `motion`) | 70.0 m/s | `22` §2.2 |
+| Tabla de penalizaciones de plausibilidad | velocidad 0,8 · outlier 0,6 · mock 0,5 · fix congelado 0,5 · aceleración 0,4 · baja precisión 0,2 · solo red 0,1 | `22` §2.2 |
+| Incertidumbre inicial de velocidad (`σ_v0`) | 10.0 m/s | `22` §2.3 |
+| Velocidades por modo del estimador de ETA | auto 6,9 m/s · moto 8,3 · bicicleta 4,2 · a pie 1,3 | `23` §4 |
+| `gs-geo` paso de simplificación online | Ventana = `offline_simplify_tolerance_m` | `22` §3.5 |
+
 ## 3. Restricciones por entorno
 
 | Regla | `dev` | `test` | `prod` |
@@ -173,9 +227,106 @@ Se guarda en `tenants.policy` (JSONB) y se gestiona con `geostream admin policy`
 | `geofence_confirm_samples` | int | 2 | 1..=10 | `14` §4 |
 | `geofence_exit_buffer_m` | float | 20 | 0..=500 | `14` §4 |
 | `geofence_max_accuracy_m` | float | 100 | 10..=1000 | `14` §4 |
-| `history_allowed` | bool | `false` | reservado F13 | `03` FR-HIS-001 |
+| `history_allowed` | bool | `false` | `24` §1 | `03` FR-HIS-001 |
 
-Validación cruzada: `default_session_ttl_seconds ≤ max_session_ttl_seconds`; `default_max_members_* ≤ max_members_cap`; `snapshot_ttl_default_seconds ≤ snapshot_ttl_max_seconds`.
+### 4.1 Política del motor (pista E)
+
+> Valores iniciales migrados del addendum A-02 §14.5. Se calibran con medición y viven aquí en exclusiva (`00` §1, corolario 4).
+
+**Trayectoria (`22` §2)**
+
+| Clave | Tipo | Default | Rango | Usado en |
+|---|---|---|---|---|
+| `track_estimates_enabled` | bool | `true` | | `22` §2.7 |
+| `track_max_speed_mps` | float | 70 | 10..=350 | `22` §2.2 |
+| `track_max_accel_mps2` | float | 8 | 1..=50 | `22` §2.2 |
+| `track_low_accuracy_m` | float | 100 | 10..=1000 | `22` §2.2 |
+| `track_frozen_fix_count` | int | 5 | 2..=50 | `22` §2.2 |
+| `track_reset_gap_s` | int | 60 | 5..=600 | `22` §2.3 |
+| `track_lost_after_s` | int | 30 | 5..=600 | `22` §2.7 |
+| `track_accuracy_sigma_factor` | float | 1.0 | 0.5..=3.0 | `22` §2.3 |
+| `track_outlier_chi2` | float | 13.82 | 5..=50 | `22` §2.3 |
+| `track_outlier_reset_count` | int | 3 | 1..=10 | `22` §2.3 |
+| `track_frame_reanchor_m` | float | 10000 | 1000..=50000 | `22` §2.3 |
+| `track_odometer_noise_factor` | float | 1.0 | 0.5..=5 | `22` §2.5 |
+| `track_odometer_bridge_gaps` | bool | `true` | | `22` §2.5 |
+| `track_stop_radius_m` | float | 50 | 10..=500 | `22` §2.6 |
+| `track_stop_min_duration_s` | int | 120 | 10..=3600 | `22` §2.6 |
+| `track_stop_exit_confirm` | int | 2 | 1..=10 | `22` §2.6 |
+
+**Muestreo y publicación (`22` §3)**
+
+| Clave | Tipo | Default | Rango | Usado en |
+|---|---|---|---|---|
+| `sampling_policy` | objeto | matriz de `22` §3.2 | validado por `22` §3.2 | `22` §3.4 |
+| `publish_min_distance_m` | float | 10 | 1..=1000 | `22` §3.3 |
+| `publish_accuracy_factor` | float | 1.5 | 0.1..=10.0 | `22` §3.3 |
+| `publish_min_course_change_deg` | float | 20 | 1..=180 | `22` §3.3 |
+| `publish_turn_min_speed_mps` | float | 2.5 | 0..=50 | `22` §3.3 |
+| `publish_min_speed_change_mps` | float | 1.0 | 0..=20 | `22` §3.3 |
+| `publish_max_silence_s` | int | 60 | 5..=600 | `22` §3.3 |
+
+**Pools y movilidad (`23`)**
+
+| Clave | Tipo | Default | Rango | Usado en |
+|---|---|---|---|---|
+| `max_pool_members_cap` | int | 100000 | 2..=1000000 | `23` §1.1 |
+| `pool_snapshot_ttl_default_seconds` | int | 120 | 0..=`snapshot_ttl_max_seconds` | `23` §1.1 |
+| `pool_index_resolution` | int | 9 | 7..=11 | `23` §2.1 |
+| `pool_max_attributes` | int | 8 | 0..=16 | `23` §1.1 |
+| `pool_query_max_radius_m` | float | 20000 | 100..=100000 | `23` §3.1 |
+| `pool_eta_prefilter` | int | 20 | 1..=100 | `23` §3.1 |
+| `pool_density_resolution` | int | 9 | 7..=10 | `23` §3.3 |
+| `pool_density_max_markers` | int | 15 | 0..=50 | `23` §3.3 |
+| `pool_density_delay_s` | int | 10 | 0..=120 | `23` §3.3 |
+| `eta_default_circuity` | float | 1.35 | 1.0..=3.0 | `23` §4 |
+| `eta_max_matrix_cells` | int | 625 | 1..=2500 | `23` §4 |
+| `assignment_max_size` | int | 500 | 1..=2000 | `23` §5 |
+| `max_dynamic_geofences_per_session` | int | 20 | 0..=200 | `23` §6 |
+| `geofence_dwell_min_seconds` | int | 300 | 30..=86400 | `23` §6, `14` §5 |
+
+**Historial y analítica (`24`)**
+
+| Clave | Tipo | Default | Rango | Usado en |
+|---|---|---|---|---|
+| `history_raw_retention_days` | int | 30 | 1..=3650 | `24` §5 |
+| `history_trip_retention_days` | int | 365 | 1..=3650 | `24` §5 |
+| `history_backfill_max_age_s` | int | 604800 | 0..=2592000 | `24` §2 |
+| `history_backfill_grace_s` | int | 86400 | 0..=604800 | `24` §2 |
+| `analytics_allowed` | bool | `false` | | `24` §1 |
+| `analytics_k_anonymity` | int | 5 | 2..=100 | `24` §6 |
+| `trip_simplify_tolerance_m` | float | 5 | 0..=100 | `24` §3 |
+| `driving_harsh_accel_mps2` | float | 3.0 | 1..=10 | `24` §3.2 |
+| `driving_harsh_brake_mps2` | float | 3.5 | 1..=10 | `24` §3.2 |
+
+**Edge (`25`)**
+
+| Clave | Tipo | Default | Rango | Usado en |
+|---|---|---|---|---|
+| `edge_enabled` | bool | `false` | | `25` §2 |
+| `edge_relay_scope` | enum | `TENANT` | `TENANT`, `NETWORK` | `25` §2.1 |
+| `edge_rotation_s` | int | 1024 | 256..=86400 | `25` §2.3 |
+| `edge_report_ttl_hours` | int | 168 | 1..=720 | `25` §2.6 |
+| `edge_lookup_max_ids` | int | 500 | 1..=5000 | `25` §2.7 |
+| `edge_separated_after_h` | int | 72 | 1..=720 | `25` §3 |
+| `dult_min_sightings` | int | 3 | 1..=100 | `25` §3 |
+| `dult_min_distinct_locations` | int | 3 | 1..=100 | `25` §3 |
+| `dult_min_distance_m` | float | 500 | 10..=100000 | `25` §3 |
+| `dult_min_duration_min` | int | 60 | 1..=10080 | `25` §3 |
+
+**Interruptores de capacidad por tenant (pista E).** Todos por defecto `false`: una capacidad nueva no se activa para ningún tenant hasta que el propietario lo decide explícitamente (`00` §1, corolario 3).
+
+| Clave | Tipo | Default | Habilita | Requisito cruzado |
+|---|---|---|---|---|
+| `pools_allowed` | bool | `false` | Sesiones `POOL` y consultas `nearby`/`rings`/`density` (`23`) | — |
+| `tools_allowed` | bool | `false` | `POST /v1/tools/*` (`23` §4–§7) | — |
+| `edge_allowed` | bool | `false` | Tags, reportes Beacon y LPWAN (`25`) | — |
+| `learned_places_allowed` | bool | `false` | Capa de mapa aprendida y `GET /v1/analytics/places` (`24` §3) | `analytics_allowed = true` |
+| `geofence_dwell_enabled` | bool | `false` | Eventos `geofence.dwell` (`23` §6) | `geofence_dwell_min_seconds` definido |
+| `history_allowed` (línea base) | bool | `false` | Ingesta y consulta de historial (`24`) | — |
+| `analytics_allowed` | bool | `false` | Agregados k-anónimos (`24` §6) | `history_allowed = true` |
+
+Validación cruzada: `default_session_ttl_seconds ≤ max_session_ttl_seconds`; `default_max_members_* ≤ max_members_cap`; `snapshot_ttl_default_seconds ≤ snapshot_ttl_max_seconds`; `default_max_members_pool ≤ max_members_cap`; `pool_snapshot_ttl_default_seconds ≤ snapshot_ttl_max_seconds`; `analytics_allowed = true` exige `history_allowed = true`; `learned_places_allowed = true` exige `analytics_allowed = true`; `pool_index_resolution ≥ pool_density_resolution`.
 
 ## 5. Constantes del SDK (no configurables en el servidor)
 
@@ -189,6 +340,22 @@ Validación cruzada: `default_session_ttl_seconds ≤ max_session_ttl_seconds`; 
 | Muestras de desfase de reloj | 8 | `12` §10 |
 | Agrupación de emisiones de `SessionView` | 100 ms | `12` §14 |
 | Renovación de token | cuando queda < 20 % de vida | `12` §8 |
+| `offline_buffer_max_samples` | 20000 | `22` §3.5 |
+| `offline_buffer_max_age_s` | 86400 | `22` §3.5 |
+| `offline_simplify_tolerance_m` | 3 | `22` §3.5 |
+| `history_upload_interval_s` | 300 | `22` §3.5 |
+| `predict_horizon_ms` | 3000 (máximo 10000) | `22` §3.6 |
+| `predict_blend_ms` | 500 | `22` §3.6 |
+| `predict_speed_decay_s` | 2 | `22` §3.6 |
+| `predict_min_speed_mps` | 1 | `22` §3.6 |
+| `predict_min_plausibility` | 0.5 | `22` §3.6 |
+| `predict_uncertainty_growth_mps` | 2 | `22` §3.6 |
+| `sampling_activity_confidence` | 75 | `22` §3.2 |
+| `sampling_downgrade_confirm_s` | 120 | `22` §3.2 |
+| `wake_region_radius_m` | 150 | `22` §3.7 |
+| `edge_scan_duty_cycle` | a medir (E8) | `25` §6 |
+
+**Regla de acotamiento (T-30).** El núcleo del cliente acota **todo** valor recibido en `SamplingPolicy` a los rangos de las políticas de este documento antes de aplicarlo, e ignora valores ausentes o malformados. Un valor fuera de rango se reporta como `sampling_policy_clamped_total` (contador, sin identificadores) y **nunca** se aplica tal cual.
 
 ## 6. Variables de los ejemplos de integración
 `GS_API_KEY` y `GS_BASE_URL` aparecen en `15_INTEGRATION_GUIDE.md` y `examples/`: son variables del **backend del integrador**, no del servidor GeoStream.

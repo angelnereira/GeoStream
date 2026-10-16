@@ -56,11 +56,12 @@ flowchart TB
 
 | Contenedor | Responsabilidad | Estado |
 |---|---|---|
-| Rol `api` | Autenticación de peticiones REST, casos de uso del plano de control, emisión de tokens y tickets, auditoría, outbox | Sin estado propio |
-| Rol `stream` | Conexiones WebSocket, handshake, suscripciones, validación y aceptación de ubicaciones, fan-out, presencia, backpressure | Estado de conexión en memoria; verdad en PG/efímero |
-| Rol `worker` | Expiración de sesiones, jobs de retención, entrega de webhooks (las geocercas de F11 se evalúan en `stream`, no aquí) | Sin estado propio |
-| PostgreSQL | Tenants, aplicaciones, keys, subjects, dispositivos, sesiones, membresías, invitaciones, auditoría, idempotencia, webhooks, outbox, geocercas | Durable |
-| Redis/Valkey | Snapshots, secuencias, presencia, tickets, versiones de membresía, épocas de subject, rate limits, bus Pub/Sub | Efímero, **sin persistencia en disco** |
+| Rol `api` | Autenticación de peticiones REST, casos de uso del plano de control, emisión de tokens y tickets, consultas de movilidad e historial, auditoría, outbox | Sin estado propio |
+| Rol `stream` | Conexiones WebSocket, handshake, suscripciones, validación y aceptación de ubicaciones, estimación de trayectoria, geocercas, fan-out, presencia, backpressure | Estado de conexión y de trayectoria en memoria; verdad en PG/efímero |
+| Rol `worker` | Expiración de sesiones, jobs de retención, entrega de webhooks, mantenimiento de particiones de historial | Sin estado propio |
+| Rol `analytics` (opcional) | Trabajos pesados por lotes: cierre de viajes, agregados H3, capa aprendida, map-matching, matrices OD | Sin estado propio |
+| PostgreSQL | Tenants, aplicaciones, keys, subjects, dispositivos, sesiones, membresías, invitaciones, auditoría, idempotencia, webhooks, outbox, geocercas, historial de puntos y viajes, tags, reportes Beacon opacos | Durable |
+| Redis/Valkey | Snapshots, secuencias, presencia, tickets, versiones de membresía, épocas de subject, rate limits, bus Pub/Sub, estado del filtro de trayectoria, odómetro y paradas, índice espacial vivo de pools | Efímero, **sin persistencia en disco** |
 
 Con `GS_STATE_BACKEND=memory` no hay Redis/Valkey: el almacén efímero y el bus viven en memoria y **solo puede ejecutarse una instancia** (desarrollo, pruebas, instalaciones pequeñas).
 
@@ -78,14 +79,21 @@ Bus con temas por sesión. Una sola ruta de entrega: **toda** `LocationUpdate` a
 ### 3.4 Plano efímero
 Snapshots, secuencias, presencia, tickets y versiones con TTL. Pérdida total tolerada: se recupera sola (los clientes reconectan; las secuencias del SDK siguen creciendo; los snapshots se repueblan).
 
-### 3.5 Plano geoespacial (F11)
-Evaluación de geocercas en el rol `stream`, sobre muestras aceptadas, con índice R-tree en memoria cargado desde PostgreSQL. Su fallo nunca bloquea la distribución.
+### 3.5 Plano del motor
 
-### 3.6 Plano de mapas
-Solo cliente (SDK). El servidor no depende de proveedores de mapas.
+El kernel geoespacial (`gs-geo`) es la base determinista de todo lo demás, sin I/O ni estado global. Sobre él:
+
+- **Camino caliente (rol `stream`):** puerta de plausibilidad, filtro de Kalman CV, anti-deriva en reposo, odómetro y paradas (`gs-track`), y evaluación de geocercas con índice R-tree en memoria cargado desde PostgreSQL. Su fallo nunca bloquea la distribución.
+- **Consulta (roles `api`):** índice espacial vivo de pools (`gs-mobility`), ETA, asignación por lotes y Provider Gateway.
+- **Lotes (rol `analytics` o `worker`):** historial, cierre de viajes, agregados H3, capa aprendida y map-matching (`gs-analytics`). Nunca en el camino de aceptación.
+- **Dispositivo:** `gs-client-core` ejecuta muestreo adaptativo, publicación por cambio significativo, predicción visual y cola sin conexión; comparte `gs-geo`, `gs-track` y `gs-edge` con el servidor (`26` §1).
+
+### 3.6 Plano de mapas y proveedores
+
+`geostream_maps` (interfaces) y `geostream_maps_*` (adaptadores) siguen siendo **cliente**. El servidor añade un plano opcional y desactivado por defecto: el **Provider Gateway** (`gs-providers`, ADR-0028), que solo llama a proveedores para tenants que configuraron sus propias credenciales (BYOK), con manifiestos declarativos, `ContentPolicy` y aislamiento total respecto al stream y a la aceptación.
 
 ### 3.7 Plano de privacidad
-Transversal: compartir apagado por defecto, consentimiento del subject, capacidades por acción, snapshot efímero, borrado inmediato, redacción en logs, auditoría sin coordenadas. Ver `10_SECURITY_PRIVACY.md`.
+Transversal: compartir apagado por defecto, consentimiento del subject con propósito (`HISTORY`, `ANALYTICS`), capacidades por acción, snapshot efímero, borrado inmediato, k-anonimato en agregados, redacción en logs, auditoría sin coordenadas y E2E para tags Beacon. Ver `10_SECURITY_PRIVACY.md`.
 
 ## 4. Estructura del repositorio objetivo
 
@@ -105,26 +113,37 @@ geostream/
 │   ├── gs-config/             # carga y validación de configuración y políticas
 │   ├── gs-auth/               # API keys, JWT EdDSA, tickets, scopes, extracción de principal
 │   ├── gs-store/              # PostgreSQL (sqlx): repositorios, transacciones, outbox, auditoría, idempotencia
-│   ├── gs-ephemeral/          # trait EphemeralStore + impl memoria + impl Redis/Valkey
+│   ├── gs-ephemeral/          # trait EphemeralStore + impl memoria + impl Redis/Valkey + ValkeyGeoIndex
 │   ├── gs-bus/                # trait Bus + impl memoria + impl Redis/Valkey Pub/Sub
-│   ├── gs-service/            # casos de uso: sesiones, miembros, invitaciones, compartición, tokens, AuthzCache
+│   ├── gs-service/            # casos de uso: sesiones, membresías, pools, compartición, tokens, AuthzCache
 │   ├── gs-api/                # router Axum REST, middlewares, Problem Details
 │   ├── gs-stream/             # WebSocket: conexión, handshake, suscripciones, publicación, fan-out local
-│   ├── gs-worker/             # jobs: expiración, retención, entrega de webhooks
-│   ├── gs-geo/                # geocercas (F11)
+│   ├── gs-worker/             # jobs: expiración, retención, entrega de webhooks, particiones
+│   ├── gs-geo/                # kernel geoespacial: geodesia, ENU, polilíneas, R-tree, H3 (E1)
+│   ├── gs-track/              # motor de trayectoria: plausibilidad, Kalman, odómetro, paradas (E2)
+│   ├── gs-mobility/           # LiveIndex, ranking, anillos, ETA, asignación, grafo vial (E4–E7)
+│   ├── gs-analytics/          # viajes, paradas offline, DBSCAN, agregados H3, map-matching (E6–E7)
+│   ├── gs-providers/          # puertos y adaptadores del Provider Gateway BYOK (E5)
+│   ├── gs-edge/               # EID rotatorio, tramas BLE, cifrado, códecs LPWAN (no_std, E8)
+│   ├── gs-client-core/        # núcleo sans-IO del cliente: muestreo, publicación, cola, predicción (E3)
+│   ├── gs-client-runtime/     # transporte nativo del cliente (tokio, WebSocket, HTTP)
+│   ├── gs-ffi/                # superficie FFI única (única excepción a forbid(unsafe_code), ADR-0031)
 │   ├── gs-observability/      # tracing, métricas, tipos redactados
-│   └── gs-testkit/            # cliente de prueba, fixtures, runner de vectores y escenarios
+│   └── gs-testkit/            # cliente de prueba, fixtures, runner de vectores y escenarios, trazas sintéticas
+├── bindings/                  # salidas generadas de gs-ffi por lenguaje
 ├── migrations/                # SQL secuencial (sqlx)
-├── sdks/flutter/
-│   ├── geostream/             # paquete núcleo (sin mapas)
-│   ├── geostream_maps/        # interfaces de mapas (F9)
-│   ├── geostream_maps_maplibre/
-│   ├── geostream_maps_google/
-│   └── example/               # app de ejemplo
+├── firmware/                  # firmware de referencia del tag (COULD, fuera del workspace)
+├── sdks/
+│   ├── flutter/geostream/     # paquete Dart: fachada L2 sobre gs-client-core
+│   ├── kotlin/                # Android: fachada L2 + anfitrión de plataforma
+│   ├── swift/                 # iOS: fachada L2 + anfitrión de plataforma
+│   ├── ts/                    # web (WASM) y Node
+│   ├── go/                    # backend
+│   └── ruby/                  # backend
 ├── contracts/                 # proto, openapi, test-vectors, scenarios
 ├── deploy/                    # Dockerfile, docker-compose.yml, ejemplos de proxy
-├── examples/                  # backend de tokens de ejemplo, receptor de webhooks
-├── tools/                     # scripts de CI (consistencia de catálogos, enlaces)
+├── examples/                  # backend de tokens de ejemplo, receptor de webhooks, demos por vertical
+├── tools/                     # verificadores de CI (consistencia de catálogos, enlaces, reglas de crates)
 └── docs/
 ```
 
@@ -139,42 +158,75 @@ flowchart BT
   auth[gs-auth] --> domain
   auth --> config
   store[gs-store] --> domain
-  eph[gs-ephemeral] --> domain
-  eph --> protocol
   bus[gs-bus] --> domain
+  geo[gs-geo] --> domain
+  track[gs-track] --> geo
+  track --> domain
+  mobility[gs-mobility] --> geo
+  mobility --> domain
+  analytics[gs-analytics] --> track
+  analytics --> geo
+  analytics --> domain
+  providers[gs-providers] --> domain
+  edge[gs-edge]
+  eph[gs-ephemeral] --> protocol
+  eph --> mobility
+  eph --> domain
   service[gs-service] --> auth
   service --> store
   service --> eph
   service --> bus
   service --> protocol
+  service --> track
+  service --> mobility
+  service --> analytics
+  service --> providers
+  service --> edge
   api[gs-api] --> service
   stream[gs-stream] --> service
-  worker[gs-worker] --> service
-  geo[gs-geo] --> domain
+  stream --> track
   stream --> geo
+  worker[gs-worker] --> service
+  client[gs-client-core] --> protocol
+  client --> track
+  client --> geo
+  client --> edge
+  client --> domain
+  runtime[gs-client-runtime] --> client
+  ffi[gs-ffi] --> runtime
   app[apps/geostream] --> api
   app --> stream
   app --> worker
+  app --> config
 ```
 
-- `gs-domain` NO DEBE depender de `tokio`, `sqlx`, `axum`, `redis` ni de ningún crate interno.
+Reglas obligatorias:
+
+- `gs-domain` NO DEBE depender de `tokio`, `sqlx`, `axum`, `redis`, `reqwest` ni de ningún crate interno.
+- Los crates **puros** (`gs-domain`, `gs-track`, `gs-mobility`, `gs-analytics`, `gs-edge`, `gs-client-core`) NO DEBEN depender de `tokio`, `sqlx`, `axum`, `redis` ni `reqwest`, ni realizar ningún I/O.
+- `gs-edge` NO DEBE depender de ningún crate interno: también lo usa el firmware.
 - Solo `gs-store` habla con PostgreSQL. Solo `gs-ephemeral` y `gs-bus` hablan con Redis/Valkey.
 - `gs-api` y `gs-stream` NO DEBEN acceder a `gs-store`, `gs-ephemeral` ni `gs-bus` directamente: usan `gs-service`.
-- `gs-observability` puede ser usado por cualquier crate excepto `gs-domain` (que solo define los tipos redactados).
+- `gs-observability` puede ser usado por cualquier crate excepto `gs-domain` (que solo define los tipos redactados) y `gs-edge` (que debe ser `no_std` puro).
+- Ningún crate del servidor depende de `gs-client-core`, `gs-client-runtime` ni `gs-ffi`. Servidor y cliente comparten `gs-domain`, `gs-protocol`, `gs-geo`, `gs-track` y `gs-edge`.
+- `gs-ffi` es la **única** excepción a `#![forbid(unsafe_code)]`, documentada en ADR-0031.
+- La implementación Valkey de `LiveIndex` (`ValkeyGeoIndex`) vive en `gs-ephemeral`, que depende de `gs-mobility` (crate puro) para implementar el trait; la consume `gs-service` a través del trait.
 - Un check de CI (`tools/check_crate_deps`) verifica estas reglas con `cargo metadata`.
 
 ## 5. Binario y roles
 
 ```
-geostream serve   [--roles api,stream,worker] [--config path.toml]
+geostream serve   [--roles api,stream,worker,analytics] [--config path.toml]
 geostream migrate [--dry-run]
 geostream admin   <tenant|app|key|policy|signing-key> <subcomando> ...
 geostream version
 ```
 
-- `serve` sin `--roles` ejecuta los tres roles en un proceso.
+- `serve` sin `--roles` ejecuta `api`, `stream` y `worker` en un proceso (el rol `analytics` es opcional y hay que pedirlo explícitamente).
 - `api` y `stream` comparten el listener `GS_HTTP_ADDR` cuando corren juntos; el router monta `/v1/stream` solo si el rol `stream` está activo.
 - El rol `worker` NO DEBE ejecutarse en más de una instancia salvo que sus jobs usen bloqueo (`FOR UPDATE SKIP LOCKED`); todos los jobs DEBEN usarlo, de modo que varias instancias sean seguras.
+- **Rol `analytics`** (opcional, `24` §3): ejecuta los trabajos pesados por lotes (cierre de viajes, agregados horarios, lugares aprendidos, perfiles de velocidad, matrices OD, particiones de historial) con `FOR UPDATE SKIP LOCKED`, para no competir por CPU con el rol `stream`. Sin ese rol, `worker` los ejecuta con menor prioridad.
+- El escritor de historial (`24` §2) corre dentro de los roles que aceptan muestras: `stream` y `api` (ingesta HTTP).
 - `/metrics` y una copia de `/health/*` escuchan en `GS_ADMIN_ADDR`.
 
 ## 6. Distribución multi-instancia
@@ -254,8 +306,43 @@ Orden de operaciones en la aceptación (normativo en `09` §4; resumen):
 
 1. Precondiciones del lote (`08` §6.4) y, por cada muestra en orden: validación pura (sin efectos).
 2. Por cada muestra válida y no antigua: CAS atómico de secuencia (`{p}:seq:{session}:{device}`); si se acepta, publicar su `LocationUpdate` al bus.
-3. Tras el lote: si hubo alguna aceptada y `snapshot_ttl_seconds > 0`, escribir el snapshot con la última aceptada; actualizar `{p}:devseq:{device}` con el máximo.
-4. Responder `PublishAck` (el orden entre el ack y la entrega a otros suscriptores no está garantizado).
+3. Entre el CAS aceptado y la publicación al bus se inserta el **paso de estimación** (`22` §2.8), que calcula `LocationEstimate` por `(device_id, sequence)` y lo adjunta como campo aparte. La muestra `MEASURED` viaja intacta.
+4. Tras el lote: si hubo alguna aceptada y `snapshot_ttl_seconds > 0`, escribir el snapshot con la última aceptada; actualizar `{p}:devseq:{device}` con el máximo.
+5. Responder `PublishAck` (el orden entre el ack y la entrega a otros suscriptores no está garantizado).
+
+### 7.2.1 Consulta de cercanos en un pool
+
+```mermaid
+sequenceDiagram
+  participant B as Backend (API key, pools:query)
+  participant API as api
+  participant IDX as Índice vivo (H3 en memoria o Valkey)
+  participant ETA as gs-providers / capa aprendida
+  B->>API: POST /v1/pools/{s}/nearby {center, radius_m, rank}
+  API->>IDX: within(pool, radio, filtro, límite)
+  IDX-->>API: candidatos (member_id, disponibilidad, atributos, ts)
+  API->>ETA: refinar los pool_eta_prefilter más cercanos
+  ETA-->>API: eta_s, source, confidence
+  API-->>B: candidatos ordenados por distancia o ETA
+```
+
+La actualización del índice ocurre fuera de este camino, por canal acotado con coalescencia (§7.2.2). El borrado por desconexión es **síncrono** y previo a la respuesta.
+
+### 7.2.2 Escritura de historial
+
+```mermaid
+sequenceDiagram
+  participant S as Rol stream / api
+  participant Q as Canal acotado (GS_HISTORY_QUEUE_CAPACITY)
+  participant W as Escritor por instancia
+  participant PG as PostgreSQL (location_points particionado)
+  S->>Q: LocationUpdate aceptada (si procede la triple llave, 24 §1)
+  Note over Q: Si el canal está lleno se descarta y se cuenta gs_history_dropped_total
+  Q->>W: lotes de GS_HISTORY_BATCH_SIZE o cada GS_HISTORY_FLUSH_MS
+  W->>PG: COPY / INSERT multifila con ON CONFLICT DO NOTHING
+```
+
+El backfill del dispositivo sigue el mismo camino pero por `POST /v1/ingest/history`, sin tocar la secuencia viva ni el snapshot.
 
 ### 7.3 Revocación de un miembro
 
@@ -292,6 +379,28 @@ Detección por error de conexión o latencia > `GS_REDIS_COMMAND_TIMEOUT_MS`:
 5. Al recuperarse: vaciar caché de autorización, resuscribir temas, `ServerNotice RECOVERED`, `ready=true`.
 
 No se simula que el fan-out sigue sano.
+
+La pérdida del almacén efímero implica además la pérdida del estado del filtro de trayectoria (`{p}:trk:*`), del odómetro y de las paradas. Cada uno se reinicia desde la siguiente muestra aceptada (`TrackState.INIT`), sin estimar a partir de un estado desconocido.
+
+### 7.7 Reporte Beacon
+
+```mermaid
+sequenceDiagram
+  participant TAG as Tag BLE (EID rotatorio)
+  participant F as Buscador (SDK en un teléfono)
+  participant API as api
+  participant E as Almacén opaco (TTL)
+  participant D as Dueño (SDK)
+  TAG->>F: anuncio conectable: x(R) + UUID de servicio
+  F->>F: reconstruir R; ECDH efímero; HKDF; AES-256-GCM sobre {lat_e7, lon_e7, acc, observed_at}
+  F->>API: POST /v1/edge/reports {hashed_eid, time_bucket, E, nonce, ciphertext}
+  API->>E: guardar blob opaco (sin identidad del buscador)
+  D->>API: POST /v1/edge/reports:lookup {hashed_eid…} (derivados del EIK del dueño)
+  API-->>D: blobs opacos
+  D->>D: descifrar, fusionar por precisión → TagLocation
+```
+
+El servidor nunca puede leer las coordenadas ni vincular un reporte con el buscador que lo envió (`25` §2.6, `NFR-PRIV-004`).
 
 ## 8. Modelo de concurrencia del stream
 
@@ -345,9 +454,11 @@ Kubernetes es opcional. Detalle en `16_OPERATIONS.md`.
 
 Ver `docs/adr/README.md`. Las decisiones que estructuran esta arquitectura: ADR-0002 (monolito modular), ADR-0004 (transporte), ADR-0006/0007 (identidad y tickets), ADR-0008 (secuencias), ADR-0009 (revocación), ADR-0010 (backends efímero/bus), ADR-0011 (PostgreSQL e IDs).
 
+Las decisiones que estructuran la **pista del motor**: ADR-0021 (alcance y no objetivos), ADR-0022 (núcleo Rust compartido, sustituye ADR-0012), ADR-0023 (motor de trayectoria), ADR-0024 (historial opt-in, sustituye ADR-0005), ADR-0025 (cola `buffered`, sustituye ADR-0014), ADR-0026 (H3 y R-tree, sustituye ADR-0016), ADR-0027 (pools e índice vivo), ADR-0028 (Provider Gateway BYOK, amplía ADR-0013), ADR-0029 (red Beacon), ADR-0030 (predicción visual), ADR-0031 (bindings y FFI), ADR-0032 (capa aprendida y grafo propio).
+
 ## 13. Puntos de extensión posteriores a GA
 
-- Historial (F13): tabla particionada por día, escrita por `stream` de forma asíncrona solo para sesiones con historial.
 - MQTT (F14): adaptador de ingesta que reutiliza la lógica de aceptación de `gs-service`.
-- E2EE (F16): requiere que `LocationUpdate` admita una carga cifrada opaca; el servidor perdería snapshots en claro y geocercas. Se decidirá en ADR.
-- Particionado por región/tenant: solo con evidencia de cuello de botella.
+- E2EE de sesiones (F16): requiere que `LocationUpdate` admita una carga cifrada opaca; el servidor perdería snapshots en claro y geocercas. Se decidirá en ADR. Los tags Beacon ya tienen E2E en E8 (`FR-EDGE-002`).
+- Particionado multi-región por tenant: solo con evidencia de cuello de botella (`03` G-17, brecha `docs/proposals/GeoStream_Brechas_y_Plan_de_Completitud.md`).
+- Perfil de release y PGO del servidor: solo con evidencia de benchmark (`26` §5).
