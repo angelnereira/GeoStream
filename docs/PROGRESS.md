@@ -44,7 +44,7 @@ Ninguno abierto. Las cuatro decisiones que bloqueaban F4 están resueltas.
 | **F4 (M1)** | **completada** | 2026-10-15 | T-F4-01 a T-F4-13 cerradas. SCN-001..010 verdes en ambos subprotocolos; plazo de revocación medido dentro de NFR-SEC-002; `gs-devclient` con demo M1 (dos publicadores y un lector); suite de privacidad T-F4-13 verde (3/3). Release `server-v0.1.0-alpha.1` |
 | F5 (M2) | pendiente | | El SDK Flutter pasa a ser uno más: la lógica de cliente vive en `gs-client-core` (ADR-0022 sustituye a ADR-0012) |
 | E0 | **completada** | 2026-10-15 | Adopción documental del addendum A-02: `docs/22`–`docs/26`, ADR-0021..0032, enmiendas de `docs/00`–`docs/21`, contrato ampliado, vectores `TRK/SMP/POOL/ETA/PRD/ASG/EDGE` y escenarios SCN-014..026. `geostream-tools all` con 9 comprobaciones en verde |
-| E1 | **en curso** | | T-E1-01 (`gs-geo`) completada. Siguiente: T-E1-02 (`gs-client-core`) |
+| E1 | **en curso** | | T-E1-01 y T-E1-02 completadas. Siguiente: T-E1-03 (runtime) |
 | E2 | pendiente | | |
 | E3 | pendiente | | |
 | E4 | pendiente | | |
@@ -86,6 +86,18 @@ Formato de cada entrada (más reciente arriba):
 - **El sesgo del marco local queda documentado en el tipo.** `LocalFrame` usa el radio medio en ambos ejes para ser coherente con `haversine_distance`; a cambio, sobre el ecuador su escala norte-sur excede en un 0,56 % la del arco meridiano WGS84. Mezclar un marco esférico con una distancia elipsoidal convertiría un sesgo constante en una función de la dirección, que es peor.
 - Corregido de paso un defecto de `docs/17` §2.11: declaraba **dos valores distintos bajo el nombre `EARTH_MEAN_RADIUS_M`** (6 371 008,8 y 6 371 000,0). Ahora hay tres constantes con nombre propio: `EARTH_MEAN_RADIUS_M` (esfera), `EARTH_SEMIMAJOR_AXIS_M` y `EARTH_FLATTENING` (elipsoide), con la explicación de por qué son cosas distintas.
 - Comandos: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (503 pruebas, 0 fallos), `cargo run -p geostream-tools -- all` (10/10 OK).
+### 2026-10-15 — T-E1-02 — `gs-client-core`: núcleo sans-IO
+
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Requisitos: habilitante de FR-CORE-001 (se cierra en E3 con el runtime).
+- Evidencia: 11 pruebas propias; `cargo build -p gs-client-core --target wasm32-unknown-unknown` OK; `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace` (514 pruebas, 0 fallos), `cargo deny check`, `cargo run -p geostream-tools -- all` (10/10 OK).
+- Decisiones:
+  - `gs-geo` pierde la dependencia de `gs-domain` (solo eran comentarios): desbloquea el wasm.
+  - Umbrales de muestreo se inyectan, nunca se clavan a constantes del SDK.
+  - `#[allow(hidden_glob_reexports)]` acotado a las importaciones privadas que shadow la glob re-exportación.
+- Siguiente: T-E1-03 (`gs-client-runtime`, desbloquea el `gs-devclient` real).
+
 ### 2026-10-15 — T-E0-08 (ampliación) — Verificador de enums y corrección de `docs/22` §2.2
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.

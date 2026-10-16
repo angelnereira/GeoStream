@@ -1665,6 +1665,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gs-client-core"
+version = "0.0.0"
+dependencies = [
+ "gs-geo",
+ "proptest",
+]
+
+[[package]]
 name = "gs-config"
 version = "0.0.0"
 dependencies = [
@@ -1738,7 +1746,6 @@ name = "gs-geo"
 version = "0.0.0"
 dependencies = [
  "geo",
- "gs-domain",
  "rstar 0.13.0",
 ]
 
