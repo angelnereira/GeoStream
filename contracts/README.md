@@ -17,7 +17,12 @@ contracts/
 │   ├── invitation_codes.json
 │   ├── webhook_signature.json
 │   ├── token_claims.json
-│   └── stream_messages.json
+│   ├── stream_messages.json
+│   ├── tracking_estimates.json  # pista E: TRK-*
+│   ├── sampling_policy.json      # pista E: SMP-*
+│   ├── pool_queries.json         # pista E: POOL-*
+│   ├── mobility_tools.json       # pista E: ETA-*, PRD, ASG, ANA-*
+│   └── edge_reports.json         # pista E: EDGE-*
 └── scenarios/                   # Escenarios extremo a extremo (SCN-NNN)
 ```
 
@@ -82,6 +87,23 @@ Forma exacta de cabecera y claims; `forbidden_extra_claims: true` exige que no h
 ### 4.6 `stream_messages.json`
 Un ejemplo completo y válido de cada mensaje de `ClientMessage`/`ServerMessage` en JSON canónico proto3 (sin campos con valor por defecto). Uso: prueba de ida y vuelta JSON → binario → JSON (T-F0-04), codec del SDK y simulador de transporte. Verificado con `buf convert`.
 
+### 4.7 `tracking_estimates.json` (pista E, `TRK-*`)
+Filtro de trayectoria del servidor (`docs/22_TRACKING_ENGINE.md §2`): puerta de plausibilidad, filtro de Kalman, reinicios, odómetro y paradas online. Incluye `constants` (valores no configurables de `17` §2.11), `tolerances` de comparación numérica y conjuntos de banderas con nombre.
+
+### 4.8 `sampling_policy.json` (pista E, `SMP-*`)
+Muestreo adaptativo y publicación por cambio significativo (`22` §3). Incluye los rangos de acotamiento de `SamplingPolicy` (T-30), los casos de cola sin conexión cifrada y los de predicción visual.
+
+### 4.9 `pool_queries.json` (pista E, `POOL-*`)
+Pools de disponibilidad (`docs/23_MOBILITY.md`): consultas `nearby`/`rings`/`density`, invariantes `INV-POOL-1` e `INV-PRS-2`, y casos de validación.
+
+### 4.10 `mobility_tools.json` (pista E, `ETA-*`, `PRD`, `ASG`, `ANA-*`)
+Herramientas de movilidad, Provider Gateway BYOK, capa de mapa aprendida y k-anonimato. Los casos `*_DEG-*` fijan la regla más importante del conjunto: **nunca degradar en silencio**.
+
+### 4.11 `edge_reports.json` (pista E, `EDGE-*`)
+Red GeoStream Beacon: rotación de `EID`, reportes cifrados que el servidor no puede leer, consultas del dueño, registro de tags, DULT e ingesta LPWAN.
+
+**Doble uso de los vectores de la pista E.** Los valores sintéticos de `GEO-*`, `TRK-*`, `SMP-*`, `POOL-*`, `ETA-*`, `ASG`, `PRD` y `EDGE-*` son **también** valores prohibidos en logs, métricas, trazas y respuestas de error. El verificador de redacción (`docs/18_TESTING_STRATEGY.md` §7.1) los carga de aquí; por eso no se pueden usar números reales en los vectores.
+
 ## 5. Escenarios (`scenarios/*.json`)
 
 Cada archivo describe un flujo extremo a extremo que el runner de `gs-testkit` ejecuta contra un servidor real (PostgreSQL + almacén efímero; en F6 también con dos instancias y Redis/Valkey).
@@ -95,10 +117,31 @@ Cada archivo describe un flujo extremo a extremo que el runner de `gs-testkit` e
   "requirements": ["FR-MEM-004", "NFR-SEC-002"],   // IDs cubiertos
   "slow": false,                                  // true = solo en la suite lenta/nocturna
   "config": { "GS_…": 123 },                       // sobrescrituras de configuración del servidor
+  "note": "texto libre que explica la intención del escenario",
   "actors": { "<nombre>": { … } },
   "steps": [ { … } ]
 }
 ```
+
+### 5.1.1 Escenarios de la pista E
+
+| ID | Qué fija |
+|---|---|
+| SCN-014 | La estimación acompaña a la muestra sin sustituirla (P-E3) |
+| SCN-015 | Un conflicto del motor no impide aceptar la muestra |
+| SCN-016 | En un `POOL` los conductores no se ven entre sí (`INV-POOL-1`) |
+| SCN-017 | `density` no revela quién está dónde (T-25) |
+| SCN-018 | Detener la compartición borra el índice de forma síncrona |
+| SCN-019 | Retirar `HISTORY` detiene las escrituras de inmediato |
+| SCN-020 | El backend no puede conceder consentimiento (`INV-SHR-5`) |
+| SCN-021 | k-anonimato: lo que está por debajo de *k* no aparece |
+| SCN-022 | El proveedor recibe solo coordenadas (T-29) |
+| SCN-023 | Proveedor caído → 503, nunca estimación silenciosa |
+| SCN-024 | El servidor no puede descifrar el reporte Beacon |
+| SCN-025 | Estado `SEPARATED` y protección DULT |
+| SCN-026 | Compatibilidad hacia atrás (NFR-COMPAT-003) |
+
+SCN-014..SCN-026 usan `op` adicionales de aserción (`assert.*`) que el runner debe soportar antes de que la fase correspondiente declare su escenario verde.
 
 ### 5.2 Actores
 - `{"kind": "application", "scopes": [...], "tenant": "default"|"<otro>"}` → el runner crea (o reutiliza) el tenant, una aplicación y una API key con esos scopes.
@@ -118,6 +161,15 @@ Cada archivo describe un flujo extremo a extremo que el runner de `gs-testkit` e
 | `stream.close` | `connection?` | Cerrar con 1000 |
 | `token.refresh` | — | Emitir un token nuevo para el mismo dispositivo del actor |
 | `assert.ephemeral` | `what: "snapshot"`, `session`, `member`, `exists` | Inspeccionar el almacén efímero directamente (solo en pruebas) |
+| `assert.metric` | `what`, `expect: { increased? }` | Verificar un contador Prometheus tras el paso |
+| `assert.db_row` | `table`, `expect` | Inspeccionar una fila real de PostgreSQL (solo en pruebas) |
+| `assert.schema` | `what: "no_column_for_eik"`, `expect` | Inspeccionar el esquema (solo en pruebas) |
+| `assert.provider_request` | `for_port`, `expect` | Inspeccionar lo que el proveedor de pruebas recibió (solo en pruebas) |
+| `assert.server_cannot_decrypt` / `assert.client_can_decrypt` | `what` / `with_key` | Verificar la frontera de cifrado |
+| `assert.dult` | `tag_id`, `params`, `expect` | Evaluar los umbrales DULT con el reloj controlado |
+| `assert.eid_rotation` | `tag_id`, `state_before`, `state_after`, `period_s`, `period_after_s` | Verificar la rotación del identificador efímero |
+| `assert.no_secret_leak` | `secret`, `in: [...]` | Buscar un secreto en logs, métricas, trazas y respuestas |
+| `assert.received_message_fields`, `assert.server_hello`, `assert.no_error_for_unknown_enum` | `expect` | Verificar tolerancias de compatibilidad del cliente |
 | `sleep` | `ms` | Esperar (evitar salvo necesidad) |
 
 Campos comunes: `note` (texto libre), `mark` (registra el instante del paso), `measure_from` + `metric` (mide la latencia desde un `mark` y la reporta).

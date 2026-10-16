@@ -45,6 +45,8 @@ message ServerMessage {
     ServerNotice server_notice = 26;
     // F11.
     GeofenceEvent geofence_event = 27;
+    // E2. No solicitado (request_id = 0).
+    TrackEvent track_event = 28;
     StreamError error = 30;
   }
 }
@@ -62,6 +64,10 @@ message ClientHello {
   uint64 last_sequence = 6;
   // Reloj del dispositivo al enviar.
   google.protobuf.Timestamp client_time = 7;
+  // E3: versión del núcleo Rust del cliente, p. ej. "0.1.0".
+  // Solo diagnóstico: el servidor NUNCA rechaza la conexión por este campo.
+  // Un cliente que no lo envíe se comporta como en la línea base.
+  string core_version = 8;
 }
 
 enum PrincipalKind {
@@ -96,12 +102,69 @@ message ServerHello {
   string subject_id = 8;
   string device_id = 9;
   string application_id = 10;
+  // E3: política de muestreo y publicación del tenant.
+  //
+  // Solo llega por este canal autenticado sobre TLS. El cliente DEBE acotar cada
+  // valor a los rangos de docs/17_CONFIGURATION.md §4.1 antes de aplicarlo e
+  // ignorar valores ausentes o malformados (T-30). Un cliente que no entienda
+  // este campo lo ignora y usa sus defaults locales.
+  SamplingPolicy sampling = 11;
+}
+
+// Zona de la que depende la regla de muestreo.
+enum SamplingZone {
+  SAMPLING_ZONE_UNSPECIFIED = 0;
+  SAMPLING_ZONE_URBAN = 1;
+  SAMPLING_ZONE_HIGHWAY = 2;
+  SAMPLING_ZONE_RURAL = 3;
+}
+
+// Regla de muestreo (E3). Elige el grupo cuya condición se cumple; gana la
+// primera que coincide, en orden.
+message SamplingRule {
+  SamplingZone zone = 1;
+  // Velocidad máxima del grupo en m/s. El último grupo abierto usa 0 como máximo.
+  double max_speed_mps = 2;
+  // Precisión máxima del grupo en metros (0 = sin límite).
+  double max_accuracy_m = 3;
+  // Intervalo de publicación en milisegundos. El cliente lo acota a su rango duro.
+  uint32 interval_ms = 4;
+}
+
+// Política de muestreo y publicación (E3).
+message SamplingPolicy {
+  // Versión de la política; el cliente la usa para detectar cambios.
+  uint32 version = 1;
+  // Reglas evaluadas en orden; la última debe ser abierta (max_speed_mps = 0).
+  repeated SamplingRule rules = 2;
+  // Condiciones de publicación por cambio significativo (docs/22_TRACKING_ENGINE.md §3.3).
+  uint32 publish_min_distance_m = 3;
+  double publish_accuracy_factor = 4;
+  uint32 publish_min_course_change_deg = 5;
+  double publish_turn_min_speed_mps = 6;
+  double publish_min_speed_change_mps = 7;
+  uint32 publish_max_silence_s = 8;
+  // Radio en metros que despierta la app para evaluar geocercas y regiones.
+  uint32 wake_region_radius_m = 9;
+  // Tiempo de confirmación antes de subir un escalón el intervalo.
+  uint32 downgrade_confirm_s = 10;
+  // Horizonte de la predicción visual, en milisegundos. 0 = predicción desactivada.
+  uint32 predict_horizon_ms = 11;
 }
 
 message Subscribe {
   string session_id = 1;
   // false (por defecto) = incluir snapshot en SubscribeAck.
   bool skip_snapshot = 2;
+  // E6: tras el SubscribeAck, el servidor envía la traza simplificada de la sesión
+  // como LocationUpdate con delivery = REPLAY.
+  //
+  // Requiere autorización de historial: history:read para aplicaciones;
+  // HISTORY en consent_purposes y sesión ACTIVE para dispositivos. Sin ella, el
+  // servidor responde CONSENT_REQUIRED o PERMISSION_DENIED ANTES del SubscribeAck.
+  // Si la política del tenant no habilita historial, el campo se ignora como si
+  // fuera false: nunca es un error por sí solo.
+  bool replay_trace = 3;
 }
 
 message SubscribeAck {

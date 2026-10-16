@@ -1,0 +1,264 @@
+{
+  "description": "Vectores de la red GeoStream Beacon, los tags BLE y la ingesta LPWAN (docs/25_EDGE_DEVICES.md §8). Formato en contracts/README.md §4.11. Estos vectores son también valores prohibidos en logs y métricas (docs/18_TESTING_STRATEGY.md §7.1).",
+  "version": 1,
+  "policy": {
+    "edge_rotation_s": 1024,
+    "edge_report_ttl_hours": 168,
+    "edge_lookup_max_ids": 500,
+    "edge_separated_after_h": 72,
+    "edge_relay_scope": "TENANT",
+    "edge_finder_max_accuracy_m": 50.0,
+    "dult_min_sightings": 3,
+    "dult_min_distinct_locations": 3,
+    "dult_min_distance_m": 500.0,
+    "dult_min_duration_min": 60
+  },
+  "constants": {
+    "comment": "Criptografía del beacon (docs/25_EDGE_DEVICES.md §2).",
+    "eid_bits": 128,
+    "separated_rotation_s": 86400,
+    "frame_min_bytes": 8,
+    "frame_max_bytes": 37,
+    "ciphertext_max_bytes": 4096,
+    "finder_pubkey_encoding": "P-256 compressed SEC1 (33 bytes)"
+  },
+  "eid_cases": [
+    {
+      "id": "EDGE-EID-001",
+      "description": "El EID es aleatorio y cambia en cada rotación",
+      "generations": 5,
+      "expect": { "distinct_values": 5, "rotation_period_s": 1024 }
+    },
+    {
+      "id": "EDGE-EID-002",
+      "description": "El EID no contiene la EIK ni ningún identificador estable",
+      "generations": 200,
+      "expect": { "derivable_from_eik": false, "stable_across_rotations": false }
+    },
+    {
+      "id": "EDGE-EID-003",
+      "description": "En estado SEPARATED la rotación se ralentiza a 24 h",
+      "state": "SEPARATED",
+      "generations": 3,
+      "expect": { "rotation_period_s": 86400 },
+      "note": "La protección DULT se implementa deliberadamente por el lado de la víctima: no se puede quitar sin que quien rastrea lo note."
+    },
+    {
+      "id": "EDGE-EID-004",
+      "description": "Cambiar al estado SEPARATED requiere acción explícita del usuario",
+      "action": "set_state",
+      "to": "SEPARATED",
+      "expect": { "requires": "explicit_user_action", "audited": true }
+    }
+  ],
+  "report_cases": [
+    {
+      "id": "EDGE-RPT-001",
+      "description": "El servidor NO puede descifrar el reporte que almacena",
+      "action": "post_then_inspect_server_state",
+      "expect": { "server_can_decrypt": false, "server_has_eik": false, "server_has_cipher_key": false },
+      "note": "INV-EDGE-1 y NFR-PRIV-004. Es la diferencia entre esta parte del producto y el resto: aquí sí hay E2EE."
+    },
+    {
+      "id": "EDGE-RPT-002",
+      "description": "El blob almacenado es exactamente el enviado, sin transformación",
+      "params": { "ciphertext_bytes": 256 },
+      "expect": { "stored_equals_sent": true, "server_transforms": false }
+    },
+    {
+      "id": "EDGE-RPT-003",
+      "description": "El reporte no guarda la posición del buscador junto al blob",
+      "params": { "finder_lat": 8.9830, "finder_lon": -79.5190 },
+      "expect": {
+        "stores_finder_position": false,
+        "stores_finder_device_id_with_blob": false,
+        "stores_only": ["hashed_eid", "time_bucket_hourly"]
+      },
+      "note": "T-28. El servidor conoce un pseudónimo y una hora; no sabe quién vio el tag."
+    },
+    {
+      "id": "EDGE-RPT-004",
+      "description": "La marca temporal tiene resolución horaria",
+      "params": { "sighted_at": "2026-01-15T12:34:56.789Z" },
+      "expect": { "time_bucket": "2026-01-15T12:00:00Z", "resolution": "hour" }
+    },
+    {
+      "id": "EDGE-RPT-005",
+      "description": "time_bucket más antiguo que edge_rotation_s se rechaza",
+      "params": { "time_bucket": "2026-01-14T10:00:00Z" },
+      "expect": { "status": 422, "field": "time_bucket" },
+      "note": "Un sighting de hace días ya no identifica un EID que sigue rotando: aceptarlo sería guardar basura y hacerlo pasar por información."
+    },
+    {
+      "id": "EDGE-RPT-006",
+      "description": "time_bucket más antiguo que 1 hora se rechaza",
+      "params": { "time_bucket": "2026-01-15T09:00:00Z" },
+      "expect": { "status": 422, "field": "time_bucket" }
+    },
+    {
+      "id": "EDGE-RPT-007",
+      "description": "Reportes de un tag de otro tenant se rechazan",
+      "params": { "tag_owner_tenant": "otro" },
+      "expect": { "status": 404, "error_code": "NOT_FOUND" },
+      "note": "404 y no 403: no se revela la existencia del tag de otro tenant."
+    },
+    {
+      "id": "EDGE-RPT-008",
+      "description": "Sin el scope edge:report el envío se rechaza",
+      "params": { "scopes": ["sessions:create"] },
+      "expect": { "status": 403, "error_code": "INSUFFICIENT_SCOPE" }
+    },
+    {
+      "id": "EDGE-RPT-009",
+      "description": "La tasa por (buscador, hashed_eid) está acotada",
+      "params": { "reports": 500, "window_s": 60 },
+      "expect": { "limited": true, "status_after": 429, "error_code": "RATE_LIMITED" }
+    },
+    {
+      "id": "EDGE-RPT-010",
+      "description": "Un buscador con precisión peor que edge_finder_max_accuracy_m no aporta reporte",
+      "params": { "horizontal_accuracy_m": 120.0 },
+      "expect": { "accepted": false },
+      "note": "Un sighting con 120 m de precisión no localiza una etiqueta; aceptar el reporte contaminaría el historial del dueño con posiciones inútiles."
+    },
+    {
+      "id": "EDGE-RPT-011",
+      "description": "Tras edge_report_ttl_hours el reporte se elimina automáticamente",
+      "params": { "age_hours": 169 },
+      "expect": { "exists": false }
+    }
+  ],
+  "lookup_cases": [
+    {
+      "id": "EDGE-LKP-001",
+      "description": "El dueño recupera sus reportes y los descifra en su cliente",
+      "action": "lookup_then_decrypt_client_side",
+      "expect": { "status": 200, "server_decrypted": false, "client_decrypted": true, "recovered": 12 }
+    },
+    {
+      "id": "EDGE-LKP-002",
+      "description": "Un dispositivo que no es el dueño no recupera nada",
+      "action": "lookup_other_owner",
+      "expect": { "status": 404, "returned": 0 }
+    },
+    {
+      "id": "EDGE-LKP-003",
+      "description": "Más de edge_lookup_max_ids identificadores se rechaza",
+      "params": { "hashed_eids_count": 501 },
+      "expect": { "status": 422, "field": "hashed_eids" }
+    },
+    {
+      "id": "EDGE-LKP-004",
+      "description": "hashed_eids duplicados se rechazan",
+      "params": { "hashed_eids": ["a", "a"] },
+      "expect": { "status": 422, "field": "hashed_eids" }
+    },
+    {
+      "id": "EDGE-LKP-005",
+      "description": "El puente opcional de 25 §2.8 es explícito y queda auditado",
+      "action": "server_side_bridge_lookup",
+      "expect": { "requires": "explicit_owner_opt_in", "audited": true, "audited_event": "edge.bridge_used" },
+      "note": "El puente rompe la E2EE por diseño; por eso solo puede activarlo el dueño y cada uso deja rastro."
+    }
+  ],
+  "tag_cases": [
+    {
+      "id": "EDGE-TAG-001",
+      "description": "Registrar un tag nunca acepta ni devuelve la EIK",
+      "action": "create_tag",
+      "body": { "model": "gst-1", "name": "Mochila" },
+      "expect": { "request_has_eik": false, "response_has_eik": false }
+    },
+    {
+      "id": "EDGE-TAG-002",
+      "description": "Intentar enviar la EIK en el cuerpo es 422 por propiedad desconocida",
+      "action": "create_tag",
+      "body": { "model": "gst-1", "eik": "AAAA" },
+      "expect": { "status": 422, "field": "eik" },
+      "note": "`additionalProperties: false` en CreateTagRequest hace imposible que una clave llegue por accidente."
+    },
+    {
+      "id": "EDGE-TAG-003",
+      "description": "No existe ninguna columna de EIK en el esquema",
+      "action": "inspect_schema",
+      "expect": { "tables_with_eik_column": 0 },
+      "note": "Verificado por el test de privacidad (docs/18_TESTING_STRATEGY.md §7.1), no por confianza."
+    },
+    {
+      "id": "EDGE-TAG-004",
+      "description": "El nombre del tag no puede llevar coordenadas ni datos de persona",
+      "action": "create_tag",
+      "body": { "model": "gst-1", "name": "Coche de Ana, 8.9824/-79.5199" },
+      "expect": { "status": 422, "field": "name" },
+      "note": "Un campo libre de texto es el camino más fácil por el que un dato sensible acaba en el sistema."
+    }
+  ],
+  "dult_cases": [
+    {
+      "id": "EDGE-DULT-001",
+      "description": "Se cumplen los cuatro umbrales: se emite UnwantedTrackerAlert",
+      "params": { "distinct_eids": 3, "distinct_locations": 3, "distance_m": 1200.0, "duration_min": 90 },
+      "expect": { "alert": true, "alert_type": "UNWANTED_TRACKER", "coordinates_in_alert": false },
+      "note": "La alerta dice «te están rastreando» y **no** por dónde. Dar la ruta sería darle el resultado a quien rastrea en cuanto se filtrase el dispositivo."
+    },
+    {
+      "id": "EDGE-DULT-002",
+      "description": "Solo tres de los cuatro umbrales: no hay alerta",
+      "params": { "distinct_eids": 3, "distinct_locations": 3, "distance_m": 100.0, "duration_min": 90 },
+      "expect": { "alert": false },
+      "note": "100 m < dult_min_distance_m = 500. Alguien que te sigue por la acera está dentro de ese radio, y alertarlo cada día entrenaría al usuario a ignorarlo."
+    },
+    {
+      "id": "EDGE-DULT-003",
+      "description": "Duración insuficiente: no hay alerta",
+      "params": { "distinct_eids": 3, "distinct_locations": 3, "distance_m": 1200.0, "duration_min": 10 },
+      "expect": { "alert": false }
+    },
+    {
+      "id": "EDGE-DULT-004",
+      "description": "El contador de sightings caduca: no se acumula indefinidamente",
+      "params": { "sightings": 2, "per_hour": 1, "ttl_s": 60, "elapsed_s": 3600 },
+      "expect": { "effective_sightings": 1, "alert": false }
+    }
+  ],
+  "lpwan_cases": [
+    {
+      "id": "EDGE-LPW-001",
+      "description": "Firma HMAC válida: la ingesta se acepta",
+      "params": { "signature": "valida", "model": "lora-sensor-a" },
+      "expect": { "status": 202, "accepted": 1 }
+    },
+    {
+      "id": "EDGE-LPW-002",
+      "description": "Firma HMAC inválida: 401",
+      "params": { "signature": "invalida", "model": "lora-sensor-a" },
+      "expect": { "status": 401, "accepted": 0 }
+    },
+    {
+      "id": "EDGE-LPW-003",
+      "description": "Timestamp fuera de la ventana se rechaza",
+      "params": { "timestamp_skew_s": 3600 },
+      "expect": { "status": 401 }
+    },
+    {
+      "id": "EDGE-LPW-004",
+      "description": "Modelo sin decodificador registrado: 422, nunca best-effort",
+      "params": { "model": "desconocido-9999" },
+      "expect": { "status": 422, "field": "model" },
+      "note": "Un best-effort sobre un formato desconocido produce coordenadas inventadas con apariencia de datos. Es peor que no tener dato."
+    },
+    {
+      "id": "EDGE-LPW-005",
+      "description": "El DevEUI se asocia al tag registrado y se audita",
+      "params": { "deveui": "70B3D57ED0001234", "tag_id": "tag_00000000000000000000000000000001" },
+      "expect": { "associated": true, "audited": true }
+    },
+    {
+      "id": "EDGE-LPW-006",
+      "description": "La posición LPWAN pasa por la misma validación que una muestra de dispositivo",
+      "params": { "latitude": 0.0, "longitude": 0.0 },
+      "expect": { "rejected": true, "reason": "reject_null_island" },
+      "note": "Un Gateway vaciado puede producir 0,0. Aceptarlo crea un conductor en el golfo de Guinea."
+    }
+  ]
+}

@@ -1,0 +1,130 @@
+{
+  "id": "SCN-020",
+  "title": "El backend no puede conceder consentimiento de historial en nombre de otro subject (INV-SHR-5)",
+  "requirements": ["FR-HIS-002", "FR-HIS-003", "FR-SHR-006", "INV-SHR-5", "NFR-PRIV-003"],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "sessions:write", "members:write", "history:read", "analytics:read"]
+    },
+    "alice": { "kind": "device", "external_subject_id": "alice", "platform": "PLATFORM_ANDROID" }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "history_mode": "TRACE_AND_ANALYTICS",
+        "initial_members": [{ "external_subject_id": "alice" }]
+      },
+      "expect": { "status": 201 },
+      "capture": { "session_id": "$.id" }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members",
+      "expect": { "status": 200 },
+      "capture": { "alice_member_id": "$.data[?(@.external_subject_id=='alice')].id" }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/{{alice_member_id}}/sharing",
+      "body": { "sharing": true, "purposes": ["HISTORY", "ANALYTICS"] },
+      "expect": { "status": 403, "json": { "code": "PERMISSION_DENIED" } },
+      "note": "INV-SHR-5: el backend tiene `members:write` y sigue sin poder. No es un permiso que se pueda comprar con un scope."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "PATCH",
+      "path": "/v1/sessions/{{session_id}}/members/{{alice_member_id}}",
+      "body": { "purposes": ["HISTORY"] },
+      "expect": { "status": 422, "json": { "code": "VALIDATION_FAILED" } },
+      "note": "El campo ni siquiera existe en `UpdateMemberRequest`: no hay forma de intentarlo por la vía de `PATCH`."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "history_mode": "TRACE",
+        "initial_members": [
+          { "external_subject_id": "alice", "purposes": ["HISTORY"] }
+        ]
+      },
+      "expect": { "status": 422, "json": { "code": "VALIDATION_FAILED" } },
+      "note": "El alta con consentimientos tampoco es una vía: consentir por otro al crear su membresía es consentir por otro."
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true, "purposes": ["HISTORY"] },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true, "purposes": ["HISTORY", "ANALYTICS"] },
+      "expect": { "status": 200, "json": { "sharing": true } }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members/me",
+      "expect": { "status": 200, "json": { "sharing": true } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/members",
+      "expect": { "status": 200 },
+      "note": "El backend PUEDE leer los propósitos vigentes: la restricción es sobre escribir, no sobre conocer el estado para mostrarlo al usuario."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/mobility-profile?subject_id=alice",
+      "expect": { "status": 200 },
+      "note": "Con ANALYTICS otorgado por el propio subject, la consulta tiene datos."
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true, "purposes": ["HISTORY"] },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/mobility-profile?subject_id=alice",
+      "expect": { "status": 403, "json": { "code": "CONSENT_REQUIRED" } },
+      "note": "Sin ANALYTICS, el perfil de movilidad no existe para ese sujeto. No se devuelve un perfil vacío que el integrador podría confundir con «no hay datos»."
+    }
+  ]
+}

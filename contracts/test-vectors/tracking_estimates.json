@@ -1,0 +1,381 @@
+{
+  "description": "Vectores del motor de trayectoria del servidor (docs/22_TRACKING_ENGINE.md §4). Fijan el comportamiento del filtro de Kalman, la puerta de plausibilidad, el odómetro y las paradas online. Formato en contracts/README.md §4.7.",
+  "version": 1,
+  "server_now": "2026-01-15T12:00:00.000Z",
+  "policy": {
+    "track_estimates_enabled": true,
+    "track_max_speed_mps": 70.0,
+    "track_max_accel_mps2": 8.0,
+    "track_low_accuracy_m": 100.0,
+    "track_frozen_fix_count": 5,
+    "track_reset_gap_s": 60,
+    "track_accuracy_sigma_factor": 1.0,
+    "track_outlier_chi2": 13.82,
+    "track_outlier_reset_count": 3,
+    "track_odometer_noise_factor": 1.0,
+    "track_odometer_bridge_gaps": true,
+    "track_stop_radius_m": 50.0,
+    "track_stop_min_duration_s": 120,
+    "track_stop_exit_confirm": 2,
+    "track_lost_after_s": 30
+  },
+  "constants": {
+    "comment": "Constantes de docs/17_CONFIGURATION.md §2.11. No son configurables.",
+    "initial_speed_sigma_mps": 10.0,
+    "zupt_sigma_mps": 0.1,
+    "motion_threshold_mps": 0.5,
+    "process_noise_stationary_mps2": 0.05,
+    "process_noise_walking_mps2": 0.5,
+    "process_noise_running_mps2": 1.0,
+    "process_noise_cycling_mps2": 1.0,
+    "process_noise_automotive_mps2": 2.0,
+    "process_noise_unknown_mps2": 1.5,
+    "speed_table_max_mps": {
+      "WALKING": 2.0,
+      "RUNNING": 8.0,
+      "CYCLING": 12.0,
+      "AUTOMOTIVE": 70.0,
+      "UNKNOWN": 70.0
+    },
+    "plausibility_penalty_weights": {
+      "speed": 0.8,
+      "outlier": 0.6,
+      "mock": 0.5,
+      "frozen_fix": 0.5,
+      "accel": 0.4,
+      "low_accuracy": 0.2,
+      "network_only": 0.1
+    }
+  },
+  "tolerances": {
+    "comment": "Comparación numérica: |esperado - obtenido| <= valor. La posición estimada se compara en metros de gran distancia.",
+    "position_m": 2.0,
+    "speed_mps": 0.5,
+    "heading_deg": 10.0,
+    "accuracy_m": 1.0,
+    "confidence": 0.05,
+    "odometer_m": 3.0
+  },
+  "flags": {
+    "comment": "Conjunto de banderas esperadas. El orden no importa; deben coincidir como conjunto.",
+    "none": [],
+    "single": ["LOW_ACCURACY"],
+    "frozen": ["FROZEN_FIX"],
+    "mock": ["MOCK_FLAGGED", "NETWORK_ONLY"],
+    "speed": ["EXCESSIVE_SPEED"],
+    "outlier": ["OUTLIER_JUMP"],
+    "accel": ["IMPLAUSIBLE_ACCEL"]
+  },
+  "cases": [
+    {
+      "id": "TRK-FILT-001",
+      "description": "Primer fix: se inicializa el estado sin velocidad previa",
+      "input": [
+        {
+          "sequence": 1,
+          "captured_at": "2026-01-15T12:00:00.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "UNKNOWN"
+        }
+      ],
+      "expect": {
+        "kind": "FILTERED",
+        "accepted": true,
+        "position_equals_input": true,
+        "speed_mps": null,
+        "confidence": [0.0, 0.5],
+        "flags": "none",
+        "reset_reason": "first_fix"
+      }
+    },
+    {
+      "id": "TRK-FILT-002",
+      "description": "Segundo fix en movimiento: el filtro deriva velocidad a partir del desplazamiento",
+      "input": [
+        {
+          "sequence": 1,
+          "captured_at": "2026-01-15T12:00:00.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "UNKNOWN"
+        },
+        {
+          "sequence": 2,
+          "captured_at": "2026-01-15T12:00:02.000Z",
+          "latitude": 8.98268,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "UNKNOWN"
+        }
+      ],
+      "expect": {
+        "kind": "FILTERED",
+        "accepted": true,
+        "speed_mps": [14.0, 14.0],
+        "heading_deg": [0.0, 90.0],
+        "flags": "none"
+      },
+      "note": "31 m en 2 s = 15,5 m/s; el filtro parte de sigma_v0 = 10 m/s, de ahí el margen del rango."
+    },
+    {
+      "id": "TRK-FILT-003",
+      "description": "Posición inmóvil: el filtro converge hacia cero y no acumula deriva",
+      "input": [
+        {
+          "sequence": 1,
+          "captured_at": "2026-01-15T12:00:00.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "STATIONARY"
+        },
+        {
+          "sequence": 2,
+          "captured_at": "2026-01-15T12:00:02.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "STATIONARY"
+        },
+        {
+          "sequence": 3,
+          "captured_at": "2026-01-15T12:00:04.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "STATIONARY"
+        },
+        {
+          "sequence": 4,
+          "captured_at": "2026-01-15T12:00:06.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "STATIONARY"
+        }
+      ],
+      "expect": {
+        "kind": "FILTERED",
+        "accepted": true,
+        "speed_mps": [0.0, 0.6],
+        "zupt_active": true,
+        "flags": "none"
+      },
+      "note": "Con ZUPT activo, sigma de velocidad = GS_TRACK_ZUPT_SIGMA_MPS = 0,1 m/s."
+    },
+    {
+      "id": "TRK-PLAUS-001",
+      "description": "Velocidad por encima de v_max(motion): se marca EXCESSIVE_SPEED pero la muestra se acepta",
+      "input": [
+        {
+          "sequence": 1,
+          "captured_at": "2026-01-15T12:00:00.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "WALKING"
+        },
+        {
+          "sequence": 2,
+          "captured_at": "2026-01-15T12:00:01.000Z",
+          "latitude": 8.98359,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "WALKING"
+        }
+      ],
+      "expect": {
+        "accepted": true,
+        "flags": "speed",
+        "sample_modified": false
+      },
+      "note": "132 m en 1 s = 132 m/s, muy por encima de WALKING:2.0. GeoStream NO rechaza la muestra (D-10): marca la señal y sigue."
+    },
+    {
+      "id": "TRK-PLAUS-002",
+      "description": "Precisión peor que track_low_accuracy_m",
+      "input": [
+        {
+          "sequence": 1,
+          "captured_at": "2026-01-15T12:00:00.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "UNKNOWN"
+        },
+        {
+          "sequence": 2,
+          "captured_at": "2026-01-15T12:00:02.000Z",
+          "latitude": 8.98268,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 250.0,
+          "motion": "UNKNOWN"
+        }
+      ],
+      "expect": {
+        "accepted": true,
+        "flags": "single"
+      }
+    },
+    {
+      "id": "TRK-PLAUS-003",
+      "description": "Posición marcada como simulada por la plataforma, sin señal satelital",
+      "input": [
+        {
+          "sequence": 1,
+          "captured_at": "2026-01-15T12:00:00.000Z",
+          "latitude": 8.9824,
+          "longitude": -79.5199,
+          "horizontal_accuracy_m": 8.0,
+          "motion": "UNKNOWN",
+          "is_mock": true,
+          "source": "NETWORK"
+        }
+      ],
+      "expect": {
+        "accepted": true,
+        "flags": "mock"
+      },
+      "note": "GeoStream expone la señal; la decisión de tratar un mock como fraude es del integrador (D-10)."
+    },
+    {
+      "id": "TRK-PLAUS-004",
+      "description": "Cinco fixes idénticos consecutivos: FROZEN_FIX",
+      "input": [
+        {"sequence": 1, "captured_at": "2026-01-15T12:00:00.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"},
+        {"sequence": 2, "captured_at": "2026-01-15T12:00:02.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"},
+        {"sequence": 3, "captured_at": "2026-01-15T12:00:04.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"},
+        {"sequence": 4, "captured_at": "2026-01-15T12:00:06.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"},
+        {"sequence": 5, "captured_at": "2026-01-15T12:00:08.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"}
+      ],
+      "expect": {
+        "accepted": true,
+        "flags": "frozen",
+        "sample_modified": false
+      },
+      "note": "track_frozen_fix_count = 5. La bandera NO sustituye a la muestra: el dispositivo puede estar legítimamente quieto."
+    },
+    {
+      "id": "TRK-RESET-001",
+      "description": "Hueco mayor que track_reset_gap_s: el filtro se reinicia y no extrapola a través del hueco",
+      "input": [
+        {"sequence": 1, "captured_at": "2026-01-15T12:00:00.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"},
+        {"sequence": 2, "captured_at": "2026-01-15T12:00:30.000Z", "latitude": 8.99004, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"}
+      ],
+      "expect": {
+        "accepted": true,
+        "reset_reason": "gap",
+        "speed_mps": null,
+        "position_equals_input": true
+      },
+      "note": "850 m en 30 s. Sin el reinicio, el filtro concluiría 28 m/s de una trayectoria que en realidad tiene un hueco."
+    },
+    {
+      "id": "TRK-ODO-001",
+      "description": "Odómetro acumula la distancia estimada de un desplazamiento recto",
+      "input": [
+        {"sequence": 1, "captured_at": "2026-01-15T12:00:00.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "AUTOMOTIVE"},
+        {"sequence": 2, "captured_at": "2026-01-15T12:00:10.000Z", "latitude": 8.98292, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "AUTOMOTIVE"}
+      ],
+      "expect": {
+        "accepted": true,
+        "odometer_m": 58.0,
+        "reset_reason": "first_fix"
+      }
+    },
+    {
+      "id": "TRK-STOP-001",
+      "description": "Permanencia dentro de track_stop_radius_m durante track_stop_min_duration_s emite STOP_STARTED",
+      "input": [
+        {"sequence": 1, "captured_at": "2026-01-15T12:00:00.000Z", "latitude": 8.98240, "longitude": -79.51990, "horizontal_accuracy_m": 8.0, "motion": "STATIONARY"},
+        {"sequence": 2, "captured_at": "2026-01-15T12:01:00.000Z", "latitude": 8.98244, "longitude": -79.51987, "horizontal_accuracy_m": 8.0, "motion": "STATIONARY"},
+        {"sequence": 3, "captured_at": "2026-01-15T12:02:10.000Z", "latitude": 8.98243, "longitude": -79.51991, "horizontal_accuracy_m": 8.0, "motion": "STATIONARY"}
+      ],
+      "expect": {
+        "events": [
+          {"kind": "STOP_STARTED", "position_present": true, "duration_s": null, "stop_index": 0}
+        ]
+      }
+    },
+    {
+      "id": "TRK-STOP-002",
+      "description": "Salida del radio tras track_stop_exit_confirm muestras emite STOP_ENDED con duración",
+      "input": [
+        {"sequence": 1, "captured_at": "2026-01-15T12:00:00.000Z", "latitude": 8.98240, "longitude": -79.51990, "horizontal_accuracy_m": 8.0, "motion": "STATIONARY"},
+        {"sequence": 2, "captured_at": "2026-01-15T12:02:10.000Z", "latitude": 8.98243, "longitude": -79.51991, "horizontal_accuracy_m": 8.0, "motion": "STATIONARY"},
+        {"sequence": 3, "captured_at": "2026-01-15T12:03:00.000Z", "latitude": 8.98440, "longitude": -79.51990, "horizontal_accuracy_m": 8.0, "motion": "AUTOMOTIVE"},
+        {"sequence": 4, "captured_at": "2026-01-15T12:03:05.000Z", "latitude": 8.98490, "longitude": -79.51990, "horizontal_accuracy_m": 8.0, "motion": "AUTOMOTIVE"}
+      ],
+      "expect": {
+        "events": [
+          {"kind": "STOP_STARTED", "position_present": true, "duration_s": null, "stop_index": 0},
+          {"kind": "STOP_ENDED", "position_present": true, "duration_s": [180.0, 180.0], "stop_index": 0}
+        ]
+      },
+      "note": "220 m de salida > track_stop_radius_m = 50 m; se confirman 2 muestras fuera."
+    },
+    {
+      "id": "TRK-STOP-003",
+      "description": "Parada online NO emite coordenadas por webhook",
+      "input_ref": "TRK-STOP-002",
+      "expect": {
+        "webhook": {
+          "type": "track.stop_ended",
+          "has_position": false,
+          "has_centroid": false,
+          "has_duration_s": true
+        }
+      },
+      "note": "FR-WHK-005: un webhook describe qué pasó, no dónde."
+    },
+    {
+      "id": "TRK-P-E3-001",
+      "description": "INVARIANTE P-E3: la muestra viaja intacta aunque la estimación difiera",
+      "input": [
+        {"sequence": 1, "captured_at": "2026-01-15T12:00:00.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "WALKING"},
+        {"sequence": 2, "captured_at": "2026-01-15T12:00:01.000Z", "latitude": 8.98359, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "WALKING"}
+      ],
+      "expect": {
+        "update_sample": {
+          "latitude": 8.98359,
+          "longitude": -79.5199
+        },
+        "update_estimate_present": true,
+        "sample_equals_input": true,
+        "sample_modified": false
+      },
+      "note": "Un cliente que no entienda `estimate` sigue viendo exactamente la misma posición que antes."
+    },
+    {
+      "id": "TRK-DEGRADE-001",
+      "description": "El motor de trayectoria no está disponible: la muestra se acepta y `estimate` va ausente",
+      "policy_override": { "track_estimates_enabled": false },
+      "input": [
+        {"sequence": 1, "captured_at": "2026-01-15T12:00:00.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"}
+      ],
+      "expect": {
+        "accepted": true,
+        "update_estimate_present": false,
+        "sample_equals_input": true
+      },
+      "note": "La aceptación NUNCA depende de la disponibilidad del filtro."
+    },
+    {
+      "id": "TRK-CONFLICT-001",
+      "description": "Conflicto de versión del estado bajo ingesta HTTP: se acepta y se cuenta gs_track_state_conflict_total",
+      "conflict": true,
+      "input": [
+        {"sequence": 1, "captured_at": "2026-01-15T12:00:00.000Z", "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0, "motion": "UNKNOWN"}
+      ],
+      "expect": {
+        "accepted": true,
+        "update_estimate_present": false,
+        "metrics": { "gs_track_state_conflict_total": 1 }
+      },
+      "note": "El estado del filtro se calcula una vez por (device, sequence): la misma muestra publicada en varias sesiones conserva la misma estimación."
+    }
+  ]
+}

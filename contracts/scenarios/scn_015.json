@@ -1,0 +1,135 @@
+{
+  "id": "SCN-015",
+  "title": "Un conflicto del motor de trayectoria no impide aceptar la muestra",
+  "requirements": ["FR-TRK-006", "FR-LOC-006", "NFR-RES-002"],
+  "config": { "GS_TRACK_STATE_TTL_S": 60 },
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "sessions:write", "members:write"]
+    },
+    "alice": { "kind": "device", "external_subject_id": "alice", "platform": "PLATFORM_ANDROID" }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "ONE_TO_MANY",
+        "expires_in_seconds": 3600,
+        "initial_members": [{ "external_subject_id": "alice" }]
+      },
+      "expect": { "status": 201 },
+      "capture": { "session_id": "$.id" }
+    },
+    { "actor": "alice", "op": "stream.connect", "expect": "ready" },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/ingest/locations",
+      "body": {
+        "session_id": "{{session_id}}",
+        "samples": [
+          {
+            "sequence": 1,
+            "captured_at": "{{now-2s}}",
+            "position": { "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+            "quality": { "source": "GNSS", "kind": "MEASURED" }
+          },
+          {
+            "sequence": 2,
+            "captured_at": "{{now-1s}}",
+            "position": { "latitude": 8.98268, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+            "quality": { "source": "GNSS", "kind": "MEASURED" }
+          }
+        ]
+      },
+      "expect": {
+        "status": 200,
+        "json": {
+          "results": [
+            { "sequence": 1, "status": "ACCEPTED" },
+            { "sequence": 2, "status": "ACCEPTED" }
+          ]
+        }
+      },
+      "note": "La ingesta HTTP procesa muestras concurrentes para el mismo dispositivo: el estado del filtro puede quedar desfasado."
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/snapshot",
+      "expect": {
+        "status": 200,
+        "json": {
+          "items": [
+            {
+              "sample": { "position": { "latitude": 8.98268 } }
+            }
+          ]
+        }
+      },
+      "note": "El snapshot contiene la MUESTRA, no la estimación. Si `estimate` está ausente (conflicto de versión), el snapshot sigue siendo correcto y completo."
+    },
+    {
+      "actor": "alice",
+      "op": "assert.metric",
+      "what": "gs_track_state_conflict_total",
+      "expect": { "increased": true },
+      "note": "El conflicto se cuenta pero no se propaga al resultado de aceptación."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "ONE_TO_MANY",
+        "expires_in_seconds": 3600,
+        "initial_members": [{ "external_subject_id": "alice" }]
+      },
+      "expect": { "status": 201 },
+      "capture": { "session2_id": "$.id" },
+      "note": "Segunda sesión del mismo dispositivo."
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session2_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/ingest/locations",
+      "body": {
+        "session_id": "{{session2_id}}",
+        "samples": [
+          {
+            "sequence": 3,
+            "captured_at": "{{now}}",
+            "position": { "latitude": 8.98292, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+            "quality": { "source": "GNSS", "kind": "MEASURED" }
+          }
+        ]
+      },
+      "expect": { "status": 200, "json": { "results": [{ "sequence": 3, "status": "ACCEPTED" }] } },
+      "note": "La unidad del estado del filtro es (device, sequence), no (session, sequence): la misma muestra publicada en varias sesiones comparte estimación."
+    }
+  ]
+}

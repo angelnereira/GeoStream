@@ -4,6 +4,7 @@ syntax = "proto3";
 
 package geostream.v1;
 
+import "geostream/v1/common.proto";
 import "google/protobuf/timestamp.proto";
 
 enum SessionMode {
@@ -11,6 +12,33 @@ enum SessionMode {
   SESSION_MODE_ONE_TO_ONE = 1;
   SESSION_MODE_ONE_TO_MANY = 2;
   SESSION_MODE_MANY_TO_MANY = 3;
+  // E4: pool de disponibilidad. No es un concepto nuevo: reutiliza membresías,
+  // consentimiento, revocación, secuencias y snapshot. Lo único propio es que
+  // ningún miembro DISPOSITIVO puede tener read, invite ni manage (INV-POOL-1),
+  // de modo que los conductores no se ven entre sí.
+  SESSION_MODE_POOL = 4;
+}
+
+// Modo de historial de la sesión (E6). Opt-in, apagado por defecto.
+enum HistoryMode {
+  HISTORY_MODE_UNSPECIFIED = 0;
+  // Sin historial.
+  HISTORY_MODE_OFF = 1;
+  // Escribe puntos; consulta por history:read.
+  HISTORY_MODE_TRACE = 2;
+  // Escribe puntos y alimenta agregados k-anónimos.
+  HISTORY_MODE_TRACE_AND_ANALYTICS = 3;
+}
+
+// Disponibilidad declarada por un conductor dentro de un pool (E4).
+enum Availability {
+  AVAILABILITY_UNSPECIFIED = 0;
+  // Disponible para recibir trabajo.
+  AVAILABILITY_AVAILABLE = 1;
+  // Ocupado, normalmente en un viaje.
+  AVAILABILITY_BUSY = 2;
+  // Pausado: en línea pero no disponible.
+  AVAILABILITY_PAUSED = 3;
 }
 
 enum SessionStatus {
@@ -49,6 +77,9 @@ message SessionInfo {
   uint32 max_members = 5;
   uint32 stale_after_seconds = 6;
   uint32 snapshot_ttl_seconds = 7;
+  // E6: modo de historial. OFF (o el valor por defecto de la plataforma) cuando
+  // el tenant no tiene historial habilitado.
+  HistoryMode history_mode = 8;
 }
 
 message MemberStatus {
@@ -62,6 +93,15 @@ message MemberStatus {
   Connectivity connectivity = 7;
   // captured_at del snapshot vigente; ausente si no comparte o no hay snapshot.
   optional google.protobuf.Timestamp last_location_at = 8;
+  // E4: presente solo en sesiones POOL y solo para principales de APLICACIÓN.
+  // Para una conexión de dispositivo se omite siempre (INV-PRS-2).
+  Availability availability = 9;
+  // E4: atributos declarados por la aplicación (tipo de vehículo, capacidad, …).
+  // Presentes solo en sesiones POOL y solo para principales de APLICACIÓN.
+  map<string, string> attributes = 10;
+  // E6: propósitos de consentimiento otorgados por el propio sujeto.
+  // Solo el propio subject puede cambiarlos (INV-SHR-5).
+  repeated ConsentPurpose purposes = 11;
 }
 
 enum MemberEventKind {

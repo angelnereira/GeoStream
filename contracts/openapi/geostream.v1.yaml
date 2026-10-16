@@ -36,6 +36,18 @@ tags:
     description: Endpoints de webhooks firmados.
   - name: Geofences
     description: Geocercas de tenant o de sesión (F11).
+  - name: Pools
+    description: 'Pools de disponibilidad (E4). Sesiones `POOL`: los conductores no se ven entre sí.'
+  - name: Tools
+    description: 'Herramientas de movilidad: ETA, asignación por lotes y ruta (E5).'
+  - name: Providers
+    description: Provider Gateway con credenciales BYOK del tenant (E5, ADR-0028).
+  - name: History
+    description: Trazas, viajes y exportaciones del historial opt-in (E6).
+  - name: Analytics
+    description: Agregados k-anónimos y lugares aprendidos (E6/E7).
+  - name: Edge
+    description: Tags BLE, reportes cifrados e ingesta LPWAN (E8).
   - name: Health
     description: Liveness y readiness.
 paths:
@@ -1063,6 +1075,1078 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+# ==========================================================================
+  # Pista E — motor de ubicación y movilidad.
+  #
+  # Todas estas operaciones son ADITIVAS bajo /v1 (docs/07_REST_API.md §11):
+  # no renumeran ni rompen ningún campo existente. Un cliente escrito antes de
+  # la pista E sigue funcionando sin cambios (NFR-COMPAT-003).
+  #
+  # Cada capacidad nueva está detrás de su interruptor de política del tenant
+  # (docs/17_CONFIGURATION.md §4.1). Sin él, la respuesta es 403 FEATURE_DISABLED:
+  # el permiso es correcto, la capacidad no está contratada.
+  # ==========================================================================
+
+  /v1/pools:
+    post:
+      operationId: createPool
+      tags: [Pools]
+      summary: Crear un pool de disponibilidad.
+      description: |
+        Alias de sugar sintáctico de `POST /v1/sessions` con `mode = POOL` forzado.
+        No duplica reglas: la respuesta es la misma `Session` con su `ETag`.
+
+        Un pool es una sesión de disponibilidad, no un concepto nuevo: reutiliza
+        membresías, consentimiento, revocación en vivo, publicador único,
+        secuencias y snapshot (docs/05_DOMAIN_MODEL.md §4.2.1).
+
+        En un pool, ningún miembro **dispositivo** puede tener `read`, `invite` ni
+        `manage` (INV-POOL-1): los conductores no se ven entre sí.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'pools:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePoolRequest' }
+      responses:
+        '201':
+          description: Pool creado.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/pools/{session_id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: getPool
+      tags: [Pools]
+      summary: Obtener un pool (su `Session` con `mode = POOL`).
+      x-gs-phase: E0
+      x-gs-auth: { application: 'sessions:read', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '200':
+          description: Pool.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/pools/{session_id}/nearby:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: getPoolNearby
+      tags: [Pools]
+      summary: Miembros conectados cerca de un punto.
+      description: |
+        Solo aplicación. Con `rank = eta` se aplica el prefiltrado
+        `pool_eta_prefilter` antes de estimar el tiempo de llegada.
+
+        Devuelve `member_id`, `distance_m`, `age_ms`, `availability`, `attributes`,
+        `position` y, con `rank = eta`, `eta_s` y `mode`. Excluye a quien está
+        `PAUSED` o desconectado, salvo que `max_age_s` lo permita explícitamente.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'pools:query', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/Latitude'
+        - $ref: '#/components/parameters/Longitude'
+        - name: radius_m
+          in: query
+          required: true
+          schema: { type: number, format: double, minimum: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: rank
+          in: query
+          required: false
+          schema: { type: string, enum: [distance, eta], default: distance }
+        - name: max_age_s
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: filter.attributes
+          in: query
+          required: false
+          description: Filtro de igualdad sobre atributos; hasta 3 claves `k=v` separadas por `&`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Miembros cercanos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NearbyResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/pools/{session_id}/rings:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: getPoolRings
+      tags: [Pools]
+      summary: Anillos concéntricos de miembros alrededor de un punto.
+      description: Exactamente uno de `ring_step_m` o `k`. `per_ring_limit` acota cada anillo.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'pools:query', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/Latitude'
+        - $ref: '#/components/parameters/Longitude'
+        - name: ring_step_m
+          in: query
+          required: false
+          schema: { type: number, format: double, minimum: 1 }
+        - name: k
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+        - name: per_ring_limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Anillos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RingsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/pools/{session_id}/density:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: getPoolDensity
+      tags: [Pools]
+      summary: Marcadores aproximados y anónimos de densidad.
+      description: |
+        Única consulta de pool accesible a un dispositivo, y existe precisamente
+        para que un pasajero NO necesite ver conductores individuales (FR-POOL-006).
+
+        Sin `member_id`, sin `subject_id`, sin `device_id` y sin marcas de tiempo
+        exactas. Cada marcador lleva un conteo, un centroide de celda H3 desplazado
+        de forma aleatoria pero acotada, rumbo cuantizado a 8 sectores y
+        `delay_ms >= pool_density_delay_s`.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'pools:query', device: 'pools:density' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/Latitude'
+        - $ref: '#/components/parameters/Longitude'
+        - name: radius_m
+          in: query
+          required: true
+          schema: { type: number, format: double, minimum: 1 }
+        - name: resolution
+          in: query
+          required: false
+          schema: { type: integer, minimum: 7, maximum: 10 }
+      responses:
+        '200':
+          description: Marcadores de densidad.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DensityResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/pools/{session_id}/members/{member_id}/availability:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+      - $ref: '#/components/parameters/MemberIdPath'
+    put:
+      operationId: setOwnAvailability
+      tags: [Pools]
+      summary: Declarar la disponibilidad de un miembro del pool.
+      description: |
+        Un dispositivo solo puede cambiar la suya (`me`). La aplicación con
+        `pools:manage` puede cambiar la de cualquier miembro.
+
+        `availability` y `attributes` **solo** se proyectan a principales de
+        aplicación; para una conexión de dispositivo se omiten siempre (INV-PRS-2).
+      x-gs-phase: E0
+      x-gs-auth: { application: none, device: 'sharing:write' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetAvailabilityRequest' }
+      responses:
+        '200':
+          description: Disponibilidad actualizada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/pools/{session_id}/members/{member_id}/attributes:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+      - $ref: '#/components/parameters/MemberIdPath'
+    put:
+      operationId: setPoolMemberAttributes
+      tags: [Pools]
+      summary: Declarar los atributos de un miembro del pool (solo aplicación).
+      description: |
+        Ejemplos: `vehicle_type = van`, `seats = 4`. Hasta `pool_max_attributes`
+        entradas; clave `^[a-z0-9_]{1,32}$`, valor de 64 caracteres como máximo.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'pools:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetAttributesRequest' }
+      responses:
+        '200':
+          description: Atributos actualizados.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/pools/{session_id}/reset-odometer:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    post:
+      operationId: resetOdometer
+      tags: [Pools]
+      summary: Reiniciar el odómetro estimado de un miembro.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'members:write', device: forbidden }
+      security:
+        - applicationKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetOdometerRequest' }
+      responses:
+        '200':
+          description: Odómetro reiniciado a 0.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Odometer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/tools/eta:
+    post:
+      operationId: estimateEta
+      tags: [Tools]
+      summary: Matriz de tiempos de llegada origen-destino.
+      description: |
+        `source_preference` elige la fuente. Con `PROVIDER` y el proveedor caído la
+        respuesta es `503 PROVIDER_UNAVAILABLE` con `Retry-After`: **nunca** se
+        degrada silenciosamente a la estimación propia, porque el integrador pidió
+        el proveedor explícitamente.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'tools:use', device: 'tools:use' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EtaRequest' }
+      responses:
+        '200':
+          description: Matriz de ETAs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EtaResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ProviderUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/tools/assignments:
+    post:
+      operationId: assignBatch
+      tags: [Tools]
+      summary: Asignación por lotes de tareas a trabajadores.
+      description: |
+        `algorithm = hungarian` exige `capacity = 1`. `min_cost_flow` admite
+        capacidades mayores. `size <= assignment_max_size`.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'tools:use', device: 'tools:use' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignmentRequest' }
+      responses:
+        '200':
+          description: Asignación.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AssignmentResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ProviderUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/tools/routes:
+    post:
+      operationId: computeRoute
+      tags: [Tools]
+      summary: Ruta sobre el grafo vial propio o por Provider Gateway.
+      description: |
+        Si `GS_GRAPH_PATHS` tiene grafos cargados, la ruta se calcula localmente
+        (ADR-0032) y ninguna coordenada sale de la infraestructura del tenant.
+        Si no, se delega en el proveedor con la credencial BYOK del tenant.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'tools:use', device: forbidden }
+      security:
+        - applicationKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RouteRequest' }
+      responses:
+        '200':
+          description: Ruta.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ProviderUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/providers/{port}:
+    parameters:
+      - $ref: '#/components/parameters/ProviderPortPath'
+    get:
+      operationId: getProvider
+      tags: [Providers]
+      summary: Consultar la configuración de un puerto del Provider Gateway.
+      description: |
+        La respuesta **nunca** incluye la credencial: solo su versión y la fecha
+        de la última rotación.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'providers:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '200':
+          description: Configuración del puerto.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      operationId: putProvider
+      tags: [Providers]
+      summary: Configurar o rotar un proveedor (BYOK).
+      description: |
+        La credencial es **del tenant** y se cifra en reposo con
+        `GS_DATA_ENCRYPTION_KEY`. Repetirla la rota. `terms.checked_on` es la fecha
+        en la que el tenant confirmó los términos del proveedor.
+
+        Efecto inmediato: rotar o borrar invalida el uso de esa credencial en el
+        gateway (docs/06_IDENTITY_AUTH.md §7).
+      x-gs-phase: E0
+      x-gs-auth: { application: 'providers:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PutProviderRequest' }
+      responses:
+        '200':
+          description: Proveedor configurado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deleteProvider
+      tags: [Providers]
+      summary: Retirar un proveedor.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'providers:manage', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '204':
+          description: Proveedor retirado. Idempotente.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/history:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    post:
+      operationId: ingestHistory
+      tags: [History]
+      summary: Ingestar muestras retroactivas de historial.
+      description: |
+        Exige triple llave (docs/24_HISTORY_ANALYTICS.md §1): política del tenant
+        con `history_allowed`, sesión con `history_mode != OFF` y `HISTORY` en los
+        `consent_purposes` del propio subject.
+
+        La antigüedad máxima es `history_backfill_max_age_s`. Aceptar más es
+        escribir historia inventada.
+      x-gs-phase: E0
+      x-gs-auth: { application: forbidden, device: 'ingest:write' }
+      x-gs-capability: publish_and_sharing
+      security:
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngestHistoryRequest' }
+      responses:
+        '200':
+          description: Resultados por muestra, alineados con `samples`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IngestHistoryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/trace:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: getTrace
+      tags: [History]
+      summary: Polilínea del historial de una sesión.
+      description: |
+        `format = gsp1` devuelve la polilínea en formato compacto;
+        `simplify_m` aplica Douglas-Peucker. La simplificación nunca aumenta la
+        tolerancia de `trip_simplify_tolerance_m` por debajo de lo acordado.
+
+        Un dispositivo solo puede leer la traza de una sesión donde es miembro con
+        `read`, la sesión está `ACTIVE` y `HISTORY` está en sus `consent_purposes`.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'history:read', device: none }
+      x-gs-capability: read_and_session_active
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: to
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: simplify_m
+          in: query
+          required: false
+          schema: { type: number, format: double, minimum: 0, maximum: 1000, default: 0 }
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [json, polyline, gsp1], default: json }
+      responses:
+        '200':
+          description: Traza.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/sessions/{session_id}/trips:
+    parameters:
+      - $ref: '#/components/parameters/SessionIdPath'
+    get:
+      operationId: listTrips
+      tags: [History]
+      summary: Listar los viajes derivados de una sesión.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'history:read', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Página de viajes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TripList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/trips/{trip_id}:
+    parameters:
+      - $ref: '#/components/parameters/TripIdPath'
+    get:
+      operationId: getTrip
+      tags: [History]
+      summary: Obtener un viaje con su polilínea y sus paradas.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'history:read', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '200':
+          description: Viaje.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trip' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/analytics/heatmap:
+    get:
+      operationId: getHeatmap
+      tags: [Analytics]
+      summary: Mapa de calor k-anónimo.
+      description: |
+        `metric` ∈ {presence, stops, speed}. Toda respuesta incluye
+        `k_anonymity_applied` y `suppressed_cells` para que el integrador sepa
+        qué se ocultó, **sin revelar los valores suprimidos** (INV-HIS-3).
+      x-gs-phase: E0
+      x-gs-auth: { application: 'analytics:read', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - name: bbox
+          in: query
+          required: true
+          description: '`minLon,minLat,maxLon,maxLat`'
+          schema: { type: string }
+        - name: from
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: to
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: metric
+          in: query
+          required: false
+          schema: { type: string, enum: [presence, stops, speed], default: presence }
+        - name: resolution
+          in: query
+          required: false
+          schema: { type: integer, minimum: 5, maximum: 12 }
+      responses:
+        '200':
+          description: Mapa de calor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HeatmapResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/analytics/od-matrix:
+    get:
+      operationId: getOdMatrix
+      tags: [Analytics]
+      summary: Matriz origen-destino k-anónima.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'analytics:read', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: to
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: resolution
+          in: query
+          required: false
+          schema: { type: integer, minimum: 4, maximum: 12 }
+      responses:
+        '200':
+          description: Matriz OD.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OdMatrixResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/analytics/speed-profile:
+    get:
+      operationId: getSpeedProfile
+      tags: [Analytics]
+      summary: Percentiles de velocidad por celda y franja horaria.
+      description: Exactamente uno de `cell` o `bbox`. Supresión k-anónima por celda.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'analytics:read', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - name: cell
+          in: query
+          required: false
+          schema: { type: string }
+        - name: bbox
+          in: query
+          required: false
+          schema: { type: string }
+        - name: resolution
+          in: query
+          required: true
+          schema: { type: integer, minimum: 5, maximum: 12 }
+        - name: from
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+        - name: to
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Timestamp' }
+      responses:
+        '200':
+          description: Perfil de velocidad.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpeedProfileResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/analytics/mobility-profile:
+    get:
+      operationId: getMobilityProfile
+      tags: [Analytics]
+      summary: Perfil de movilidad de un sujeto o de una cohorte.
+      description: |
+        Para un sujeto concreto exige que ese subject haya otorgado `ANALYTICS`.
+        Un tenant NO puede otorgarlo en nombre de otro (INV-SHR-5): intentarlo
+        devuelve `403 PERMISSION_DENIED`, no un resultado vacío.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'analytics:read', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - name: subject_id
+          in: query
+          required: false
+          description: Si se omite, devuelve el perfil agregado k-anónimo del tenant.
+          schema: { $ref: '#/components/schemas/SubjectId' }
+      responses:
+        '200':
+          description: Perfil de movilidad.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MobilityProfileResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/analytics/places:
+    get:
+      operationId: getPlaces
+      tags: [Analytics]
+      summary: Lugares aprendidos (DBSCAN sobre centros de parada).
+      description: |
+        Derivados y **anónimos**: no guardan IDs de subject ni de sesión, y se
+        suprimen los que no alcanzan `analytics_k_anonymity` subjects distintos
+        (INV-HIS-3).
+      x-gs-phase: E0
+      x-gs-auth: { application: 'analytics:read', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/Latitude'
+        - $ref: '#/components/parameters/Longitude'
+        - name: radius_m
+          in: query
+          required: true
+          schema: { type: number, format: double, minimum: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Lugares aprendidos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlacesResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/exports:
+    post:
+      operationId: createExport
+      tags: [History]
+      summary: Solicitar una exportación asíncrona de historial.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'history:read', device: forbidden }
+      security:
+        - applicationKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateExportRequest' }
+      responses:
+        '202':
+          description: Exportación en curso.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Export' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/exports/{export_id}:
+    parameters:
+      - $ref: '#/components/parameters/ExportIdPath'
+    get:
+      operationId: getExport
+      tags: [History]
+      summary: Estado de una exportación y URL de descarga de TTL corto.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'history:read', device: forbidden }
+      security:
+        - applicationKey: []
+      responses:
+        '200':
+          description: Exportación.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Export' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/tags:
+    post:
+      operationId: createTag
+      tags: [Edge]
+      summary: Registrar un tag BLE.
+      description: |
+        El cuerpo **nunca** acepta ni devuelve la `EIK`: la clave de instalación
+        vive en el tag y en el dispositivo dueño, y el servidor no la recibe
+        (INV-EDGE-1, docs/25_EDGE_DEVICES.md §2.2).
+      x-gs-phase: E0
+      x-gs-auth: { application: 'tags:manage', device: 'tags:manage' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTagRequest' }
+      responses:
+        '201':
+          description: Tag registrado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tag' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      operationId: listTags
+      tags: [Edge]
+      summary: Listar tags.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'tags:manage', device: 'tags:manage' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [ACTIVE, SEPARATED, REMOVED] }
+      responses:
+        '200':
+          description: Página de tags.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TagList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/tags/{tag_id}:
+    parameters:
+      - $ref: '#/components/parameters/TagIdPath'
+    get:
+      operationId: getTag
+      tags: [Edge]
+      summary: Obtener un tag.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'tags:manage', device: 'tags:manage' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '200':
+          description: Tag.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tag' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deleteTag
+      tags: [Edge]
+      summary: Dar de baja un tag.
+      x-gs-phase: E0
+      x-gs-auth: { application: 'tags:manage', device: 'tags:manage' }
+      security:
+        - applicationKey: []
+        - deviceToken: []
+      responses:
+        '204':
+          description: Tag dado de baja. Idempotente.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/edge/reports:
+    post:
+      operationId: postEdgeReport
+      tags: [Edge]
+      summary: Enviar sightings cifrados de un tag.
+      description: |
+        El blob es opaco para el servidor: se almacena tal cual, con TTL, y solo
+        el dueño del tag puede descifrarlo. La coherencia temporal es obligatoria
+        (`time_bucket` de resolución horaria, no más antigua que `edge_rotation_s`).
+
+        El reporte **no** almacena `device_id` ni `subject_id` del buscador junto
+        al blob (T-28): solo un `hashed_eid` y una marca temporal gruesa.
+      x-gs-phase: E0
+      x-gs-auth: { application: forbidden, device: 'edge:report' }
+      security:
+        - deviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EdgeReportRequest' }
+      responses:
+        '202':
+          description: Reporte aceptado para almacenamiento opaco.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/edge/reports/lookup:
+    post:
+      operationId: lookupEdgeReports
+      tags: [Edge]
+      summary: Consultar los reportes de los tags propios.
+      description: |
+        El servidor entrega los blobs **sin poder descifrarlos**: el descifrado ocurre
+        en el cliente del dueño, con la `EIK`. Por eso el coste está acotado por
+        `edge_lookup_max_ids` y por un bucket de tasa por (dueño, `hashed_eid`).
+      x-gs-phase: E0
+      x-gs-auth: { application: forbidden, device: 'edge:lookup' }
+      security:
+        - deviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EdgeReportsLookupRequest' }
+      responses:
+        '200':
+          description: Reportes recuperados por el cliente.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EdgeReportsLookupResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/edge/lpwan/{integration_id}/webhook:
+    parameters:
+      - $ref: '#/components/parameters/LpwanIntegrationIdPath'
+    post:
+      operationId: ingestLpwan
+      tags: [Edge]
+      summary: Ingesta de posiciones de una red LPWAN.
+      description: |
+        No usa scopes: se autentica con la **firma HMAC de la integración** sobre
+        el cuerpo bruto, con el secreto cuyo hash guarda `edge_lpwan_integrations`.
+
+        Cada modelo registrado tiene su decodificador; un modelo sin decodificador
+        devuelve `422`, nunca un best-effort con datos mal interpretados.
+      x-gs-phase: E0
+      x-gs-auth: { application: none, device: forbidden }
+      security: []
+      parameters:
+        - name: X-Gs-Lpwan-Signature
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Gs-Lpwan-Timestamp
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '202':
+          description: Posiciones aceptadas.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LpwanIngestResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
 webhooks:
   sessionEvent:
     post:
@@ -1109,7 +2193,7 @@ webhooks:
   geofenceEvent:
     post:
       operationId: onGeofenceEvent
-      summary: geofence.entered | geofence.exited
+      summary: geofence.entered | geofence.exited | geofence.dwell
       x-gs-phase: F11
       security: []  # el receptor verifica la firma HMAC (docs/07_REST_API.md §10.3)
       requestBody:
@@ -1117,6 +2201,67 @@ webhooks:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/GeofenceWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+  trackEvent:
+    post:
+      operationId: onTrackEvent
+      summary: track.stop_started | track.stop_ended
+      x-gs-phase: E0
+      description: |
+        Sin coordenadas y **sin centroide de parada**: un webhook describe qué
+        pasó, no dónde (FR-WHK-005, docs/10 §8.2).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TrackWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+  tripEvent:
+    post:
+      operationId: onTripEvent
+      summary: trip.completed
+      x-gs-phase: E0
+      description: Sin polilínea ni paradas con coordenadas.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TripWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+  poolEvent:
+    post:
+      operationId: onPoolEvent
+      summary: pool.member_online | pool.member_offline | pool.member_availability_changed
+      x-gs-phase: E0
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PoolWebhookEvent' }
+      responses:
+        '200':
+          description: Cualquier 2xx confirma la entrega.
+  edgeEvent:
+    post:
+      operationId: onEdgeEvent
+      summary: edge.tag_registered | edge.tag_removed
+      x-gs-phase: E0
+      description: Nunca incluye la `EIK` (INV-EDGE-1).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EdgeWebhookEvent' }
       responses:
         '200':
           description: Cualquier 2xx confirma la entrega.
@@ -1198,6 +2343,49 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/GeofenceId' }
+    MemberIdPath:
+      name: member_id
+      in: path
+      required: true
+      description: ID de miembro o el literal `me` (solo dispositivos, en `availability`).
+      schema:
+        type: string
+        pattern: '^(me|mem_[0-9a-f]{32})$'
+    ProviderPortPath:
+      name: port
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ProviderPort' }
+    TripIdPath:
+      name: trip_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/TripId' }
+    ExportIdPath:
+      name: export_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ExportId' }
+    TagIdPath:
+      name: tag_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/TagId' }
+    LpwanIntegrationIdPath:
+      name: integration_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/LpwanIntegrationId' }
+    Latitude:
+      name: lat
+      in: query
+      required: true
+      schema: { type: number, format: double, minimum: -90, maximum: 90 }
+    Longitude:
+      name: lon
+      in: query
+      required: true
+      schema: { type: number, format: double, minimum: -180, maximum: 180 }
     Limit:
       name: limit
       in: query
@@ -1279,6 +2467,17 @@ components:
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+    ProviderUnavailable:
+      description: |
+        Se exigía `source_preference = provider` y el proveedor no respondió.
+        El servidor NO degrada a su estimación propia: un integrador que eligió
+        proveedor por cobertura o por contrato necesita distinguir "no hay ruta"
+        de "no supe" (docs/23_MOBILITY.md §4).
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
 
   schemas:
     # ---------- Identificadores ----------
@@ -1334,6 +2533,13 @@ components:
         - TOO_MANY_SUBSCRIPTIONS
         - TEMPORARILY_UNAVAILABLE
         - INTERNAL
+        # Pista E. El permiso es correcto pero la capacidad no está contratada:
+        # no se degrada a PERMISSION_DENIED.
+        - FEATURE_DISABLED
+        # Falta el propósito de consentimiento del sujeto (HISTORY / ANALYTICS).
+        - CONSENT_REQUIRED
+        # Se exigía source_preference = provider y el proveedor no respondió.
+        - PROVIDER_UNAVAILABLE
     FieldError:
       type: object
       additionalProperties: false
@@ -1421,7 +2627,15 @@ components:
     # ---------- Sesiones ----------
     SessionMode:
       type: string
-      enum: [ONE_TO_ONE, ONE_TO_MANY, MANY_TO_MANY]
+      enum: [ONE_TO_ONE, ONE_TO_MANY, MANY_TO_MANY, POOL]
+      description: |
+        `POOL` (E4) es una sesión de disponibilidad, no un concepto nuevo:
+        reutiliza membresías, consentimiento, revocación, secuencias y snapshot.
+        En un pool ningún miembro **dispositivo** puede tener `read`, `invite` ni
+        `manage` (INV-POOL-1).
+
+        Un cliente que no conozca `POOL` debe tratarlo como modo no reconocido y
+        no asumir nada; no es un error por sí mismo.
     SessionStatus:
       type: string
       enum: [ACTIVE, CLOSED, EXPIRED]
@@ -1465,6 +2679,9 @@ components:
         max_members: { type: integer, minimum: 2 }
         snapshot_ttl_seconds: { type: integer, minimum: 0 }
         stale_after_seconds: { type: integer, minimum: 5, maximum: 3600 }
+        history_mode:
+          allOf: [{ $ref: '#/components/schemas/HistoryMode' }]
+          description: E6. `OFF` cuando el tenant no tiene historial habilitado.
         metadata: { $ref: '#/components/schemas/Metadata' }
         active_member_count: { type: integer, minimum: 0 }
         closed_reason:
@@ -1559,6 +2776,21 @@ components:
             - { $ref: '#/components/schemas/Timestamp' }
             - { type: 'null' }
         joined_via: { type: string, enum: [CREATOR, DIRECT_ADD, INVITATION] }
+        purposes:
+          type: array
+          items: { $ref: '#/components/schemas/ConsentPurpose' }
+          description: |
+            E6. Solo el propio subject puede cambiarlos (INV-SHR-5). Una aplicación
+            con `members:write` puede leerlos, pero escribirlos devuelve
+            `403 PERMISSION_DENIED`: conceder consentimiento en nombre de otro no
+            es una operación que exista.
+        availability:
+          allOf: [{ $ref: '#/components/schemas/Availability' }]
+          description: E4. Presente solo en sesiones `POOL`.
+        attributes:
+          type: object
+          description: E4. Presente solo en sesiones `POOL`. Hasta `pool_max_attributes` entradas.
+          additionalProperties: { type: string, maxLength: 64 }
         version: { type: integer, minimum: 1 }
     MemberList:
       type: object
@@ -1591,6 +2823,16 @@ components:
       required: [sharing]
       properties:
         sharing: { type: boolean }
+        purposes:
+          type: array
+          description: |
+            E6. Subconjunto de {HISTORY, ANALYTICS}, sin duplicados. Solo el
+            propio subject, desde su propio dispositivo, con `sharing:write`.
+
+            Conceder `HISTORY` con `history_mode = OFF` devuelve
+            `422 CONSENT_REQUIRED`: no se acepta un consentimiento que no puede
+            surtir efecto.
+          items: { $ref: '#/components/schemas/ConsentPurpose' }
 
     # ---------- Invitaciones ----------
     Invitation:
@@ -1690,6 +2932,15 @@ components:
         sample: { $ref: '#/components/schemas/LocationSample' }
         received_at: { $ref: '#/components/schemas/Timestamp' }
         age_ms: { type: integer, minimum: 0, description: 'generated_at - captured_at en milisegundos.' }
+        estimate:
+          allOf: [{ $ref: '#/components/schemas/LocationEstimate' }]
+          description: |
+            E2. Estimación canónica del motor de trayectoria.
+
+            INVARIANTE P-E3: `sample` viaja **intacto** y es la verdad. `estimate`
+            es un dato derivado y opcional; un cliente que no lo entienda sigue
+            funcionando igual. Si el motor no pudo estimar, el campo va ausente y la
+            lectura no se ve afectada.
     SessionSnapshot:
       type: object
       required: [session_id, generated_at, items]
@@ -1911,8 +3162,78 @@ components:
                 session_id: { $ref: '#/components/schemas/SessionId' }
                 member_id: { $ref: '#/components/schemas/MemberId' }
                 external_subject_id: { $ref: '#/components/schemas/ExternalSubjectId' }
-                transition: { type: string, enum: [ENTERED, EXITED] }
+                transition: { $ref: '#/components/schemas/GeofenceTransitionValue' }
                 occurred_at: { $ref: '#/components/schemas/Timestamp' }
+                dwell_seconds:
+                  type: ['integer', 'null']
+                  description: Solo para `geofence.dwell`. Sin centroide.
+                anchor_member_id:
+                  type: ['string', 'null']
+                  description: Solo en geocercas dinámicas. Prohibido en sesiones `POOL`.
+    TrackWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type: { enum: [track.stop_started, track.stop_ended] }
+            data:
+              type: object
+              required: [session_id, member_id, kind, occurred_at, stop_index]
+              properties:
+                session_id: { $ref: '#/components/schemas/SessionId' }
+                member_id: { $ref: '#/components/schemas/MemberId' }
+                kind:
+                  type: string
+                  enum: [STOP_STARTED, STOP_ENDED, TRACKING_LOST, TRACKING_RESUMED]
+                occurred_at: { $ref: '#/components/schemas/Timestamp' }
+                stop_index: { type: integer, minimum: 0 }
+                duration_s:
+                  type: ['integer', 'null']
+                  description: Solo para `track.stop_ended`.
+    TripWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type: { enum: [trip.completed] }
+            data:
+              type: object
+              required: [trip_id, session_id, member_id, started_at, ended_at, distance_m, stop_count]
+              properties:
+                trip_id: { $ref: '#/components/schemas/TripId' }
+                session_id: { $ref: '#/components/schemas/SessionId' }
+                member_id: { $ref: '#/components/schemas/MemberId' }
+                started_at: { $ref: '#/components/schemas/Timestamp' }
+                ended_at: { $ref: '#/components/schemas/Timestamp' }
+                distance_m: { type: number, format: double, minimum: 0 }
+                stop_count: { type: integer, minimum: 0 }
+    PoolWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type:
+              enum: [pool.member_online, pool.member_offline, pool.member_availability_changed]
+            data:
+              type: object
+              required: [session_id, member_id]
+              properties:
+                session_id: { $ref: '#/components/schemas/SessionId' }
+                member_id: { $ref: '#/components/schemas/MemberId' }
+                from: { type: ['string', 'null'] }
+                to: { type: ['string', 'null'] }
+    EdgeWebhookEvent:
+      allOf:
+        - $ref: '#/components/schemas/WebhookEnvelopeBase'
+        - type: object
+          properties:
+            type: { enum: [edge.tag_registered, edge.tag_removed] }
+            data:
+              type: object
+              required: [tag_id, model]
+              properties:
+                tag_id: { $ref: '#/components/schemas/TagId' }
+                model: { type: string }
     TestWebhookEvent:
       allOf:
         - $ref: '#/components/schemas/WebhookEnvelopeBase'
@@ -1992,3 +3313,692 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Geofence' }
         next_cursor: { type: ['string', 'null'] }
+
+    # ==========================================================================
+    # Pista E — motor de ubicación y movilidad.
+    # Semántica: docs/22..26. Validación: docs/09_VALIDATION_ERRORS.md §5.1.
+    # ==========================================================================
+
+    # ---------- Enums nuevos ----------
+    HistoryMode:
+      type: string
+      enum: [OFF, TRACE, TRACE_AND_ANALYTICS]
+      description: |
+        E6. `OFF` es el valor por defecto y el que tiene toda sesión cuyo tenant
+        no tiene `history_allowed`. No es un valor "pendiente de activar": es la
+        garantía de que no se escribe nada.
+    ConsentPurpose:
+      type: string
+      enum: [HISTORY, ANALYTICS]
+    Availability:
+      type: string
+      enum: [AVAILABLE, BUSY, PAUSED]
+    ProviderPort:
+      type: string
+      enum: [route_matrix, route, map_matching, geocoding]
+    SourcePreference:
+      type: string
+      enum: [PROVIDER, LEARNED, ESTIMATED]
+    EstimateKind:
+      type: string
+      enum: [FILTERED, MAP_MATCHED]
+      description: |
+        Nunca `MEASURED` (dato crudo) ni `PREDICTED` (predicción visual,
+        exclusivamente local, docs/08_STREAM_PROTOCOL.md §7.6).
+    PlausibilityFlag:
+      type: string
+      enum:
+        - EXCESSIVE_SPEED
+        - OUTLIER_JUMP
+        - LOW_ACCURACY
+        - MOCK_FLAGGED
+        - FROZEN_FIX
+        - IMPLAUSIBLE_ACCEL
+        - NETWORK_ONLY
+      description: |
+        Señales de bajo nivel. GeoStream **no** puntúa fraude, no lista y no
+        sanciona (D-10): expone la señal y la decisión es del integrador.
+    GeofenceTransitionValue:
+      type: string
+      enum: [ENTERED, EXITED, DWELL]
+    TagState:
+      type: string
+      enum: [ACTIVE, SEPARATED, REMOVED]
+
+    # ---------- Identificadores nuevos ----------
+    TripId: { type: string, pattern: '^trp_[0-9a-f]{32}$' }
+    PlaceId: { type: string, pattern: '^plc_[0-9a-f]{32}$' }
+    ExportId: { type: string, pattern: '^exp_[0-9a-f]{32}$' }
+    TagId: { type: string, pattern: '^tag_[0-9a-f]{32}$' }
+    LpwanIntegrationId: { type: string, pattern: '^lpw_[0-9a-f]{32}$' }
+    H3Cell:
+      type: string
+      pattern: '^[0-9a-f]{15,16}$'
+      description: |
+        Celda H3 en su representación canónica. **Es una coordenada** a efectos de
+        redacción: está prohibida en logs, métricas y trazas (docs/10 §8.2).
+
+    # ---------- Estimación (E2) ----------
+    LocationEstimate:
+      type: object
+      additionalProperties: false
+      required: [kind, position, horizontal_accuracy_m, confidence, odometer_m, flags]
+      properties:
+        kind: { $ref: '#/components/schemas/EstimateKind' }
+        position: { $ref: '#/components/schemas/Position' }
+        speed_mps:
+          type: ['number', 'null']
+          description: Ausente si el motor no pudo derivarla.
+        heading_deg:
+          type: ['number', 'null']
+          description: Ausente si no hay velocidad suficiente.
+        horizontal_accuracy_m:
+          type: number
+          format: double
+          minimum: 0
+          description: |
+            Desviación típica (1 sigma) de la posición estimada. **No** es la
+            precisión declarada por el dispositivo.
+        confidence: { type: number, format: double, minimum: 0, maximum: 1 }
+        odometer_m: { type: number, format: double, minimum: 0 }
+        flags:
+          type: array
+          items: { $ref: '#/components/schemas/PlausibilityFlag' }
+        road_id:
+          type: ['string', 'null']
+          description: Solo si `kind = MAP_MATCHED`.
+        road_distance_m:
+          type: ['number', 'null']
+          description: Solo si `kind = MAP_MATCHED`.
+
+    # ---------- Pools (E4) ----------
+    CreatePoolRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        expires_in_seconds: { type: integer, minimum: 60 }
+        max_members: { type: integer, minimum: 2 }
+        snapshot_ttl_seconds: { type: integer, minimum: 0 }
+        stale_after_seconds: { type: integer, minimum: 5, maximum: 3600 }
+        metadata: { $ref: '#/components/schemas/Metadata' }
+      description: |
+        `mode` es implícitamente `POOL` y no se envía. `owner_external_subject_id`
+        e `initial_members` están prohibidos: los conductores entran solos.
+    SetAvailabilityRequest:
+      type: object
+      additionalProperties: false
+      required: [availability]
+      properties:
+        availability: { $ref: '#/components/schemas/Availability' }
+    SetAttributesRequest:
+      type: object
+      additionalProperties: false
+      required: [attributes]
+      properties:
+        attributes:
+          type: object
+          maxProperties: 16
+          propertyNames: { pattern: '^[a-z0-9_]{1,32}$' }
+          additionalProperties: { type: string, maxLength: 64 }
+    NearbyMember:
+      type: object
+      required: [member_id, distance_m, age_ms, availability, position]
+      properties:
+        member_id: { $ref: '#/components/schemas/MemberId' }
+        distance_m: { type: number, format: double, minimum: 0 }
+        age_ms: { type: integer, minimum: 0 }
+        availability: { $ref: '#/components/schemas/Availability' }
+        attributes:
+          type: object
+          additionalProperties: { type: string, maxLength: 64 }
+        position: { $ref: '#/components/schemas/Position' }
+        eta_s:
+          type: ['number', 'null']
+          description: Solo con `rank = eta`.
+        mode:
+          type: ['string', 'null']
+          description: Solo con `rank = eta`.
+    NearbyResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/NearbyMember' }
+    RingsResponse:
+      type: object
+      required: [rings]
+      properties:
+        rings:
+          type: array
+          items:
+            type: object
+            required: [ring, inner_radius_m, outer_radius_m, members, truncated]
+            properties:
+              ring: { type: integer, minimum: 0 }
+              inner_radius_m: { type: number, format: double, minimum: 0 }
+              outer_radius_m: { type: number, format: double, minimum: 0 }
+              truncated: { type: boolean }
+              members:
+                type: array
+                items: { $ref: '#/components/schemas/NearbyMember' }
+    DensityMarker:
+      type: object
+      additionalProperties: false
+      required: [position, count, delay_ms]
+      properties:
+        position:
+          allOf: [{ $ref: '#/components/schemas/Position' }]
+          description: |
+            Centroide de celda H3 **desplazado aleatoriamente dentro de un radio
+            acotado** y rumbo **cuantizado a 8 sectores**. Deliberadamente no es la
+            posición real de nadie (FR-POOL-006, T-25).
+        count: { type: integer, minimum: 1 }
+        resolution: { type: integer, minimum: 7, maximum: 10 }
+        heading_sector:
+          type: ['integer', 'null']
+          description: Sector de rumbo 0..7, o ausente.
+        delay_ms:
+          type: integer
+          minimum: 0
+          description: '`>= pool_density_delay_s`. Retraso mínimo antes de mostrar el marcador.'
+    DensityResponse:
+      type: object
+      additionalProperties: false
+      required: [markers]
+      properties:
+        markers:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/DensityMarker' }
+      description: |
+        Nunca contiene `member_id`, `subject_id`, `device_id` ni marcas de tiempo
+        exactas. Es la **única** consulta de pool accesible a un dispositivo, y
+        existe precisamente para que un pasajero no necesite ver conductores.
+    ResetOdometerRequest:
+      type: object
+      additionalProperties: false
+      required: [member_id]
+      properties:
+        member_id: { $ref: '#/components/schemas/MemberId' }
+    Odometer:
+      type: object
+      required: [member_id, distance_m, reset_at]
+      properties:
+        member_id: { $ref: '#/components/schemas/MemberId' }
+        distance_m: { type: number, format: double, minimum: 0 }
+        reset_at: { $ref: '#/components/schemas/Timestamp' }
+
+    # ---------- Herramientas de movilidad (E5) ----------
+    Point:
+      type: object
+      additionalProperties: false
+      required: [lat, lon]
+      properties:
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+    TravelMode:
+      type: string
+      enum: [DRIVING, TWO_WHEELER, BICYCLE, WALKING]
+    EtaRequest:
+      type: object
+      additionalProperties: false
+      required: [origins, destinations, mode]
+      properties:
+        origins:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Point' }
+        destinations:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Point' }
+        mode: { $ref: '#/components/schemas/TravelMode' }
+        source_preference: { $ref: '#/components/schemas/SourcePreference' }
+      description: |
+        `len(origins) * len(destinations) <= eta_max_matrix_cells`. Con
+        `source_preference = PROVIDER` y el proveedor caído la respuesta es
+        `503 PROVIDER_UNAVAILABLE`, no una estimación propia.
+    EtaResponse:
+      type: object
+      required: [matrix, source, mode]
+      properties:
+        matrix:
+          type: array
+          items:
+            type: array
+            items:
+              type: ['number', 'null']
+              description: Segundos. `null` = sin ruta conocida.
+        source:
+          type: string
+          enum: [PROVIDER, LEARNED, ESTIMATED]
+        mode: { $ref: '#/components/schemas/TravelMode' }
+    Worker:
+      type: object
+      additionalProperties: false
+      required: [id, position]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 64 }
+        position: { $ref: '#/components/schemas/Point' }
+        capacity: { type: integer, minimum: 1, default: 1 }
+        cost_per_unit: { type: number, format: double, minimum: 0, default: 0 }
+    Task:
+      type: object
+      additionalProperties: false
+      required: [id, position]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 64 }
+        position: { $ref: '#/components/schemas/Point' }
+        demand: { type: integer, minimum: 1, default: 1 }
+    AssignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [workers, tasks]
+      properties:
+        workers:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items: { $ref: '#/components/schemas/Worker' }
+        tasks:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items: { $ref: '#/components/schemas/Task' }
+        algorithm:
+          type: string
+          enum: [hungarian, min_cost_flow]
+          default: hungarian
+          description: '`hungarian` exige `capacity = 1` en todos los trabajadores.'
+        max_cost:
+          type: number
+          format: double
+          minimum: 0
+          description: Pares por encima se dejan sin asignar.
+        source_preference: { $ref: '#/components/schemas/SourcePreference' }
+    Assignment:
+      type: object
+      required: [task_id, worker_id, cost]
+      properties:
+        task_id: { type: string }
+        worker_id: { type: string }
+        cost: { type: number, format: double, minimum: 0 }
+    AssignmentResponse:
+      type: object
+      required: [assignments, unassigned, total_cost]
+      properties:
+        assignments:
+          type: array
+          items: { $ref: '#/components/schemas/Assignment' }
+        unassigned:
+          type: array
+          items: { type: string }
+        total_cost: { type: number, format: double, minimum: 0 }
+        source:
+          type: string
+          enum: [PROVIDER, LEARNED, ESTIMATED]
+    RouteRequest:
+      type: object
+      additionalProperties: false
+      required: [origin, destination, mode]
+      properties:
+        origin: { $ref: '#/components/schemas/Point' }
+        destination: { $ref: '#/components/schemas/Point' }
+        mode: { $ref: '#/components/schemas/TravelMode' }
+        source_preference: { $ref: '#/components/schemas/SourcePreference' }
+    RouteResponse:
+      type: object
+      required: [geometry, distance_m, source]
+      properties:
+        geometry:
+          type: array
+          items: { $ref: '#/components/schemas/Point' }
+        distance_m: { type: number, format: double, minimum: 0 }
+        duration_s:
+          type: ['number', 'null']
+        source:
+          type: string
+          enum: [PROVIDER, OWN_GRAPH]
+          description: |
+            `OWN_GRAPH` significa que la ruta se calculó con el grafo local
+            (ADR-0032): ninguna coordenada salió de la infraestructura del tenant.
+
+    # ---------- Provider Gateway (E5) ----------
+    Provider:
+      type: object
+      required: [port, configured, terms_checked_on]
+      properties:
+        port: { $ref: '#/components/schemas/ProviderPort' }
+        configured: { type: boolean }
+        terms_checked_on:
+          type: ['string', 'null']
+          format: date
+        credential_version:
+          type: ['integer', 'null']
+          description: 'Nunca el valor de la credencial: solo su versión de rotación.'
+        rotated_at:
+          type: ['string', 'null']
+          format: date-time
+    PutProviderRequest:
+      type: object
+      additionalProperties: false
+      required: [url, credential, terms_checked_on]
+      properties:
+        url:
+          type: string
+          format: uri
+          pattern: '^https://'
+          description: Solo `https://` en producción.
+        credential:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: |
+            Credencial **del tenant** (BYOK). Se cifra en reposo y nunca se
+            devuelve ni se registra.
+        terms_checked_on:
+          type: string
+          format: date
+          description: Fecha en la que el tenant confirmó los términos del proveedor.
+
+    # ---------- Historial (E6) ----------
+    IngestHistoryRequest:
+      type: object
+      additionalProperties: false
+      required: [samples]
+      properties:
+        samples:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/LocationSample' }
+    IngestHistoryResponse:
+      type: object
+      required: [session_id, results]
+      properties:
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/SampleResult' }
+    TraceResponse:
+      type: object
+      required: [session_id, from, to, points]
+      properties:
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        from: { $ref: '#/components/schemas/Timestamp' }
+        to: { $ref: '#/components/schemas/Timestamp' }
+        points:
+          type: array
+          items: { $ref: '#/components/schemas/Point' }
+        encoded:
+          type: ['string', 'null']
+          description: Polilínea en el formato pedido (`polyline` o `gsp1`), si lo fue.
+    TripStop:
+      type: object
+      required: [started_at, ended_at, duration_s, position, radius_m, point_count]
+      properties:
+        started_at: { $ref: '#/components/schemas/Timestamp' }
+        ended_at: { $ref: '#/components/schemas/Timestamp' }
+        duration_s: { type: integer, minimum: 1 }
+        position: { $ref: '#/components/schemas/Position' }
+        radius_m: { type: number, format: double, minimum: 0 }
+        point_count: { type: integer, minimum: 1 }
+    Trip:
+      type: object
+      required: [id, session_id, member_id, started_at, ended_at, duration_s, distance_m, point_count, stops]
+      properties:
+        id: { $ref: '#/components/schemas/TripId' }
+        session_id: { $ref: '#/components/schemas/SessionId' }
+        member_id: { $ref: '#/components/schemas/MemberId' }
+        started_at: { $ref: '#/components/schemas/Timestamp' }
+        ended_at: { $ref: '#/components/schemas/Timestamp' }
+        duration_s: { type: integer, minimum: 1 }
+        distance_m: { type: number, format: double, minimum: 0 }
+        point_count: { type: integer, minimum: 1 }
+        mode: { type: ['string', 'null'] }
+        stops:
+          type: array
+          items: { $ref: '#/components/schemas/TripStop' }
+        track_gsp1:
+          type: ['string', 'null']
+          description: Polilínea simplificada. No contiene más precisión que `trip_simplify_tolerance_m`.
+    TripList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Trip' }
+        next_cursor: { type: ['string', 'null'] }
+    CreateExportRequest:
+      type: object
+      additionalProperties: false
+      required: [from, to, format]
+      properties:
+        from: { $ref: '#/components/schemas/Timestamp' }
+        to: { $ref: '#/components/schemas/Timestamp' }
+        format: { type: string, enum: [ndjson, csv] }
+        subject_ids:
+          type: array
+          description: Si se omite, exporta todo el historial del tenant con consentimiento vigente.
+          items: { $ref: '#/components/schemas/SubjectId' }
+    Export:
+      type: object
+      required: [id, format, status, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/ExportId' }
+        format: { type: string, enum: [ndjson, csv] }
+        status: { type: string, enum: [PENDING, RUNNING, READY, FAILED, EXPIRED] }
+        row_count: { type: ['integer', 'null'] }
+        download_url:
+          type: ['string', 'null']
+          description: TTL corto. No es una credencial permanente.
+        expires_at:
+          type: ['string', 'null']
+          format: date-time
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+
+    # ---------- Analítica k-anónima (E6/E7) ----------
+    HeatmapCell:
+      type: object
+      required: [cell, value]
+      properties:
+        cell: { $ref: '#/components/schemas/H3Cell' }
+        value: { type: number, format: double, minimum: 0 }
+    HeatmapResponse:
+      type: object
+      required: [metric, resolution, cells, k_anonymity_applied, suppressed_cells]
+      properties:
+        metric: { type: string, enum: [presence, stops, speed] }
+        resolution: { type: integer, minimum: 5, maximum: 12 }
+        cells:
+          type: array
+          items: { $ref: '#/components/schemas/HeatmapCell' }
+        k_anonymity_applied:
+          type: integer
+          description: |
+            El umbral real que se aplicó. Se publica para que el integrador sepa
+            qué nivel de garantía tiene, no para que pueda reconstruir lo suprimido.
+        suppressed_cells:
+          type: integer
+          minimum: 0
+          description: |
+            Cuántas celdas se ocultaron por estar por debajo de *k*. **No** se
+            publica su valor ni su ubicación.
+    OdPair:
+      type: object
+      required: [origin_cell, destination_cell, count]
+      properties:
+        origin_cell: { $ref: '#/components/schemas/H3Cell' }
+        destination_cell: { $ref: '#/components/schemas/H3Cell' }
+        count: { type: integer, minimum: 1 }
+    OdMatrixResponse:
+      type: object
+      required: [resolution, pairs, k_anonymity_applied, suppressed_pairs]
+      properties:
+        resolution: { type: integer, minimum: 4, maximum: 12 }
+        pairs:
+          type: array
+          items: { $ref: '#/components/schemas/OdPair' }
+        k_anonymity_applied: { type: integer }
+        suppressed_pairs: { type: integer, minimum: 0 }
+    SpeedBucket:
+      type: object
+      required: [cell, hour, p50_mps, p90_mps, count]
+      properties:
+        cell: { $ref: '#/components/schemas/H3Cell' }
+        hour: { type: integer, minimum: 0, maximum: 23 }
+        p50_mps: { type: number, format: double, minimum: 0 }
+        p90_mps: { type: number, format: double, minimum: 0 }
+        count: { type: integer, minimum: 1 }
+    SpeedProfileResponse:
+      type: object
+      required: [resolution, buckets, k_anonymity_applied, suppressed_buckets]
+      properties:
+        resolution: { type: integer, minimum: 5, maximum: 12 }
+        buckets:
+          type: array
+          items: { $ref: '#/components/schemas/SpeedBucket' }
+        k_anonymity_applied: { type: integer }
+        suppressed_buckets: { type: integer, minimum: 0 }
+    MobilityProfileResponse:
+      type: object
+      required: [scope, day_types, k_anonymity_applied]
+      properties:
+        scope:
+          type: string
+          enum: [SUBJECT, COHORT]
+          description: |
+            `SUBJECT` solo es posible si ese subject otorgó `ANALYTICS`.
+            `COHORT` es el agregado k-anónimo del tenant.
+        day_types:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              day_type: { type: ['string', 'null'] }
+              typical_departure: { type: ['string', 'null'] }
+              median_trips: { type: ['number', 'null'] }
+              median_distance_m: { type: ['number', 'null'] }
+        home_area_cells:
+          type: array
+          items: { $ref: '#/components/schemas/H3Cell' }
+        k_anonymity_applied: { type: integer }
+    LearnedPlace:
+      type: object
+      required: [id, position, radius_m, visits]
+      properties:
+        id: { $ref: '#/components/schemas/PlaceId' }
+        position: { $ref: '#/components/schemas/Position' }
+        radius_m: { type: number, format: double, minimum: 0 }
+        visits: { type: integer, minimum: 1 }
+        label:
+          type: ['string', 'null']
+          description: Etiqueta derivada; nunca escrita por el usuario a mano.
+    PlacesResponse:
+      type: object
+      required: [places, k_anonymity_applied, suppressed_places]
+      properties:
+        places:
+          type: array
+          items: { $ref: '#/components/schemas/LearnedPlace' }
+        k_anonymity_applied: { type: integer }
+        suppressed_places: { type: integer, minimum: 0 }
+
+    # ---------- Edge (E8) ----------
+    CreateTagRequest:
+      type: object
+      additionalProperties: false
+      required: [model]
+      properties:
+        model: { type: string, minLength: 1, maxLength: 100 }
+        name: { type: string, minLength: 1, maxLength: 100 }
+      description: |
+        **No** acepta `eik`, `eid` ni ninguna clave. La `EIK` se queda en el tag
+        y en el dispositivo dueño (INV-EDGE-1).
+    Tag:
+      type: object
+      required: [id, model, state, created_at, updated_at]
+      properties:
+        id: { $ref: '#/components/schemas/TagId' }
+        model: { type: string }
+        name: { type: ['string', 'null'] }
+        state: { $ref: '#/components/schemas/TagState' }
+        separated_at:
+          type: ['string', 'null']
+          format: date-time
+          description: |
+            Estado *separado*: el tag entra en protección DULT y ralentiza la
+            rotación del identificador a 24 h (docs/25_EDGE_DEVICES.md §3).
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+    TagList:
+      type: object
+      required: [data, next_cursor]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Tag' }
+        next_cursor: { type: ['string', 'null'] }
+    EdgeReportRequest:
+      type: object
+      additionalProperties: false
+      required: [tag_id, hashed_eid, time_bucket, finder_ephemeral_pub, payload_salt, ciphertext]
+      properties:
+        tag_id: { $ref: '#/components/schemas/TagId' }
+        hashed_eid:
+          type: string
+          description: 16 bytes en base64url o hex. Es un pseudónimo, no una identidad.
+        time_bucket:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          description: |
+            Marca temporal **gruesa**. Deliberadamente no se guarda la posición del
+            buscador junto al blob (T-28).
+        finder_ephemeral_pub:
+          type: string
+          description: Punto P-256 comprimido del buscador (33 bytes SEC1, base64url).
+        payload_salt: { type: string, description: Sal de un solo uso, base64url. }
+        ciphertext:
+          type: string
+          maxLength: 5464
+          description: |
+            Blob cifrado para el dueño del tag. El servidor lo almacena y **no
+            puede leerlo**: por eso T-22 cambia de respuesta para esta parte del
+            producto.
+    EdgeReportBlob:
+      type: object
+      required: [tag_id, hashed_eid, time_bucket, payload_salt, ciphertext]
+      properties:
+        tag_id: { $ref: '#/components/schemas/TagId' }
+        hashed_eid: { type: string }
+        time_bucket: { $ref: '#/components/schemas/Timestamp' }
+        payload_salt: { type: string }
+        ciphertext:
+          type: string
+          description: Opaco para el servidor. El descifrado ocurre en el cliente del dueño.
+    EdgeReportsLookupRequest:
+      type: object
+      additionalProperties: false
+      required: [hashed_eids, from, to]
+      properties:
+        hashed_eids:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          description: Sin duplicados. Acotado por `edge_lookup_max_ids`.
+          items: { type: string }
+        from: { $ref: '#/components/schemas/Timestamp' }
+        to: { $ref: '#/components/schemas/Timestamp' }
+    EdgeReportsLookupResponse:
+      type: object
+      required: [reports]
+      properties:
+        reports:
+          type: array
+          items: { $ref: '#/components/schemas/EdgeReportBlob' }
+    LpwanIngestResponse:
+      type: object
+      required: [accepted, rejected]
+      properties:
+        accepted: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }

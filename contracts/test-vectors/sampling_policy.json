@@ -1,0 +1,279 @@
+{
+  "description": "Vectores de muestreo adaptativo, publicación por cambio significativo y predicción visual (docs/22_TRACKING_ENGINE.md §3, §4). Formato en contracts/README.md §4.8. Estos vectores son también valores prohibidos en logs y métricas (docs/18_TESTING_STRATEGY.md §7.1).",
+  "version": 1,
+  "policy": {
+    "publish_min_distance_m": 10.0,
+    "publish_accuracy_factor": 1.5,
+    "publish_min_course_change_deg": 20.0,
+    "publish_turn_min_speed_mps": 2.5,
+    "publish_min_speed_change_mps": 1.0,
+    "publish_max_silence_s": 60,
+    "sampling_activity_confidence": 75,
+    "sampling_downgrade_confirm_s": 120,
+    "wake_region_radius_m": 150,
+    "predict_horizon_ms": 3000,
+    "predict_blend_ms": 500,
+    "predict_speed_decay_s": 2,
+    "predict_min_speed_mps": 1.0,
+    "predict_min_plausibility": 0.5,
+    "predict_uncertainty_growth_mps": 2.0,
+    "offline_buffer_max_samples": 20000,
+    "offline_buffer_max_age_s": 86400,
+    "offline_simplify_tolerance_m": 3,
+    "history_upload_interval_s": 300
+  },
+  "sampling_rules": [
+    { "zone": "URBAN", "max_speed_mps": 8.0, "max_accuracy_m": 25.0, "interval_ms": 1000 },
+    { "zone": "HIGHWAY", "max_speed_mps": 40.0, "max_accuracy_m": 50.0, "interval_ms": 3000 },
+    { "zone": "RURAL", "max_speed_mps": 0.0, "max_accuracy_m": 0.0, "interval_ms": 5000 }
+  ],
+  "clamp_ranges": {
+    "comment": "T-30: el cliente acota cada valor de SamplingPolicy a estos rangos antes de aplicarlo. Un valor fuera del rango se cuenta en sampling_policy_clamped_total y NO se aplica tal cual.",
+    "interval_ms": [1000, 300000],
+    "publish_max_silence_s": [5, 600],
+    "wake_region_radius_m": [50, 1000],
+    "downgrade_confirm_s": [30, 3600],
+    "predict_horizon_ms": [0, 10000]
+  },
+  "base_fix": {
+    "latitude": 8.9824,
+    "longitude": -79.5199,
+    "horizontal_accuracy_m": 10.0,
+    "motion": "AUTOMOTIVE",
+    "speed_mps": 12.0
+  },
+  "sampling_cases": [
+    {
+      "id": "SMP-INT-001",
+      "description": "Urbano a 4 m/s: coincide el primer grupo por zona y velocidad",
+      "fix": { "speed_mps": 4.0, "horizontal_accuracy_m": 8.0, "latitude": 8.98245 },
+      "expect": { "interval_ms": 1000 }
+    },
+    {
+      "id": "SMP-INT-002",
+      "description": "Carretera a 25 m/s: cae en HIGHWAY, no en URBAN",
+      "fix": { "speed_mps": 25.0, "horizontal_accuracy_m": 8.0, "latitude": 8.98360 },
+      "expect": { "interval_ms": 3000 }
+    },
+    {
+      "id": "SMP-INT-003",
+      "description": "Velocidad alta pero precisión pobre: la condición de precisión saca del primer grupo",
+      "fix": { "speed_mps": 4.0, "horizontal_accuracy_m": 120.0, "latitude": 8.98245 },
+      "expect": { "interval_ms": 5000 }
+    },
+    {
+      "id": "SMP-INT-004",
+      "description": "Velocidad cero y sin zona aplicable: el último grupo abierto (RURAL) captura",
+      "fix": { "speed_mps": 0.0, "horizontal_accuracy_m": 5.0, "motion": "STATIONARY", "latitude": 8.98240 },
+      "expect": { "interval_ms": 5000 }
+    },
+    {
+      "id": "SMP-INT-005",
+      "description": "Sin `motion` declarado: se usa el grupo abierto, nunca se interrumpe la publicación",
+      "fix": { "motion": null, "speed_mps": 12.0, "horizontal_accuracy_m": 8.0, "latitude": 8.98300 },
+      "expect": { "interval_ms": 5000, "never_stops_publishing": true }
+    }
+  ],
+  "publish_cases": [
+    {
+      "id": "SMP-PUB-001",
+      "description": "Desplazamiento de 8 m: por debajo de publish_min_distance_m, no publica",
+      "steps": [
+        { "latitude": 8.9824 },
+        { "latitude": 8.98247 }
+      ],
+      "expect": { "published": false }
+    },
+    {
+      "id": "SMP-PUB-002",
+      "description": "Desplazamiento de 12 m: supera publish_min_distance_m, publica",
+      "steps": [
+        { "latitude": 8.9824 },
+        { "latitude": 8.98252 }
+      ],
+      "expect": { "published": true, "reason": "distance" }
+    },
+    {
+      "id": "SMP-PUB-003",
+      "description": "La precisión empeora 3x sobre la mejor conocida: publica por precisión",
+      "steps": [
+        { "latitude": 8.9824, "horizontal_accuracy_m": 10.0 },
+        { "latitude": 8.98241, "horizontal_accuracy_m": 30.0 }
+      ],
+      "expect": { "published": true, "reason": "accuracy" }
+    },
+    {
+      "id": "SMP-PUB-004",
+      "description": "Giro de 45 grados a 12 m/s: publica por rumbo",
+      "steps": [
+        { "latitude": 8.9824, "longitude": -79.5199, "speed_mps": 12.0 },
+        { "latitude": 8.9826, "longitude": -79.5191, "speed_mps": 12.0 }
+      ],
+      "expect": { "published": true, "reason": "course" }
+    },
+    {
+      "id": "SMP-PUB-005",
+      "description": "Giro de 45 grados a 1 m/s: por debajo de publish_turn_min_speed_mps, no publica por rumbo",
+      "steps": [
+        { "latitude": 8.9824, "longitude": -79.5199, "speed_mps": 1.0 },
+        { "latitude": 8.9826, "longitude": -79.5191, "speed_mps": 1.0 }
+      ],
+      "expect": { "published": false },
+      "note": "Andar no es girar. Publicar cada paso mientras uno cruza una calle llenaría la red de muestras irrelevantes."
+    },
+    {
+      "id": "SMP-PUB-006",
+      "description": "Cambio de velocidad de 4 m/s: publica por velocidad",
+      "steps": [
+        { "latitude": 8.9824, "speed_mps": 12.0 },
+        { "latitude": 8.98245, "speed_mps": 16.0 }
+      ],
+      "expect": { "published": true, "reason": "speed" }
+    },
+    {
+      "id": "SMP-PUB-007",
+      "description": "publish_max_silence_s cumplido sin cambios: publica igualmente",
+      "steps": [
+        { "latitude": 8.9824, "at_ms": 0 },
+        { "latitude": 8.98240, "at_ms": 61000 }
+      ],
+      "expect": { "published": true, "reason": "silence" },
+      "note": "Garantiza el latido de datos: sin esto, un vehículo parado no enviaría nada y el suscriptor no podría distinguir «quieto» de «desconectado»."
+    },
+    {
+      "id": "SMP-PUB-008",
+      "description": "Ninguna condición se cumple: no publica",
+      "steps": [
+        { "latitude": 8.9824, "speed_mps": 12.0, "horizontal_accuracy_m": 10.0, "at_ms": 0 },
+        { "latitude": 8.98242, "speed_mps": 12.2, "horizontal_accuracy_m": 10.5, "at_ms": 2000 }
+      ],
+      "expect": { "published": false }
+    }
+  ],
+  "clamp_cases": [
+    {
+      "id": "SMP-CLAMP-001",
+      "description": "interval_ms = 10 (por debajo del mínimo): se acota a 1000 y se cuenta",
+      "policy_patch": { "rules[0].interval_ms": 10 },
+      "expect": { "applied_interval_ms": 1000, "clamped": true }
+    },
+    {
+      "id": "SMP-CLAMP-002",
+      "description": "interval_ms = 999999 (por encima del máximo): se acota a 300000 y se cuenta",
+      "policy_patch": { "rules[0].interval_ms": 999999 },
+      "expect": { "applied_interval_ms": 300000, "clamped": true }
+    },
+    {
+      "id": "SMP-CLAMP-003",
+      "description": "publish_max_silence_s = 0 (por debajo del mínimo): se acota a 5",
+      "policy_patch": { "publish_max_silence_s": 0 },
+      "expect": { "applied_publish_max_silence_s": 5, "clamped": true }
+    },
+    {
+      "id": "SMP-CLAMP-004",
+      "description": "Campo ausente: se ignora y se usa el default local del cliente",
+      "policy_patch": { "rules": null },
+      "expect": { "applied": "client_default", "error": false }
+    },
+    {
+      "id": "SMP-CLAMP-005",
+      "description": "Campo malformado (cadena en vez de número): se ignora, no aborta el hello",
+      "policy_patch": { "wake_region_radius_m": "mucho" },
+      "expect": { "applied": "client_default", "error": false, "connection_closed": false },
+      "note": "Un valor malformado no puede cerrar una conexión que funciona (T-30)."
+    }
+  ],
+  "offline_cases": [
+    {
+      "id": "SMP-OFF-001",
+      "description": "Cola cifrada: al reconectar se entrega por lotes sin exceder max_samples_per_publish_http",
+      "samples": 120,
+      "http_batch": 50,
+      "expect": { "batches": 3, "max_per_batch": 50, "order_preserved": true }
+    },
+    {
+      "id": "SMP-OFF-002",
+      "description": "Se supera offline_buffer_max_samples: se descarta la muestra MÁS ANTIGUA",
+      "samples": 20050,
+      "expect": { "retained": 20000, "dropped": "oldest", "latest_retained": true }
+    },
+    {
+      "id": "SMP-OFF-003",
+      "description": "Se supera offline_buffer_max_age_s: se descarta por antigüedad",
+      "samples": 10,
+      "max_age_s": 86400,
+      "expect": { "dropped": "too_old" }
+    },
+    {
+      "id": "SMP-OFF-004",
+      "description": "Detener la compartición borra la cola de forma síncrona y completa",
+      "samples": 500,
+      "action": "set_sharing_false",
+      "expect": { "queue_size_after": 0, "on_disk_after": 0, "synchronous": true },
+      "note": "NFR-PRIV-002. Nada pendiente en disco tras detener, salir, ser revocado o cerrar sesión."
+    },
+    {
+      "id": "SMP-OFF-005",
+      "description": "La cola en disco está cifrada: el contenido en claro no existe",
+      "samples": 100,
+      "expect": { "plaintext_on_disk": false, "cipher": "AEAD", "key_scope": "installation" }
+    }
+  ],
+  "prediction_cases": [
+    {
+      "id": "SMP-PRED-001",
+      "description": "Velocidad y plausibilidad suficientes: extrapola hasta predict_horizon_ms",
+      "input": [
+        { "latitude": 8.9824, "longitude": -79.5199, "speed_mps": 12.0, "at_ms": 0 },
+        { "latitude": 8.98262, "longitude": -79.5199, "speed_mps": 12.0, "at_ms": 1000 }
+      ],
+      "horizon_ms": 3000,
+      "expect": { "extrapolated": true, "local_only": true }
+    },
+    {
+      "id": "SMP-PRED-002",
+      "description": "Velocidad por debajo de predict_min_speed_mps: no extrapola",
+      "input": [
+        { "latitude": 8.9824, "longitude": -79.5199, "speed_mps": 0.4, "at_ms": 0 },
+        { "latitude": 8.982405, "longitude": -79.5199, "speed_mps": 0.4, "at_ms": 1000 }
+      ],
+      "expect": { "extrapolated": false }
+    },
+    {
+      "id": "SMP-PRED-003",
+      "description": "Menos de 2 muestras: no hay con qué extrapolar",
+      "input": [
+        { "latitude": 8.9824, "longitude": -79.5199, "speed_mps": 12.0, "at_ms": 0 }
+      ],
+      "expect": { "extrapolated": false }
+    },
+    {
+      "id": "SMP-PRED-004",
+      "description": "La posición predicha NUNCA se publica, persiste ni registra",
+      "input_ref": "SMP-PRED-001",
+      "expect": {
+        "published_as_sample": false,
+        "persisted": false,
+        "logged": false,
+        "in_snapshot": false
+      },
+      "note": "docs/08_STREAM_PROTOCOL.md §7.6. Una muestra con kind = PREDICTED enviada al servidor se rechaza con INVALID_LOCATION en quality.kind."
+    },
+    {
+      "id": "SMP-PRED-005",
+      "description": "Un cliente que envíe kind = PREDICTED recibe INVALID_LOCATION",
+      "input": [
+        { "latitude": 8.9824, "longitude": -79.5199, "quality_kind": "PREDICTED" }
+      ],
+      "expect": { "status": "REJECTED", "error_code": "INVALID_LOCATION", "field": "quality.kind" }
+    },
+    {
+      "id": "SMP-PRED-006",
+      "description": "Un cliente que envíe kind = INTERPOLATED recibe INVALID_LOCATION",
+      "input": [
+        { "latitude": 8.9824, "longitude": -79.5199, "quality_kind": "INTERPOLATED" }
+      ],
+      "expect": { "status": "REJECTED", "error_code": "INVALID_LOCATION", "field": "quality.kind" }
+    }
+  ]
+}

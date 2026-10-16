@@ -1,0 +1,166 @@
+{
+  "id": "SCN-016",
+  "title": "En un POOL los conductores no se ven entre sí (INV-POOL-1)",
+  "requirements": ["FR-POOL-001", "FR-POOL-002", "FR-PRS-004", "INV-POOL-1"],
+  "config": { "GS_ENV": "test" },
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint", "sessions:read", "sessions:write", "members:write",
+        "pools:manage", "pools:query"
+      ]
+    },
+    "driver_a": { "kind": "device", "external_subject_id": "driver_a", "platform": "PLATFORM_ANDROID" },
+    "driver_b": { "kind": "device", "external_subject_id": "driver_b", "platform": "PLATFORM_ANDROID" }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/pools",
+      "body": { "expires_in_seconds": 3600 },
+      "expect": { "status": 201, "json": { "mode": "POOL" } },
+      "capture": { "pool_id": "$.id" }
+    },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/pools",
+      "body": { "expires_in_seconds": 3600 },
+      "expect": { "status": 403, "json": { "code": "INSUFFICIENT_SCOPE" } },
+      "note": "INV-POOL-1 / auth: solo una aplicación con `pools:manage` crea un pool."
+    },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions/{{pool_id}}/members",
+      "body": { "external_subject_id": "driver_a" },
+      "expect": { "status": 403, "json": { "code": "PERMISSION_DENIED" } },
+      "note": "Los conductores entran solos: un dispositivo no puede añadirse a sí mismo por la vía de un tercero."
+    },
+    {
+      "actor": "driver_a",
+      "op": "stream.connect",
+      "expect": "ready",
+      "note": "Entrar en un pool es ponerle `sharing = true`, igual que en cualquier otra sesión."
+    },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/pools/{{pool_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200, "json": { "sharing": true } }
+    },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/pools/{{pool_id}}/members/me/availability",
+      "body": { "availability": "AVAILABLE" },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "driver_a",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{pool_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": { "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    { "actor": "driver_b", "op": "stream.connect", "expect": "ready" },
+    {
+      "actor": "driver_b",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/pools/{{pool_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "driver_b",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{pool_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": { "latitude": 8.9870, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "driver_a",
+      "op": "stream.send",
+      "message": { "subscribe": { "session_id": "{{pool_id}}" } },
+      "expect_reply": {
+        "error": { "code": "ERROR_CODE_PERMISSION_DENIED" }
+      },
+      "note": "INV-POOL-1: un conductor no puede suscribirse al stream de otros conductores, ni siquiera a su propia sesión de pool."
+    },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/nearby?lat=8.9824&lon=-79.5199&radius_m=5000",
+      "expect": { "status": 403, "json": { "code": "INSUFFICIENT_SCOPE" } },
+      "note": "`nearby` es de aplicación. Un pasajero tampoco debe poder pedir las posiciones individuales de los conductores."
+    },
+    {
+      "actor": "driver_a",
+      "op": "stream.send",
+      "message": { "subscribe": { "session_id": "{{pool_id}}" } },
+      "expect_reply": { "error": { "code": "ERROR_CODE_PERMISSION_DENIED" } },
+      "mark": "check_no_cross_visibility"
+    },
+    {
+      "actor": "driver_b",
+      "op": "stream.expect_none",
+      "message": "location_update",
+      "for_ms": 1500,
+      "note": "El punto de driver_b nunca llega a driver_a, ni al revés."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/nearby?lat=8.9824&lon=-79.5199&radius_m=5000",
+      "expect": { "status": 200, "json_count": { "$.data": 2 } },
+      "note": "La aplicación sí ve a todo el pool: es quien necesita asignar trabajo."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions/{{pool_id}}/members",
+      "body": {
+        "external_subject_id": "driver_c",
+        "capabilities": { "publish": true, "read": true, "invite": false, "manage": false }
+      },
+      "expect": { "status": 422, "json": { "code": "VALIDATION_FAILED" } },
+      "note": "INV-POOL-1: `read` está prohibido para un miembro dispositivo de un pool. Se rechaza el alta, no se recorta en silencio."
+    },
+    { "actor": "driver_a", "op": "stream.close" },
+    { "actor": "driver_b", "op": "stream.close" }
+  ]
+}

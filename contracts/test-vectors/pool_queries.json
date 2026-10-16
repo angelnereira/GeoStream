@@ -1,0 +1,213 @@
+{
+  "description": "Vectores de pools de disponibilidad y consultas de proximidad (docs/23_MOBILITY.md §8). Formato en contracts/README.md §4.9. Estos vectores son también valores prohibidos en logs y métricas (docs/18_TESTING_STRATEGY.md §7.1).",
+  "version": 1,
+  "policy": {
+    "pool_index_resolution": 9,
+    "pool_density_resolution": 9,
+    "pool_max_attributes": 8,
+    "pool_query_max_radius_m": 20000.0,
+    "pool_eta_prefilter": 20,
+    "pool_density_max_markers": 15,
+    "pool_density_delay_s": 10,
+    "pool_snapshot_ttl_default_seconds": 120
+  },
+  "synthetic_members": {
+    "comment": "Miembros sintéticos del pool. Sus coordenadas son valores de prueba prohibidos en logs, métricas y trazas.",
+    "members": [
+      { "member_id": "mem_0000000000000000000000000000000a", "label": "conductor-near",  "lat": 8.9824,  "lon": -79.5199, "availability": "AVAILABLE", "attributes": { "vehicle_type": "van", "seats": "4" } },
+      { "member_id": "mem_0000000000000000000000000000000b", "label": "conductor-mid",  "lat": 8.9870,  "lon": -79.5199, "availability": "BUSY",     "attributes": { "vehicle_type": "car", "seats": "4" } },
+      { "member_id": "mem_0000000000000000000000000000000c", "label": "conductor-far",  "lat": 9.0050,  "lon": -79.5199, "availability": "PAUSED",   "attributes": { "vehicle_type": "car" } },
+      { "member_id": "mem_0000000000000000000000000000000d", "label": "conductor-paused-far", "lat": 8.9840, "lon": -79.5000, "availability": "PAUSED", "attributes": {} },
+      { "member_id": "mem_0000000000000000000000000000000e", "label": "conductor-offline",    "lat": 8.9830, "lon": -79.5190, "availability": "AVAILABLE", "attributes": {}, "connected": false }
+    ]
+  },
+  "center": { "lat": 8.9824, "lon": -79.5199 },
+  "nearby_cases": [
+    {
+      "id": "POOL-NEAR-001",
+      "description": "Radio de 200 m: solo entra el conductor más cercano",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 200, "rank": "distance" },
+      "expect": { "count": 1, "members": ["conductor-near"] }
+    },
+    {
+      "id": "POOL-NEAR-002",
+      "description": "Radio amplio: entran los conectados; PAUSED y desconectados quedan fuera",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 5000, "rank": "distance" },
+      "expect": { "count": 2, "members": ["conductor-near", "conductor-mid"], "excludes": ["conductor-far", "conductor-offline"] },
+      "note": "Un conductor `PAUSED` está en línea pero no disponible: no debe aparecer como opción de asignación."
+    },
+    {
+      "id": "POOL-NEAR-003",
+      "description": "Filtro por atributo: solo vehículos de tipo van",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 5000, "filter.attributes": "vehicle_type=van" },
+      "expect": { "count": 1, "members": ["conductor-near"] }
+    },
+    {
+      "id": "POOL-NEAR-004",
+      "description": "rank = eta preordena por tiempo de llegada, no por distancia",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 5000, "rank": "eta" },
+      "expect": { "count": 2, "ordered_by": "eta_s", "prefilter_applied": true, "mode": "DRIVING" }
+    },
+    {
+      "id": "POOL-NEAR-005",
+      "description": "max_age_s amplio admite un miembro cuya última muestra es antigua pero no nula",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 5000, "max_age_s": 300 },
+      "expect": { "count": 2 },
+      "note": "`max_age_s = 0` (por defecto) solo admite muestras de esta ventana; subirlo es una decisión explícita del integrador."
+    }
+  ],
+  "invariants": [
+    {
+      "id": "POOL-INV-001",
+      "description": "INV-POOL-1: un miembro dispositivo de un POOL no puede tener read, invite ni manage",
+      "action": "add_member_with_capabilities",
+      "capabilities": { "publish": true, "read": true, "invite": false, "manage": false },
+      "expect": { "status": 422, "error_code": "VALIDATION_FAILED", "field": "capabilities" }
+    },
+    {
+      "id": "POOL-INV-002",
+      "description": "INV-POOL-1: un dispositivo no puede entrar por `addMember` a un POOL",
+      "action": "add_member_by_device",
+      "expect": { "status": 403, "error_code": "PERMISSION_DENIED" }
+    },
+    {
+      "id": "POOL-INV-003",
+      "description": "INV-PRS-2: `availability` y `attributes` no se proyectan a una conexión de dispositivo",
+      "action": "device_subscribes_to_pool",
+      "expect": { "member_status_has_availability": false, "member_status_has_attributes": false }
+    },
+    {
+      "id": "POOL-INV-004",
+      "description": "INV-PRS-2: un dispositivo no puede leer el stream de otro conductor del pool",
+      "action": "device_subscribes_to_pool_stream",
+      "expect": { "status": 403, "error_code": "PERMISSION_DENIED" }
+    },
+    {
+      "id": "POOL-INV-005",
+      "description": "INV-POOL-1: crear un POOL requiere scope de aplicación `pools:manage`",
+      "action": "create_pool_by_device",
+      "expect": { "status": 403, "error_code": "PERMISSION_DENIED" }
+    },
+    {
+      "id": "POOL-INV-006",
+      "description": "Al detener la compartición, la entrada del índice se borra de forma SÍNCRONA antes de responder",
+      "action": "set_sharing_false",
+      "expect": { "index_entry_removed_before_response": true, "event": "pool.member_offline" },
+      "note": "Si el borrado fuera asíncrono, un `nearby` inmediato seguiría mostrando al conductor que ya dijo «dejo de compartir». Es la diferencia entre respetar una decisión y casi respetarla."
+    }
+  ],
+  "rings_cases": [
+    {
+      "id": "POOL-RING-001",
+      "description": "Anillos de 500 m alrededor del centro",
+      "params": { "lat": 8.9824, "lon": -79.5199, "ring_step_m": 500 },
+      "expect": { "rings": 2, "counts": [1, 1] }
+    },
+    {
+      "id": "POOL-RING-002",
+      "description": "per_ring_limit trunca el anillo y lo marca",
+      "params": { "lat": 8.9824, "lon": -79.5199, "k": 3, "per_ring_limit": 1 },
+      "expect": { "rings": 3, "truncated": true },
+      "note": "El receptor sabe que le falta información; no recibe un anillo silenciosamente incompleto."
+    },
+    {
+      "id": "POOL-RING-003",
+      "description": "Enviar ring_step_m y k a la vez es 422",
+      "params": { "lat": 8.9824, "lon": -79.5199, "ring_step_m": 500, "k": 3 },
+      "expect": { "status": 422, "error_code": "VALIDATION_FAILED" }
+    }
+  ],
+  "density_cases": [
+    {
+      "id": "POOL-DENS-001",
+      "description": "density no contiene identificadores de persona, dispositivo ni sesión",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 20000 },
+      "expect": {
+        "has_member_id": false,
+        "has_subject_id": false,
+        "has_device_id": false,
+        "has_exact_timestamp": false
+      }
+    },
+    {
+      "id": "POOL-DENS-002",
+      "description": "El centroide está desplazado: no coincide con la posición de ningún miembro",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 20000 },
+      "expect": { "centroid_offset_m": [1.0, null], "equals_member_position": false }
+    },
+    {
+      "id": "POOL-DENS-003",
+      "description": "El rumbo está cuantizado a 8 sectores",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 20000 },
+      "expect": { "heading_sector_in_range": [0, 7] }
+    },
+    {
+      "id": "POOL-DENS-004",
+      "description": "Todos los marcadores tienen delay_ms >= pool_density_delay_s",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 20000 },
+      "expect": { "min_delay_ms": 10 }
+    },
+    {
+      "id": "POOL-DENS-005",
+      "description": "El número de marcadores está acotado",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 20000 },
+      "expect": { "max_markers": 15 }
+    },
+    {
+      "id": "POOL-DENS-006",
+      "description": "Un dispositivo con `pools:density` sí puede consultar density",
+      "actor": "device_passenger",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 20000 },
+      "expect": { "status": 200 }
+    },
+    {
+      "id": "POOL-DENS-007",
+      "description": "Un dispositivo NO puede consultar nearby ni rings",
+      "actor": "device_passenger",
+      "params": { "lat": 8.9824, "lon": -79.5199, "radius_m": 5000 },
+      "expect": { "status": 403, "error_code": "INSUFFICIENT_SCOPE" },
+      "note": "Pedir `nearby` desde un dispositivo de pasajero es pedir la ubicación individual de los conductores. El scope lo impide; `density` es la alternativa deliberadamente empobrecida."
+    }
+  ],
+  "validation_cases": [
+    {
+      "id": "POOL-VAL-001",
+      "description": "radius_m por encima de pool_query_max_radius_m",
+      "params": { "radius_m": 50000 },
+      "expect": { "status": 422, "field": "radius_m" }
+    },
+    {
+      "id": "POOL-VAL-002",
+      "description": "limit por encima de 100",
+      "params": { "radius_m": 1000, "limit": 200 },
+      "expect": { "status": 422, "field": "limit" }
+    },
+    {
+      "id": "POOL-VAL-003",
+      "description": "availability con valor fuera del enum",
+      "body": { "availability": "DRIVING" },
+      "expect": { "status": 422, "field": "availability" }
+    },
+    {
+      "id": "POOL-VAL-004",
+      "description": "Más de pool_max_attributes entradas",
+      "body": { "attributes": { "a1": "x", "a2": "x", "a3": "x", "a4": "x", "a5": "x", "a6": "x", "a7": "x", "a8": "x", "a9": "x" } },
+      "expect": { "status": 422, "field": "attributes" }
+    },
+    {
+      "id": "POOL-VAL-005",
+      "description": "Clave de atributo que no cumple ^[a-z0-9_]{1,32}$",
+      "body": { "attributes": { "Vehicle-Type": "van" } },
+      "expect": { "status": 422, "field": "attributes" }
+    },
+    {
+      "id": "POOL-VAL-006",
+      "description": "Un dispositivo intenta cambiar `availability` de otro miembro",
+      "actor": "device_passenger",
+      "target": "other_member",
+      "body": { "availability": "AVAILABLE" },
+      "expect": { "status": 403, "error_code": "PERMISSION_DENIED" },
+      "note": "Solo `me` para un dispositivo; la aplicación con `pools:manage` puede cambiar cualquiera."
+    }
+  ]
+}

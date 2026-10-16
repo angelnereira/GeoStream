@@ -1,0 +1,197 @@
+{
+  "id": "SCN-019",
+  "title": "Retirar el consentimiento de HISTORIA detiene las escrituras de inmediato",
+  "requirements": ["FR-HIS-001", "FR-HIS-005", "FR-ANA-005", "NFR-PRIV-001"],
+  "slow": true,
+  "config": { "GS_ENV": "test" },
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "sessions:write", "members:write", "history:read"]
+    },
+    "alice": { "kind": "device", "external_subject_id": "alice", "platform": "PLATFORM_ANDROID" },
+    "carol": { "kind": "device", "external_subject_id": "carol", "platform": "PLATFORM_ANDROID" }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "history_mode": "TRACE",
+        "initial_members": [{ "external_subject_id": "alice" }, { "external_subject_id": "carol" }]
+      },
+      "expect": { "status": 201, "json": { "history_mode": "TRACE" } },
+      "capture": { "session_id": "$.id" },
+      "note": "history_mode = TRACE exige `tenant.history_allowed`; sin ella la respuesta sería 403 FEATURE_DISABLED."
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-3s}}",
+              "position": { "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "2",
+              "captured_at": "{{now-2s}}",
+              "position": { "latitude": 8.9826, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "2", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions/{{session_id}}/history",
+      "body": {
+        "samples": [
+          {
+            "sequence": 3,
+            "captured_at": "{{now-1s}}",
+            "position": { "latitude": 8.9828, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+            "quality": { "source": "GNSS", "kind": "MEASURED" }
+          }
+        ]
+      },
+      "expect": { "status": 403, "json": { "code": "CONSENT_REQUIRED" } },
+      "note": "La triple llave: política del tenant ✓, history_mode ≠ OFF ✓, pero HISTORY ∉ consent_purposes → CONSENT_REQUIRED."
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true, "purposes": ["HISTORY"] },
+      "expect": { "status": 200, "json": { "sharing": true } }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions/{{session_id}}/history",
+      "body": {
+        "samples": [
+          {
+            "sequence": 3,
+            "captured_at": "{{now-1s}}",
+            "position": { "latitude": 8.9828, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+            "quality": { "source": "GNSS", "kind": "MEASURED" }
+          }
+        ]
+      },
+      "expect": { "status": 200, "json": { "results": [{ "sequence": 3, "status": "ACCEPTED" }] } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/trace?from={{now-1h}}&to={{now}}&format=json",
+      "expect": { "status": 200 },
+      "mark": "with_consent"
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true, "purposes": [] },
+      "expect": { "status": 200 },
+      "mark": "consent_withdrawn",
+      "note": "Retirar el consentimiento NO detiene la compartición en vivo; sí las escrituras de historial, de inmediato."
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "4",
+              "captured_at": "{{now}}",
+              "position": { "latitude": 8.9830, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "4", "status": "SAMPLE_STATUS_ACCEPTED" }] } },
+      "note": "La muestra en vivo se sigue aceptando y distribuyendo: retirar el historial no corta la sesión de compartición."
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions/{{session_id}}/history",
+      "body": {
+        "samples": [
+          {
+            "sequence": 5,
+            "captured_at": "{{now}}",
+            "position": { "latitude": 8.9832, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+            "quality": { "source": "GNSS", "kind": "MEASURED" }
+          }
+        ]
+      },
+      "expect": { "status": 403, "json": { "code": "CONSENT_REQUIRED" } },
+      "measure_from": "consent_withdrawn",
+      "metric": "consent_withdrawal_propagation_ms",
+      "note": "NFR-PRIV-003: sin reinicio y sin coordinación entre instancias."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}/trace?from={{now-1h}}&to={{now}}&format=json",
+      "expect": { "status": 200 },
+      "note": "El historial ya escrito se conserva hasta que la retención o el borrado por consentimiento lo elimine; no se borra en el momento de retirar el permiso."
+    },
+    {
+      "actor": "alice",
+      "op": "assert.ephemeral",
+      "what": "snapshot",
+      "session": "{{session_id}}",
+      "exists": true,
+      "note": "La compartición en vivo sigue viva: el snapshot NO se borra por retirar el historial."
+    }
+  ]
+}

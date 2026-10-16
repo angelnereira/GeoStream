@@ -1,0 +1,107 @@
+{
+  "id": "SCN-023",
+  "title": "Si se exige proveedor y falla, la respuesta es 503 y no una estimación silenciosa",
+  "requirements": ["FR-MOB-004", "FR-MOB-006", "NFR-RES-002"],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "sessions:write", "members:write", "tools:use", "providers:manage"]
+    }
+  },
+  "note": "El proveedor de pruebas se configura en modo `fail` para este escenario.",
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/providers/route_matrix",
+      "body": {
+        "url": "https://provider.test.local/v1",
+        "credential": "clave-de-prueba-del-tenant",
+        "terms_checked_on": "2026-01-10"
+      },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tools/eta",
+      "body": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": 8.9900, "lon": -79.5199 }],
+        "mode": "DRIVING",
+        "source_preference": "PROVIDER"
+      },
+      "expect": { "status": 503, "json": { "code": "PROVIDER_UNAVAILABLE" } },
+      "mark": "provider_failure"
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tools/eta",
+      "body": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": 8.9900, "lon": -79.5199 }],
+        "mode": "DRIVING"
+      },
+      "expect": { "status": 200, "json": { "source": "ESTIMATED" } },
+      "note": "Sin `source_preference`, la estimación propia ES la respuesta esperada. Quien no pidió proveedor no puede quejarse de que la obtenga."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tools/eta",
+      "body": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": 8.9900, "lon": -79.5199 }],
+        "mode": "DRIVING",
+        "source_preference": "LEARNED"
+      },
+      "expect": { "status": 200, "json": { "source": "LEARNED" } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "DELETE",
+      "path": "/v1/providers/route_matrix",
+      "expect": { "status": 204 }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tools/eta",
+      "body": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": 8.9900, "lon": -79.5199 }],
+        "mode": "DRIVING",
+        "source_preference": "PROVIDER"
+      },
+      "expect": { "status": 503, "json": { "code": "PROVIDER_UNAVAILABLE" } },
+      "note": "Retirar el proveedor surte efecto inmediato: no hay caché de credenciales que lo mantenga vivo."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tools/routes",
+      "body": {
+        "origin": { "lat": 8.9824, "lon": -79.5199 },
+        "destination": { "lat": 8.9900, "lon": -79.5199 },
+        "mode": "DRIVING",
+        "source_preference": "OWN_GRAPH"
+      },
+      "expect": { "status": 503, "json": { "code": "PROVIDER_UNAVAILABLE" } },
+      "note": "Se pidió `OWN_GRAPH` y no hay grafo cargado: 503, no una ruta inventada con source incorrecto."
+    },
+    {
+      "actor": "backend",
+      "op": "assert.no_estimated_value_leaked",
+      "in_response_with_status_503": true,
+      "note": "La verificación más importante del escenario: un 503 cuyo cuerpo incluye un ETA estimado sería indistinguible de un 200 para un cliente descuidado."
+    }
+  ]
+}

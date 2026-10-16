@@ -1,0 +1,145 @@
+{
+  "id": "SCN-022",
+  "title": "El proveedor recibe solo coordenadas, nunca identificadores (T-29)",
+  "requirements": ["FR-MOB-003", "FR-MOB-005", "NFR-PRIV-004"],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "sessions:write", "members:write", "tools:use", "providers:manage", "analytics:read"]
+    },
+    "alice": { "kind": "device", "external_subject_id": "alice", "platform": "PLATFORM_ANDROID" }
+  },
+  "note": "El runner levanta un proveedor de pruebas local que registra cada petición recibida y devuelve una matriz de costes conocida. `GS_PROVIDERS_ENABLED` apunta a él.",
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "ONE_TO_ONE",
+        "expires_in_seconds": 3600,
+        "metadata": { "tenant_label": "flota-norte" },
+        "initial_members": [{ "external_subject_id": "alice" }]
+      },
+      "expect": { "status": 201 },
+      "capture": { "session_id": "$.id", "alice_member_id": "$.owner_member_id" }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.connect",
+      "expect": "ready"
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": { "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/providers/route_matrix",
+      "body": {
+        "url": "https://provider.test.local/v1",
+        "credential": "clave-de-prueba-del-tenant",
+        "terms_checked_on": "2026-01-10"
+      },
+      "expect": { "status": 200, "json": { "port": "route_matrix", "configured": true } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/providers/route_matrix",
+      "expect": { "status": 200 },
+      "assertions": [
+        "el cuerpo NO contiene el valor de la credencial",
+        "el cuerpo SÍ contiene credential_version"
+      ]
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tools/eta",
+      "body": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": 8.9900, "lon": -79.5199 }],
+        "mode": "DRIVING",
+        "source_preference": "PROVIDER"
+      },
+      "expect": { "status": 200, "json": { "source": "PROVIDER" } }
+    },
+    {
+      "actor": "backend",
+      "op": "assert.provider_request",
+      "for_port": "route_matrix",
+      "expect": {
+        "received_coordinates": true,
+        "received_identifiers": false,
+        "forbidden_fields": [
+          "subject_id",
+          "device_id",
+          "session_id",
+          "member_id",
+          "external_subject_id",
+          "tenant_id",
+          "metadata"
+        ]
+      },
+      "note": "T-29. El `metadata` de la sesión («flota-norte») es exactamente el tipo de dato que NO debe viajar: identifica al cliente del integrador."
+    },
+    {
+      "actor": "backend",
+      "op": "assert.no_secret_leak",
+      "secret": "clave-de-prueba-del-tenant",
+      "in": ["logs", "metrics", "traces", "responses"]
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tools/assignments",
+      "body": {
+        "workers": [{ "id": "w1", "position": { "lat": 8.9824, "lon": -79.5199 }, "capacity": 1 }],
+        "tasks": [{ "id": "t1", "position": { "lat": 8.9900, "lon": -79.5199 } }],
+        "algorithm": "hungarian",
+        "source_preference": "PROVIDER"
+      },
+      "expect": { "status": 200, "json": { "source": "PROVIDER" } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/provider-usage",
+      "expect": {
+        "status": 200,
+        "forbidden_fields_absent": ["labels_containing_tenant_id"]
+      },
+      "note": "El uso del gateway se contabiliza por tenant y hora en PostgreSQL, no como etiqueta Prometheus (docs/13 §8.3)."
+    }
+  ]
+}

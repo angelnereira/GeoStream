@@ -21,6 +21,26 @@
     {
       "value": "ten_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
       "type": "TenantId"
+    },
+    {
+      "value": "tag_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "TagId"
+    },
+    {
+      "value": "trp_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "TripId"
+    },
+    {
+      "value": "plc_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "PlaceId"
+    },
+    {
+      "value": "exp_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "ExportId"
+    },
+    {
+      "value": "lpw_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "LpwanIntegrationId"
     }
   ],
   "invalid": [
@@ -63,6 +83,26 @@
       "value": "ses_0192b6c0a1e47c3f9d2a7b5e8f1c0d3g",
       "type": "SessionId",
       "reason": "carácter no hex"
+    },
+    {
+      "value": "TAG_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "TagId",
+      "reason": "prefijo en mayúsculas"
+    },
+    {
+      "value": "tag_0192b6c0a1e47c3f9d2a7b5e8f1c0d3",
+      "type": "TagId",
+      "reason": "31 hex"
+    },
+    {
+      "value": "tag_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a0",
+      "type": "TagId",
+      "reason": "33 hex"
+    },
+    {
+      "value": "tag_0192B6C0A1E47C3F9D2A7B5E8F1C0D3A",
+      "type": "TagId",
+      "reason": "hex en mayúsculas"
     }
   ],
   "external_subject_id": {
@@ -91,5 +131,9 @@
       "3f1c2a7e-9b0d-1c1e-8f2a-6d5b4c3a2e10",
       "3f1c2a7e-9b0d-4c1e-cf2a-6d5b4c3a2e10"
     ]
-  }
+  },
+  "notes": [
+    "Prefijos de docs/05_DOMAIN_MODEL.md §2: tag_, trp_, plc_, exp_, lpw_.",
+    "h3_cell NO es un ID público: es una celda entera opaca usada como clave de particionado y agregación, y se trata como coordenada a efectos de redacción (docs/10 §8.2)."
+  ]
 }

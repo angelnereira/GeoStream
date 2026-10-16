@@ -1,0 +1,140 @@
+{
+  "id": "SCN-024",
+  "title": "El servidor almacena el reporte Beacon sin poder descifrarlo",
+  "requirements": ["FR-EDGE-001", "FR-EDGE-002", "FR-EDGE-005", "NFR-PRIV-004"],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "members:write", "tags:manage"]
+    },
+    "owner": {
+      "kind": "device",
+      "external_subject_id": "owner",
+      "platform": "PLATFORM_ANDROID",
+      "scopes": ["tags:manage", "edge:lookup"]
+    },
+    "finder": {
+      "kind": "device",
+      "external_subject_id": "finder",
+      "platform": "PLATFORM_ANDROID",
+      "scopes": ["edge:report"]
+    }
+  },
+  "note": "El blob del vector `EDGE-RPT-001` está cifrado con la `EIK` del tag, que el runner conserva fuera del servidor para simular el dispositivo real.",
+  "steps": [
+    {
+      "actor": "owner",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tags",
+      "body": { "model": "gst-1", "name": "Mochila del colegio" },
+      "expect": { "status": 201 },
+      "capture": { "tag_id": "$.id" },
+      "assertions": ["la respuesta NO contiene ningún campo de clave", "la petición NO contenía ninguna clave"]
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tags",
+      "body": { "model": "gst-1", "eik": "AAAA" },
+      "expect": { "status": 422, "json": { "code": "VALIDATION_FAILED" } },
+      "note": "INV-EDGE-1: `additionalProperties: false` hace imposible que una clave llegue por accidente."
+    },
+    {
+      "actor": "finder",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports",
+      "body": {
+        "tag_id": "{{tag_id}}",
+        "hashed_eid": "AAAAAAAAAAAAAAAAAAAAAA",
+        "time_bucket": "{{now}}",
+        "finder_ephemeral_pub": "BAAAAAAA",
+        "payload_salt": "c2FsdC1kZS1wcmFiYQ",
+        "ciphertext": "Y2lwaGVydGV4dC1vcGFxdW8tYmxvYg"
+      },
+      "expect": { "status": 202 }
+    },
+    {
+      "actor": "backend",
+      "op": "assert.schema",
+      "what": "no_column_for_eik",
+      "expect": { "columns_found": 0 },
+      "note": "INV-EDGE-1 verificable en el esquema, no por confianza en la aplicación."
+    },
+    {
+      "actor": "backend",
+      "op": "assert.db_row",
+      "table": "edge_reports",
+      "expect": {
+        "ciphertext_equals_sent": true,
+        "stores_finder_position_with_blob": false,
+        "stores_finder_device_id_with_blob": false,
+        "stores": ["hashed_eid", "time_bucket", "finder_ephemeral_pub", "payload_salt", "ciphertext"]
+      },
+      "note": "T-28. El servidor sabe un pseudónimo y una hora; no sabe quién vio el tag ni dónde estaba."
+    },
+    {
+      "actor": "backend",
+      "op": "assert.server_cannot_decrypt",
+      "what": "{{tag_id}}"
+    },
+    {
+      "actor": "finder",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports",
+      "body": {
+        "tag_id": "{{tag_id}}",
+        "hashed_eid": "BBBBBBBBBBBBBBBBBBBBBB",
+        "time_bucket": "{{now-2h}}",
+        "finder_ephemeral_pub": "BAAAAAAA",
+        "payload_salt": "c2FsdC1kZS1wcmFiYQ",
+        "ciphertext": "Y2lwaGVydGV4dC1vcGFxdW8tYmxvYg"
+      },
+      "expect": { "status": 422, "json": { "code": "VALIDATION_FAILED" } },
+      "note": "time_bucket con más de 1 hora de antigüedad se rechaza (EDGE-RPT-006)."
+    },
+    {
+      "actor": "finder",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports",
+      "body": {
+        "tag_id": "tag_00000000000000000000000000000099",
+        "hashed_eid": "BBBBBBBBBBBBBBBBBBBBBB",
+        "time_bucket": "{{now}}",
+        "finder_ephemeral_pub": "BAAAAAAA",
+        "payload_salt": "c2FsdC1kZS1wcmFiYQ",
+        "ciphertext": "Y2lwaGVydGV4dC1vcGFxdW8tYmxvYg"
+      },
+      "expect": { "status": 404, "json": { "code": "NOT_FOUND" } },
+      "note": "Tag inexistente: 404, no 403. No se revela la existencia de recursos de otro tenant."
+    },
+    {
+      "actor": "owner",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports/lookup",
+      "body": { "hashed_eids": ["AAAAAAAAAAAAAAAAAAAAAA"], "from": "{{now-24h}}", "to": "{{now}}" },
+      "expect": { "status": 200, "json": { "reports": "array" } },
+      "mark": "lookup"
+    },
+    {
+      "actor": "owner",
+      "op": "assert.client_can_decrypt",
+      "with_key": "EIK_del_dispositivo_dueno",
+      "expect": { "decrypted": true, "server_participated": false }
+    },
+    {
+      "actor": "finder",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports/lookup",
+      "body": { "hashed_eids": ["AAAAAAAAAAAAAAAAAAAAAA"], "from": "{{now-24h}}", "to": "{{now}}" },
+      "expect": { "status": 404, "json": { "reports": [] } },
+      "note": "Un buscador no recupera sightings de un tag que no es suyo, ni siquiera los que él mismo reportó."
+    }
+  ]
+}

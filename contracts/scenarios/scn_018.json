@@ -1,0 +1,114 @@
+{
+  "id": "SCN-018",
+  "title": "Detener la compartición borra el índice del pool de forma síncrona",
+  "requirements": ["FR-POOL-003", "FR-PRV-002", "NFR-PRIV-001", "NFR-SEC-002"],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "sessions:write", "members:write", "pools:manage", "pools:query"]
+    },
+    "driver_a": { "kind": "device", "external_subject_id": "driver_a", "platform": "PLATFORM_ANDROID" }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/pools",
+      "body": { "expires_in_seconds": 3600 },
+      "expect": { "status": 201 },
+      "capture": { "pool_id": "$.id" }
+    },
+    { "actor": "driver_a", "op": "stream.connect", "expect": "ready" },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/pools/{{pool_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "driver_a",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{pool_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": { "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/nearby?lat=8.9824&lon=-79.5199&radius_m=5000",
+      "expect": { "status": 200, "json_count": { "$.data": 1 } }
+    },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/pools/{{pool_id}}/members/me/sharing",
+      "body": { "sharing": false },
+      "expect": { "status": 200, "json": { "sharing": false } },
+      "mark": "stop_time",
+      "note": "NFR-PRIV-002. El borrado del índice ocurre ANTES de responder, no después en segundo plano."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/nearby?lat=8.9824&lon=-79.5199&radius_m=5000",
+      "expect": { "status": 200, "json_count": { "$.data": 0 } },
+      "measure_from": "stop_time",
+      "metric": "pool_index_removal_latency_ms",
+      "note": "Cero. Si un `nearby` inmediatofollowing mostrara al conductor que ya dijo «dejo de compartir», la promesa de privacidad sería falsa."
+    },
+    {
+      "actor": "driver_a",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{pool_id}}",
+          "samples": [
+            {
+              "sequence": "2",
+              "captured_at": "{{now}}",
+              "position": { "latitude": 8.9825, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": { "request_error": "ERROR_CODE_NOT_SHARING" }
+      }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{pool_id}}/snapshot",
+      "expect": { "status": 200, "json": { "items": [] } },
+      "note": "El snapshot también se borra de forma síncrona, con la misma garantía."
+    },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports/lookup",
+      "body": { "hashed_eids": ["AA"], "from": "{{now-1h}}", "to": "{{now}}" },
+      "expect": { "status": 200 },
+      "note": "Sonda de que ningún efecto asíncrono pendiente reintroduce la entrada (si el edge está habilitado)."
+    }
+  ]
+}

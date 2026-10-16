@@ -1,0 +1,150 @@
+{
+  "id": "SCN-025",
+  "title": "El tag entra en estado SEPARATED y la protección DULT se activa",
+  "requirements": ["FR-EDGE-004", "FR-EDGE-006", "NFR-PRIV-004"],
+  "actors": {
+    "owner": {
+      "kind": "device",
+      "external_subject_id": "owner",
+      "platform": "PLATFORM_ANDROID",
+      "scopes": ["tags:manage", "edge:lookup"]
+    },
+    "finder": {
+      "kind": "device",
+      "external_subject_id": "finder",
+      "platform": "PLATFORM_ANDROID",
+      "scopes": ["edge:report"]
+    }
+  },
+  "note": "El escenario usa el reloj controlado del runner para simular 72 h sin materializar esperas reales (`slow` no es necesario por eso).",
+  "steps": [
+    {
+      "actor": "owner",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tags",
+      "body": { "model": "gst-1", "name": "Mochila" },
+      "expect": { "status": 201, "json": { "state": "ACTIVE" } },
+      "capture": { "tag_id": "$.id" }
+    },
+    {
+      "actor": "finder",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports",
+      "body": {
+        "tag_id": "{{tag_id}}",
+        "hashed_eid": "AAAAAAAAAAAAAAAAAAAAAA",
+        "time_bucket": "{{now}}",
+        "finder_ephemeral_pub": "BAAAAAAA",
+        "payload_salt": "c2FsdC1kZS1wcmFiYQ",
+        "ciphertext": "Y2lwaGVydGV4dC1vcGFxdW8tYmxvYg"
+      },
+      "expect": { "status": 202 },
+      "capture": { "eid_before": "$.hashed_eid" }
+    },
+    {
+      "actor": "owner",
+      "op": "http",
+      "method": "PATCH",
+      "path": "/v1/tags/{{tag_id}}",
+      "body": { "state": "SEPARATED" },
+      "expect": { "status": 200, "json": { "state": "SEPARATED" } },
+      "note": "Acción explícita del usuario. Sin ella no hay cambio de estado: la protección no se activa sola, porque activarla sola sería incomodar a quien lleva seis meses sin uso."
+    },
+    {
+      "actor": "finder",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports",
+      "body": {
+        "tag_id": "{{tag_id}}",
+        "hashed_eid": "CCCCCCCCCCCCCCCCCCCCCC",
+        "time_bucket": "{{now}}",
+        "finder_ephemeral_pub": "BAAAAAAA",
+        "payload_salt": "c2FsdC1kZS1wcmFiYQ",
+        "ciphertext": "Y2lwaGVydGV4dC1vcGFxdW8tYmxvYg"
+      },
+      "expect": { "status": 202 }
+    },
+    {
+      "actor": "owner",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports/lookup",
+      "body": { "hashed_eids": ["AAAAAAAAAAAAAAAAAAAAAA", "CCCCCCCCCCCCCCCCCCCCCC"], "from": "{{now-24h}}", "to": "{{now}}" },
+      "expect": { "status": 200, "json_count": { "$.reports": 2 } }
+    },
+    {
+      "actor": "owner",
+      "op": "assert.eid_rotation",
+      "tag_id": "{{tag_id}}",
+      "state_before": "ACTIVE",
+      "period_s": 1024,
+      "state_after": "SEPARATED",
+      "period_after_s": 86400,
+      "note": "EDGE-EID-003: en SEPARATED la rotación se ralentiza a 24 h. La mitigación se aplica por el lado de quien sufre el rastreo, porque no se puede quitar sin que quien rastrea lo note."
+    },
+    {
+      "actor": "owner",
+      "op": "assert.dult",
+      "tag_id": "{{tag_id}}",
+      "params": {
+        "distinct_eids": 3,
+        "distinct_locations": 3,
+        "distance_m": 1200.0,
+        "duration_min": 90
+      },
+      "expect": {
+        "alert": true,
+        "alert_type": "UNWANTED_TRACKER",
+        "coordinates_in_alert": false
+      },
+      "note": "T-26 / FR-EDGE-004. La alerta dice «te están rastreando» y NO por dónde: dar la ruta sería darle el resultado a quien rastrea en cuanto se filtrase el dispositivo."
+    },
+    {
+      "actor": "owner",
+      "op": "assert.dult",
+      "tag_id": "{{tag_id}}",
+      "params": {
+        "distinct_eids": 3,
+        "distinct_locations": 3,
+        "distance_m": 100.0,
+        "duration_min": 90
+      },
+      "expect": { "alert": false },
+      "note": "EDGE-DULT-002: 100 m está por debajo de dult_min_distance_m. Quien te sigue por la acera está dentro de ese radio, y alertarlo cada día entrenaría al usuario a ignorar la alerta."
+    },
+    {
+      "actor": "owner",
+      "op": "http",
+      "method": "DELETE",
+      "path": "/v1/tags/{{tag_id}}",
+      "expect": { "status": 204 }
+    },
+    {
+      "actor": "finder",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports",
+      "body": {
+        "tag_id": "{{tag_id}}",
+        "hashed_eid": "DDDDDDDDDDDDDDDDDDDDDD",
+        "time_bucket": "{{now}}",
+        "finder_ephemeral_pub": "BAAAAAAA",
+        "payload_salt": "c2FsdC1kZS1wcmFiYQ",
+        "ciphertext": "Y2lwaGVydGV4dC1vcGFxdW8tYmxvYg"
+      },
+      "expect": { "status": 404 },
+      "note": "Tras la baja, el tag deja de aceptar reportes. Dar de baja un tag es la acción que más claramente significa «basta»."
+    },
+    {
+      "actor": "owner",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/edge/reports/lookup",
+      "body": { "hashed_eids": ["AAAAAAAAAAAAAAAAAAAAAA"], "from": "{{now-24h}}", "to": "{{now}}" },
+      "expect": { "status": 404, "json": { "reports": [] } }
+    }
+  ]
+}

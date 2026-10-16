@@ -1,0 +1,151 @@
+{
+  "id": "SCN-026",
+  "title": "Un cliente de la versión anterior sigue funcionando contra un servidor con la pista E",
+  "requirements": ["NFR-COMPAT-003", "FR-CORE-006", "FR-BND-001"],
+  "note": "El actor `legacy_client` usa un `ClientHello` sin `core_version` y nunca envía campos nuevos. Equivale a un SDK escrito antes de la pista E.",
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": [
+        "tokens:mint", "sessions:read", "sessions:write", "members:write",
+        "invitations:write", "locations:read", "pools:manage", "pools:query"
+      ]
+    },
+    "legacy_client": {
+      "kind": "device",
+      "external_subject_id": "legacy",
+      "platform": "PLATFORM_ANDROID"
+    },
+    "modern_client": {
+      "kind": "device",
+      "external_subject_id": "modern",
+      "platform": "PLATFORM_ANDROID"
+    }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "history_mode": "TRACE_AND_ANALYTICS",
+        "initial_members": [{ "external_subject_id": "legacy" }, { "external_subject_id": "modern" }]
+      },
+      "expect": { "status": 201 },
+      "capture": { "session_id": "$.id" }
+    },
+    {
+      "actor": "legacy_client",
+      "op": "stream.connect",
+      "hello": { "sdk_name": "geostream-flutter", "sdk_version": "1.4.0" },
+      "expect": "ready",
+      "note": "`core_version` ausente: el servidor lo acepta igual."
+    },
+    {
+      "actor": "legacy_client",
+      "op": "assert.server_hello",
+      "expect": {
+        "includes_new_fields": true,
+        "connection_closed": false
+      },
+      "note": "`ServerHello` incluye `sampling`. Un cliente que no lo entienda lo ignora; lo importante es que la conexión NO se cae por ello."
+    },
+    {
+      "actor": "modern_client",
+      "op": "stream.connect",
+      "hello": { "sdk_name": "geostream-flutter", "sdk_version": "2.0.0", "core_version": "0.1.0" },
+      "expect": "ready",
+      "expect_hello": { "sampling": { "present": true } }
+    },
+    {
+      "actor": "legacy_client",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200, "json": { "sharing": true } },
+      "note": "`purposes` es opcional en `SharingRequest`: el cliente antiguo no lo envía y todo funciona."
+    },
+    {
+      "actor": "legacy_client",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": { "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.5 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "legacy_client",
+      "op": "stream.send",
+      "message": { "subscribe": { "session_id": "{{session_id}}" } },
+      "expect_reply": { "subscribe_ack": {} },
+      "note": "`Subscribe` sin `replay_trace`: vale `false`. Ningún campo existente se renumeró."
+    },
+    {
+      "actor": "legacy_client",
+      "op": "assert.received_message_fields",
+      "expect": {
+        "unknown_fields_ignored": true,
+        "location_update_sample_unchanged": true,
+        "estimate_optional": true
+      },
+      "note": "`LocationUpdate.estimate` llega como campo desconocido y se descarta. La posición que el cliente ve es la de siempre."
+    },
+    {
+      "actor": "legacy_client",
+      "op": "assert.no_error_for_unknown_enum",
+      "expect": {
+        "session_mode_pool_not_used": true,
+        "closed": false
+      }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/pools",
+      "body": { "expires_in_seconds": 3600 },
+      "expect": { "status": 201, "json": { "mode": "POOL" } },
+      "note": "El servidor sí expone `POOL`. Un cliente antiguo que nunca cree un pool simplemente nunca se encuentra con él."
+    },
+    {
+      "actor": "legacy_client",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/tools/eta",
+      "body": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": 8.9900, "lon": -79.5199 }],
+        "mode": "DRIVING"
+      },
+      "expect": { "status": 403, "json": { "code": "INSUFFICIENT_SCOPE" } },
+      "note": "Un 403 por scope ausente es una respuesta limpia. Lo que no se permite es que aparezca un código de error NUEVO en una petición que el cliente antiguo nunca hizo por ignorancia."
+    },
+    {
+      "actor": "legacy_client",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/sessions/{{session_id}}",
+      "expect": { "status": 200 },
+      "assertions": [
+        "los campos antiguos están presentes y con el mismo tipo",
+        "`history_mode` aparece como campo nuevo y el cliente lo ignora"
+      ]
+    },
+    { "actor": "legacy_client", "op": "stream.close" },
+    { "actor": "modern_client", "op": "stream.close" }
+  ]
+}

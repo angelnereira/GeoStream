@@ -1,0 +1,127 @@
+{
+  "id": "SCN-014",
+  "title": "La estimación de trayectoria acompaña a la muestra sin sustituirla",
+  "requirements": ["FR-TRK-001", "FR-TRK-002", "FR-TRK-003", "FR-LOC-006", "NFR-PERF-005"],
+  "config": { "GS_TRACK_ESTIMATES_ENABLED": true },
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "sessions:write", "members:write", "locations:read"]
+    },
+    "alice": { "kind": "device", "external_subject_id": "alice", "platform": "PLATFORM_ANDROID" },
+    "carol": { "kind": "device", "external_subject_id": "carol", "platform": "PLATFORM_ANDROID" }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": {
+        "mode": "MANY_TO_MANY",
+        "expires_in_seconds": 3600,
+        "initial_members": [{ "external_subject_id": "alice" }, { "external_subject_id": "carol" }]
+      },
+      "expect": { "status": 201 },
+      "capture": { "session_id": "$.id" }
+    },
+    { "actor": "alice", "op": "stream.connect", "expect": "ready" },
+    { "actor": "carol", "op": "stream.connect", "expect": "ready" },
+    {
+      "actor": "carol",
+      "op": "stream.send",
+      "message": { "subscribe": { "session_id": "{{session_id}}" } },
+      "expect_reply": { "subscribe_ack": {} }
+    },
+    {
+      "actor": "alice",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/sessions/{{session_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200, "json": { "sharing": true } }
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-4s}}",
+              "position": { "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED", "motion": "MOTION_ACTIVITY_AUTOMOTIVE" }
+            },
+            {
+              "sequence": "2",
+              "captured_at": "{{now-2s}}",
+              "position": { "latitude": 8.98268, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED", "motion": "MOTION_ACTIVITY_AUTOMOTIVE" }
+            }
+          ]
+        }
+      },
+      "expect_reply": {
+        "publish_ack": {
+          "request_error": "ERROR_CODE_UNSPECIFIED",
+          "results": [
+            { "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" },
+            { "sequence": "2", "status": "SAMPLE_STATUS_ACCEPTED" }
+          ]
+        }
+      }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "location_update",
+      "match": { "sample": { "position": { "latitude": 8.98268 } } },
+      "within_ms": 3000,
+      "note": "INVARIANTE P-E3: el campo `sample` es exactamente lo que alice envió, byte a byte."
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "location_update",
+      "match": { "estimate": { "kind": "ESTIMATE_KIND_FILTERED" } },
+      "within_ms": 3000,
+      "note": "La estimación viaja en un campo aparte, etiquetada, y no sustituye a la muestra."
+    },
+    {
+      "actor": "alice",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{session_id}}",
+          "samples": [
+            {
+              "sequence": "3",
+              "captured_at": "{{now}}",
+              "position": { "latitude": 8.98359, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED", "motion": "MOTION_ACTIVITY_WALKING" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "3", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "carol",
+      "op": "stream.expect",
+      "message": "location_update",
+      "match": {
+        "sample": { "position": { "latitude": 8.98359 }, "quality": { "motion": "MOTION_ACTIVITY_WALKING" } },
+        "estimate": { "flags": "PLAUSIBILITY_FLAG_EXCESSIVE_SPEED" }
+      },
+      "within_ms": 3000,
+      "note": "132 m/s a pie es implausible, pero la muestra se ACEPTA y la bandera se expone. GeoStream no puntúa fraude (D-10): la decisión es del integrador."
+    },
+    {
+      "actor": "alice",
+      "op": "stream.close"
+    },
+    { "actor": "carol", "op": "stream.close" }
+  ]
+}

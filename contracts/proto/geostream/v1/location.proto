@@ -104,6 +104,100 @@ message LocationUpdate {
   // Asignado por el servidor al aceptar la muestra.
   google.protobuf.Timestamp received_at = 4;
   DeliveryKind delivery = 5;
+  // Estimación canónica calculada por el motor de trayectoria (E2).
+  //
+  // INVARIANTE P-E3: este campo NUNCA sustituye ni modifica `sample`, que viaja
+  // intacto (docs/09_VALIDATION_ERRORS.md §4). Solo puede estar ausente, y en
+  // ese caso la aceptación no se ve afectada.
+  optional LocationEstimate estimate = 6;
+}
+
+// Naturaleza de una estimación. Deliberadamente un subconjunto de LocationKind:
+// una estimación nunca es MEASURED (dato crudo) ni PREDICTED (predicción visual,
+// exclusivamente local, docs/08_STREAM_PROTOCOL.md §7.6).
+enum EstimateKind {
+  ESTIMATE_KIND_UNSPECIFIED = 0;
+  // Filtro de Kalman de velocidad constante, sin proyección a la vía.
+  ESTIMATE_KIND_FILTERED = 1;
+  // Proyección sobre un grafo vial (HMM con retardo fijo).
+  ESTIMATE_KIND_MAP_MATCHED = 2;
+}
+
+// Señal de plausibilidad de bajo nivel.
+//
+// GeoStream NO puntúa fraude, no lista y no sanciona (D-10): expone la señal y
+// la decisión es del integrador. Los pesos de la puntuación están en
+// docs/17_CONFIGURATION.md §2.11.
+enum PlausibilityFlag {
+  PLAUSIBILITY_FLAG_UNSPECIFIED = 0;
+  // Velocidad implausible para el modo de movimiento declarado.
+  PLAUSIBILITY_FLAG_EXCESSIVE_SPEED = 1;
+  // Salto respecto al estado del filtro que supera track_outlier_chi2.
+  PLAUSIBILITY_FLAG_OUTLIER_JUMP = 2;
+  // Precisión horizontal peor que track_low_accuracy_m.
+  PLAUSIBILITY_FLAG_LOW_ACCURACY = 3;
+  // La plataforma marcó la posición como simulada.
+  PLAUSIBILITY_FLAG_MOCK_FLAGGED = 4;
+  // Posición congelada durante track_frozen_fix_count muestras.
+  PLAUSIBILITY_FLAG_FROZEN_FIX = 5;
+  // Aceleración implausible.
+  PLAUSIBILITY_FLAG_IMPLAUSIBLE_ACCEL = 6;
+  // Solo proveedor de red, sin señal satelital.
+  PLAUSIBILITY_FLAG_NETWORK_ONLY = 7;
+}
+
+// Estimación de trayectoria. Viaja junto a la muestra, nunca en su lugar.
+message LocationEstimate {
+  // Obligatorio (distinto de UNSPECIFIED).
+  EstimateKind kind = 1;
+  // Obligatorio.
+  Position position = 2;
+  // Velocidad estimada en m/s. Ausente si el motor no pudo derivarla.
+  optional double speed_mps = 3;
+  // Rumbo estimado en grados. Ausente si no hay velocidad suficiente.
+  optional double heading_deg = 4;
+  // Desviación típica (1 sigma) de la posición estimada, en metros.
+  // NO es la precisión declarada por el dispositivo.
+  double horizontal_accuracy_m = 5;
+  // [0, 1]. Probabilidad acumulada de que la estimación sea correcta.
+  double confidence = 6;
+  // Distancia acumulada estimada, en metros, desde el inicio del segmento.
+  double odometer_m = 7;
+  // Banderas de plausibilidad detectadas en esta muestra.
+  repeated PlausibilityFlag flags = 8;
+  // Identificador de la vía de la que se derivó, si kind = MAP_MATCHED.
+  string road_id = 9;
+  // Distancia a la vía, en metros. Solo si kind = MAP_MATCHED.
+  optional double road_distance_m = 10;
+}
+
+// Tipo de evento del motor de trayectoria (E2).
+enum TrackEventKind {
+  TRACK_EVENT_KIND_UNSPECIFIED = 0;
+  // El miembro lleva track_stop_min_duration_s dentro de track_stop_radius_m.
+  TRACK_EVENT_KIND_STOP_STARTED = 1;
+  // El miembro ha salido del radio de parada.
+  TRACK_EVENT_KIND_STOP_ENDED = 2;
+  // Sin muestras aceptadas durante track_lost_after_s.
+  TRACK_EVENT_KIND_TRACKING_LOST = 3;
+  // Vuelven a aceptarse muestras tras un TRACKING_LOST.
+  TRACK_EVENT_KIND_TRACKING_RESUMED = 4;
+}
+
+// Evento del motor de trayectoria. No solicitado (request_id = 0).
+// Solo STOP_STARTED y STOP_ENDED llevan `position`.
+message TrackEvent {
+  string session_id = 1;
+  string member_id = 2;
+  TrackEventKind kind = 3;
+  // captured_at de la muestra que originó el evento.
+  google.protobuf.Timestamp occurred_at = 4;
+  // Centroide de la parada. Solo para STOP_STARTED y STOP_ENDED.
+  optional Position position = 5;
+  // Duración de la parada en segundos. Solo para STOP_ENDED.
+  optional uint32 duration_s = 6;
+  // Índice de la parada dentro del segmento activo.
+  uint32 stop_index = 7;
 }
 
 // Transición de geocerca (F11).
@@ -111,6 +205,8 @@ enum GeofenceTransition {
   GEOFENCE_TRANSITION_UNSPECIFIED = 0;
   GEOFENCE_TRANSITION_ENTERED = 1;
   GEOFENCE_TRANSITION_EXITED = 2;
+  // E5: permanencia. Una sola emisión por entrada; se reinicia al salir.
+  GEOFENCE_TRANSITION_DWELL = 3;
 }
 
 // Evento de geocerca (F11). No contiene coordenadas.
@@ -123,4 +219,9 @@ message GeofenceEvent {
   google.protobuf.Timestamp occurred_at = 5;
   // sequence de la muestra que confirmó la transición.
   uint64 sequence = 6;
+  // E5: presente solo en geocercas dinámicas ancladas a otro miembro de la sesión.
+  // Prohibido en sesiones POOL (INV-POOL-1).
+  string anchor_member_id = 7;
+  // E5: segundos de permanencia dentro de la geocerca. Solo para DWELL.
+  uint32 dwell_seconds = 8;
 }

@@ -1,0 +1,314 @@
+{
+  "description": "Vectores de las herramientas de movilidad (ETA, asignación, ruta), del Provider Gateway y de la capa de mapa aprendida (docs/23_MOBILITY.md §8, docs/24_HISTORY_ANALYTICS.md §8). Formato en contracts/README.md §4.10. Estos vectores son también valores prohibidos en logs y métricas (docs/18_TESTING_STRATEGY.md §7.1).",
+  "version": 1,
+  "policy": {
+    "eta_default_circuity": 1.35,
+    "eta_max_matrix_cells": 625,
+    "assignment_max_size": 500,
+    "trip_simplify_tolerance_m": 5.0,
+    "driving_harsh_accel_mps2": 3.0,
+    "driving_harsh_brake_mps2": 3.5,
+    "learned_places_eps_m": 80.0,
+    "learned_places_min_points": 20,
+    "learned_speed_resolution": 9,
+    "od_resolution": 8,
+    "analytics_k_anonymity": 5
+  },
+  "constants": {
+    "comment": "Velocidades por modo del estimador de ETA (docs/17_CONFIGURATION.md §2.11).",
+    "eta_speed_mps": { "DRIVING": 6.9, "TWO_WHEELER": 8.3, "BICYCLE": 4.2, "WALKING": 1.3 }
+  },
+  "eta_cases": [
+    {
+      "id": "ETA-EST-001",
+      "description": "Estimación propia: distancia de ruta por velocidad de modo por circunvalidad",
+      "params": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": 8.9900, "lon": -79.5199 }],
+        "mode": "DRIVING",
+        "source_preference": "ESTIMATED"
+      },
+      "straight_line_m": 844.9,
+      "expect": {
+        "source": "ESTIMATED",
+        "eta_s": [165.0, 165.0],
+        "formula": "distancia_recta * eta_default_circuity / velocidad_de_modo"
+      },
+      "note": "844,9 m × 1,35 / 6,9 m/s ≈ 165 s."
+    },
+    {
+      "id": "ETA-EST-002",
+      "description": "A pie la estimación es mucho más larga que en coche para la misma distancia",
+      "params": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": 8.9900, "lon": -79.5199 }],
+        "mode": "WALKING",
+        "source_preference": "ESTIMATED"
+      },
+      "expect": { "source": "ESTIMATED", "eta_s": [875.0, 875.0] },
+      "note": "844,9 m × 1,35 / 1,3 m/s ≈ 877 s. La diferencia de una a otra forma es la razón de tener modos y no un único número."
+    },
+    {
+      "id": "ETA-EST-003",
+      "description": "Matriz de 25x25 dentro de eta_max_matrix_cells",
+      "params": { "grid": [25, 25], "mode": "DRIVING" },
+      "expect": { "status": 200, "cells": 625 }
+    },
+    {
+      "id": "ETA-EST-004",
+      "description": "Matriz que excede eta_max_matrix_cells",
+      "params": { "grid": [30, 30], "mode": "DRIVING" },
+      "expect": { "status": 422, "field": "origins" }
+    },
+    {
+      "id": "ETA-EST-005",
+      "description": "Sin ruta conocida: null, no un número inventado",
+      "params": {
+        "origins": [{ "lat": 8.9824, "lon": -79.5199 }],
+        "destinations": [{ "lat": -33.4489, "lon": -70.6693 }],
+        "mode": "DRIVING",
+        "source_preference": "LEARNED"
+      },
+      "expect": { "eta_s": [null, null], "source": "LEARNED" },
+      "note": "Un integrador que recibe 0 aquí creerá que el destino está a un minuto. `null` significa «no lo sé»."
+    }
+  ],
+  "provider_cases": [
+    {
+      "id": "PRD-REQ-001",
+      "description": "La petición al proveedor lleva SOLO coordenadas, nunca identificadores",
+      "params": { "port": "route_matrix", "mode": "DRIVING" },
+      "expect": {
+        "provider_receives": ["origin coords", "destination coords"],
+        "provider_never_receives": [
+          "subject_id",
+          "device_id",
+          "session_id",
+          "member_id",
+          "external_subject_id",
+          "tenant_id",
+          "metadata"
+        ]
+      },
+      "note": "T-29. El proveedor ve IPs de nuestra salida, no identidades de GeoStream. Es lo que hace que BYOK sea aceptable."
+    },
+    {
+      "id": "PRD-REQ-002",
+      "description": "La credencial del tenant se usa contra la URL configurada, nunca contra una del servidor",
+      "params": { "port": "route", "configured_url": "https://api.proveedor-ejemplo.test/v1" },
+      "expect": { "host_matches_configured": true, "scheme": "https" }
+    },
+    {
+      "id": "PRD-SEC-001",
+      "description": "La respuesta de `GET /v1/providers/{port}` nunca incluye la credencial",
+      "action": "get_provider",
+      "expect": { "body_has_credential": false, "body_has_credential_version": true }
+    },
+    {
+      "id": "PRD-SEC-002",
+      "description": "La credencial no aparece en logs ni en trazas",
+      "action": "put_provider",
+      "expect": { "in_logs": false, "in_traces": false, "in_metrics": false },
+      "note": "T-29 y docs/10 §8.2."
+    },
+    {
+      "id": "PRD-ROT-001",
+      "description": "Rotar la credencial surte efecto inmediato y queda auditado",
+      "action": "put_provider_same_credential_again",
+      "expect": { "effect": "immediate", "audit_event": "provider.rotated" }
+    },
+    {
+      "id": "PRD-DEL-001",
+      "description": "Retirar el proveedor lo deja de usar de inmediato",
+      "action": "delete_provider",
+      "expect": { "effect": "immediate", "next_call_status": 503, "next_call_error": "PROVIDER_UNAVAILABLE" }
+    },
+    {
+      "id": "PRD-TERMS-001",
+      "description": "Sin `terms.checked_on` no se usa el proveedor",
+      "params": { "port": "route_matrix", "terms_checked_on": null },
+      "expect": { "status": 422, "field": "terms_checked_on" }
+    },
+    {
+      "id": "PRD-CACHE-001",
+      "description": "La respuesta en caché no excede lo que permiten los términos del proveedor",
+      "params": { "ttl_requested_s": 86400, "provider_ttl_max_s": 3600 },
+      "expect": { "effective_ttl_s": 3600 }
+    }
+  ],
+  "degradation_cases": [
+    {
+      "id": "PRD-DEG-001",
+      "description": "source_preference = PROVIDER y el proveedor no responde: 503 con Retry-After",
+      "params": { "port": "route_matrix", "provider": "down", "source_preference": "PROVIDER" },
+      "expect": {
+        "status": 503,
+        "error_code": "PROVIDER_UNAVAILABLE",
+        "retry_after_present": true,
+        "silently_estimated": false
+      },
+      "note": "Es el caso que más se violaría por comodidad de implementación, y el más caro: un integrador que eligió proveedor por cobertura recibiría rutas inventadas y no lo sabría."
+    },
+    {
+      "id": "PRD-DEG-002",
+      "description": "source_preference ausente y el proveedor no responde: la estimación propia sí es aceptable",
+      "params": { "port": "route_matrix", "provider": "down" },
+      "expect": { "status": 200, "source": "ESTIMATED" },
+      "note": "Quien no pidió proveedor no tiene derecho a quejarse de que usó la estimación."
+    },
+    {
+      "id": "PRD-DEG-003",
+      "description": "source_preference = OWN_GRAPH y no hay grafo cargado: 503, no una ruta inventada",
+      "params": { "graphs": [], "source_preference": "OWN_GRAPH" },
+      "expect": { "status": 503, "error_code": "PROVIDER_UNAVAILABLE" }
+    },
+    {
+      "id": "PRD-DEG-004",
+      "description": "Grafo propio cargado: la ruta se calcula localmente y `source` es OWN_GRAPH",
+      "params": { "graphs": ["madrid.gsg"], "source_preference": "OWN_GRAPH" },
+      "expect": { "status": 200, "source": "OWN_GRAPH", "provider_called": false }
+    }
+  ],
+  "assignment_cases": [
+    {
+      "id": "ASG-HUN-001",
+      "description": "Problema de asignación de 3x3 con matriz de coste conocida",
+      "params": {
+        "workers": [
+          { "id": "w1", "position": { "lat": 8.9824, "lon": -79.5199 }, "capacity": 1 },
+          { "id": "w2", "position": { "lat": 8.9870, "lon": -79.5199 }, "capacity": 1 },
+          { "id": "w3", "position": { "lat": 9.0050, "lon": -79.5199 }, "capacity": 1 }
+        ],
+        "tasks": [
+          { "id": "t1", "position": { "lat": 8.9824, "lon": -79.5199 } },
+          { "id": "t2", "position": { "lat": 8.9870, "lon": -79.5199 } },
+          { "id": "t3", "position": { "lat": 9.0050, "lon": -79.5199 } }
+        ],
+        "algorithm": "hungarian"
+      },
+      "expect": { "assignments": [{ "task_id": "t1", "worker_id": "w1" }, { "task_id": "t2", "worker_id": "w2" }, { "task_id": "t3", "worker_id": "w3" }], "unassigned": [] }
+    },
+    {
+      "id": "ASG-HUN-002",
+      "description": "Con coste no uniforme, el óptimo global no es el asignar cada tarea al más cercano",
+      "params": {
+        "workers": [
+          { "id": "w1", "position": { "lat": 8.9824, "lon": -79.5199 }, "capacity": 1 },
+          { "id": "w2", "position": { "lat": 8.9830, "lon": -79.5199 }, "capacity": 1 }
+        ],
+        "tasks": [
+          { "id": "t1", "position": { "lat": 8.9825, "lon": -79.5199 } },
+          { "id": "t2", "position": { "lat": 8.9900, "lon": -79.5199 } }
+        ],
+        "algorithm": "hungarian"
+      },
+      "expect": { "optimal": true, "checks_against": "exhaustive_search" },
+      "note": "Es EL caso que distingue a Hungarian de «el más cercano gana». El vector debe compararse contra búsqueda exhaustiva, no contra una intuición."
+    },
+    {
+      "id": "ASG-HUN-003",
+      "description": "hungarian con capacity > 1 es 422",
+      "params": { "algorithm": "hungarian", "workers": [{ "id": "w1", "capacity": 2 }] },
+      "expect": { "status": 422, "field": "workers[].capacity" }
+    },
+    {
+      "id": "ASG-MCF-001",
+      "description": "min_cost_flow con capacidad > 1 asigna varias tareas a un trabajador",
+      "params": {
+        "algorithm": "min_cost_flow",
+        "workers": [{ "id": "w1", "position": { "lat": 8.9824, "lon": -79.5199 }, "capacity": 3 }],
+        "tasks": [
+          { "id": "t1", "position": { "lat": 8.9825, "lon": -79.5199 } },
+          { "id": "t2", "position": { "lat": 8.9826, "lon": -79.5199 } },
+          { "id": "t3", "position": { "lat": 8.9827, "lon": -79.5199 } },
+          { "id": "t4", "position": { "lat": 8.9828, "lon": -79.5199 } }
+        ]
+      },
+      "expect": { "w1_assignments": 3, "unassigned": ["t4"] },
+      "note": "La capacidad es lo que hace útil el modelo: un solo repartidor no puede llevar cuatro pedidos a la vez."
+    },
+    {
+      "id": "ASG-MCF-002",
+      "description": "max_cost deja pares sin asignar en lugar de asignar a coste arbitrario",
+      "params": { "algorithm": "hungarian", "max_cost": 50.0 },
+      "expect": { "unassigned": [">= 1 tarea"], "no_assignment_exceeds_max_cost": true }
+    },
+    {
+      "id": "ASG-SIZE-001",
+      "description": "size por encima de assignment_max_size",
+      "params": { "workers_count": 600, "tasks_count": 600 },
+      "expect": { "status": 413, "error_code": "PAYLOAD_TOO_LARGE" }
+    }
+  ],
+  "learned_layer_cases": [
+    {
+      "id": "ANA-KAN-001",
+      "description": "Una celda con 4 subjects distintos se suprime con analytics_k_anonymity = 5",
+      "params": { "distinct_subjects": 4, "k": 5 },
+      "expect": { "suppressed": true, "in_response": false, "counted_in": "suppressed_cells" }
+    },
+    {
+      "id": "ANA-KAN-002",
+      "description": "Una celda con 5 subjects distintos se publica",
+      "params": { "distinct_subjects": 5, "k": 5 },
+      "expect": { "suppressed": false, "in_response": true }
+    },
+    {
+      "id": "ANA-KAN-003",
+      "description": "La supresión es completa: no se redondea ni se degrada a un valor binarizado",
+      "params": { "distinct_subjects": 4, "k": 5 },
+      "expect": { "rounded_value_present": false, "coarsened_value_present": false },
+      "note": "Un mapa de calor con celdas «al menos 5» seguiría leaks. Se suprime la fila entera."
+    },
+    {
+      "id": "ANA-KAN-004",
+      "description": "Un par origen-destino por debajo de k se suprime",
+      "params": { "distinct_subjects": 3, "k": 5, "aggregate": "od" },
+      "expect": { "suppressed": true, "counted_in": "suppressed_pairs" }
+    },
+    {
+      "id": "ANA-KAN-005",
+      "description": "Un lugar aprendido por debajo de k se suprime",
+      "params": { "distinct_subjects": 2, "k": 5, "aggregate": "places" },
+      "expect": { "suppressed": true }
+    },
+    {
+      "id": "ANA-KAN-006",
+      "description": "La respuesta declara el k aplicado y cuántas unidades se ocultaron",
+      "params": { "k": 5, "suppressed": 12 },
+      "expect": { "k_anonymity_applied": 5, "suppressed_cells": 12, "suppressed_values_revealed": false }
+    },
+    {
+      "id": "ANA-DBS-001",
+      "description": "DBSCAN con learned_places_eps_m y learned_places_min_points agrupa los centros de parada",
+      "params": { "eps_m": 80.0, "min_points": 20, "stop_centroids": 50 },
+      "expect": { "clusters": 2, "noise_points_discarded": true },
+      "note": "El ruido se descarta: un centro de parada aislado es ruido estadístico, no un lugar."
+    },
+    {
+      "id": "ANA-DBS-002",
+      "description": "Los lugares aprendidos no guardan IDs de subject ni de sesión",
+      "params": {},
+      "expect": { "has_subject_id": false, "has_session_id": false, "has_member_id": false }
+    },
+    {
+      "id": "ANA-HRS-001",
+      "description": "Eventos de conducción estimados por umbral",
+      "params": { "accel_mps2": 3.5, "brake_mps2": 3.5 },
+      "expect": { "harsh_accel": true, "harsh_braking": false },
+      "note": "3,5 >= driving_harsh_accel_mps2 = 3,0 pero < driving_harsh_brake_mps2 = 3,5 no se dispara por frenada; el borde está fijado a propósito."
+    },
+    {
+      "id": "ANA-HRS-002",
+      "description": "Frenada fuerte por deceleración",
+      "params": { "accel_mps2": 1.0, "brake_mps2": 4.0 },
+      "expect": { "harsh_accel": false, "harsh_braking": true }
+    },
+    {
+      "id": "ANA-SIM-001",
+      "description": "La polilínea del viaje se simplifica a trip_simplify_tolerance_m",
+      "params": { "points": 5000, "tolerance_m": 5.0 },
+      "expect": { "simplified": true, "max_deviation_m": 5.0, "format": "gsp1" }
+    }
+  ]
+}

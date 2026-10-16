@@ -1,0 +1,101 @@
+{
+  "id": "SCN-021",
+  "title": "Los agregados analíticos suprimen las unidades con menos de k subjects",
+  "requirements": ["FR-ANA-001", "FR-ANA-003", "FR-LRN-001", "NFR-PRIV-003"],
+  "slow": true,
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:read", "sessions:write", "members:write", "history:read", "analytics:read"]
+    }
+  },
+  "note": "Los actores `alice`..`carol` se crean con `external_subject_id` distintos y seeriescriben en celdas H3 distintas. `dave` comparte celda con otros cuatro.",
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/sessions",
+      "body": { "mode": "MANY_TO_MANY", "expires_in_seconds": 3600, "history_mode": "TRACE_AND_ANALYTICS", "initial_members": [] },
+      "expect": { "status": 201 },
+      "capture": { "session_id": "$.id" },
+      "note": "Fixture: el runner crea cinco subjects con consentimiento HISTORY+ANALYTICS en una celda densa y cuatro en celdas aisladas."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/analytics/aggregation/run",
+      "body": { "force": true },
+      "expect": { "status": 202 },
+      "note": "Dispara el trabajo horario de agregación de forma síncrona para el escenario. En producción es un job del rol `analytics`."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/heatmap?bbox=-79.53,8.98,-79.50,9.02&from={{now-24h}}&to={{now}}&metric=presence&resolution=9",
+      "expect": {
+        "status": 200,
+        "json": {
+          "k_anonymity_applied": 5,
+          "suppressed_cells": ">= 4",
+          "cells": "array"
+        }
+      },
+      "note": "Las cuatro celdas con un solo subject NO aparecen. La respuesta dice cuántas se ocultaron, para que el integrador sepa que el mapa está incompleto."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/heatmap?bbox=-79.53,8.98,-79.50,9.02&from={{now-24h}}&to={{now}}&metric=presence&resolution=9",
+      "expect": { "status": 200, "forbidden_fields_absent": ["raw_counts_below_k", "suppressed_values"] },
+      "note": "INV-HIS-3: se suprime la fila entera. No se redondea, no se binariza a «al menos 5», no se degrada la resolución."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/od-matrix?from={{now-24h}}&to={{now}}&resolution=8",
+      "expect": {
+        "status": 200,
+        "json": { "k_anonymity_applied": 5, "suppressed_pairs": ">= 1" }
+      },
+      "note": "Un par origen-destino con 3 subjects se suprime igual que una celda: la estructura del par también identifica."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/speed-profile?bbox=-79.53,8.98,-79.50,9.02&resolution=9&from={{now-24h}}&to={{now}}",
+      "expect": { "status": 200, "json": { "suppressed_buckets": ">= 1" } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/places?lat=8.9824&lon=-79.5199&radius_m=5000",
+      "expect": {
+        "status": 200,
+        "json": { "places": "array", "k_anonymity_applied": 5 },
+        "forbidden_fields_absent": ["subject_id", "session_id", "member_id"]
+      },
+      "note": "Los lugares aprendidos son derivados y anónimos: no guardan de quién son (INV-HIS-3)."
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/analytics/places?lat=8.9824&lon=-79.5199&radius_m=5000",
+      "expect": { "status": 200, "assertions": ["ningún lugar con menos de k subjects distintos aparece"] }
+    },
+    {
+      "actor": "backend",
+      "op": "assert.metric",
+      "what": "gs_analytics_suppressed_total",
+      "expect": { "increased": true },
+      "note": "La supresión se cuenta como un número agregado. Nunca se registra QUÉ se suprimió ni dónde."
+    }
+  ]
+}

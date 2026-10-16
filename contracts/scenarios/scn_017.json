@@ -1,0 +1,136 @@
+{
+  "id": "SCN-017",
+  "title": "La consulta de densidad de un pool no revela quién está dónde",
+  "requirements": ["FR-POOL-006", "FR-POOL-004", "NFR-PRIV-003"],
+  "actors": {
+    "backend": {
+      "kind": "application",
+      "scopes": ["tokens:mint", "sessions:write", "members:write", "pools:manage", "pools:query"]
+    },
+    "passenger": {
+      "kind": "device",
+      "external_subject_id": "passenger",
+      "platform": "PLATFORM_ANDROID",
+      "scopes": ["sessions:create", "sharing:write", "pools:density"]
+    },
+    "driver_a": { "kind": "device", "external_subject_id": "driver_a", "platform": "PLATFORM_ANDROID" },
+    "driver_b": { "kind": "device", "external_subject_id": "driver_b", "platform": "PLATFORM_ANDROID" }
+  },
+  "steps": [
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "POST",
+      "path": "/v1/pools",
+      "body": { "expires_in_seconds": 3600 },
+      "expect": { "status": 201 },
+      "capture": { "pool_id": "$.id" }
+    },
+    { "actor": "driver_a", "op": "stream.connect", "expect": "ready" },
+    { "actor": "driver_b", "op": "stream.connect", "expect": "ready" },
+    {
+      "actor": "driver_a",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/pools/{{pool_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "driver_b",
+      "op": "http",
+      "method": "PUT",
+      "path": "/v1/pools/{{pool_id}}/members/me/sharing",
+      "body": { "sharing": true },
+      "expect": { "status": 200 }
+    },
+    {
+      "actor": "driver_a",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{pool_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": { "latitude": 8.9824, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "driver_b",
+      "op": "stream.send",
+      "message": {
+        "publish_location": {
+          "session_id": "{{pool_id}}",
+          "samples": [
+            {
+              "sequence": "1",
+              "captured_at": "{{now-1s}}",
+              "position": { "latitude": 8.9870, "longitude": -79.5199, "horizontal_accuracy_m": 8.0 },
+              "quality": { "source": "LOCATION_SOURCE_GNSS", "kind": "LOCATION_KIND_MEASURED" }
+            }
+          ]
+        }
+      },
+      "expect_reply": { "publish_ack": { "results": [{ "sequence": "1", "status": "SAMPLE_STATUS_ACCEPTED" }] } }
+    },
+    {
+      "actor": "passenger",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/density?lat=8.9824&lon=-79.5199&radius_m=20000",
+      "expect": {
+        "status": 200,
+        "json": {
+          "markers": "array",
+          "forbidden_fields_absent": ["member_id", "subject_id", "device_id", "session_id"]
+        }
+      },
+      "note": "FR-POOL-006 / T-25. El pasajero necesita saber que HAY conductores, no QUIÉNES son ni dónde exactamente."
+    },
+    {
+      "actor": "passenger",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/density?lat=8.9824&lon=-79.5199&radius_m=20000",
+      "expect": {
+        "status": 200,
+        "json": { "markers": { "min_delay_ms": 10, "max_items": 15 } },
+        "assertions": [
+          "todos los marcadores tienen delay_ms >= pool_density_delay_s",
+          "ningún centroide coincide con la posición exacta de un conductor",
+          "todo heading_sector está entre 0 y 7"
+        ]
+      }
+    },
+    {
+      "actor": "passenger",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/nearby?lat=8.9824&lon=-79.5199&radius_m=5000",
+      "expect": { "status": 403, "json": { "code": "INSUFFICIENT_SCOPE" } },
+      "note": "`nearby` expone la posición individual de cada conductor: es de aplicación, nunca de dispositivo."
+    },
+    {
+      "actor": "passenger",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/rings?lat=8.9824&lon=-79.5199&k=3",
+      "expect": { "status": 403, "json": { "code": "INSUFFICIENT_SCOPE" } }
+    },
+    {
+      "actor": "backend",
+      "op": "http",
+      "method": "GET",
+      "path": "/v1/pools/{{pool_id}}/density?lat=8.9824&lon=-79.5199&radius_m=20000",
+      "expect": { "status": 200, "json": { "markers": "array" } },
+      "note": "La aplicación también obtiene la versión anonimizada: el enriquecimiento no es un privilegio de una de las dos partes."
+    }
+  ]
+}

@@ -35,6 +35,16 @@ enum ErrorCode {
   ERROR_CODE_TOO_MANY_SUBSCRIPTIONS = 23;
   ERROR_CODE_TEMPORARILY_UNAVAILABLE = 24;
   ERROR_CODE_INTERNAL = 25;
+  // La política del tenant no habilita la capacidad solicitada (pools, historial,
+  // analítica, edge, tools). No se degrada a PERMISSION_DENIED: el permiso es correcto,
+  // la capacidad no está contratada.
+  ERROR_CODE_FEATURE_DISABLED = 26;
+  // Falta el propósito de consentimiento del sujeto (HISTORY / ANALYTICS).
+  // Solo el propio subject puede otorgarlo (INV-SHR-5, docs/05_DOMAIN_MODEL.md §7.2).
+  ERROR_CODE_CONSENT_REQUIRED = 27;
+  // Se exigía source_preference = provider y el proveedor no respondió.
+  // Nunca se degrada silenciosamente a la estimación propia (docs/23_MOBILITY.md §4).
+  ERROR_CODE_PROVIDER_UNAVAILABLE = 28;
 }
 
 // Plataforma del dispositivo o cliente.
@@ -45,4 +55,37 @@ enum Platform {
   PLATFORM_WEB = 3;
   PLATFORM_SERVER = 4;
   PLATFORM_OTHER = 5;
+}
+
+// Propósito de consentimiento que el propio sujeto otorga para su historial.
+// Un tenant NO puede otorgarlo en nombre de otro (INV-SHR-5).
+enum ConsentPurpose {
+  CONSENT_PURPOSE_UNSPECIFIED = 0;
+  // Permite escritura y consulta de puntos, viajes y paradas.
+  CONSENT_PURPOSE_HISTORY = 1;
+  // Permite agregados k-anónimos y perfil de movilidad del sujeto.
+  CONSENT_PURPOSE_ANALYTICS = 2;
+}
+
+// Puertos del Provider Gateway (BYOK, ADR-0028). La credencial es del tenant.
+enum ProviderPort {
+  PROVIDER_PORT_UNSPECIFIED = 0;
+  // Matriz de tiempos de llegada origen-destino.
+  PROVIDER_PORT_ROUTE_MATRIX = 1;
+  // Ruta de un recorrido.
+  PROVIDER_PORT_ROUTE = 2;
+  // Ajuste de trayectoria a la vía.
+  PROVIDER_PORT_MAP_MATCHING = 3;
+  // Geocodificación y geocodificación inversa.
+  PROVIDER_PORT_GEOCODING = 4;
+}
+
+// Preferencia de fuente para un cálculo de movilidad. Si se elige PROVIDER y el
+// proveedor falla, la respuesta es PROVIDER_UNAVAILABLE: nunca hay degradación
+// silenciosa a la estimación propia.
+enum SourcePreference {
+  SOURCE_PREFERENCE_UNSPECIFIED = 0;
+  SOURCE_PREFERENCE_PROVIDER = 1;
+  SOURCE_PREFERENCE_LEARNED = 2;
+  SOURCE_PREFERENCE_ESTIMATED = 3;
 }
