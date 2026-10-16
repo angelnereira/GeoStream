@@ -27,17 +27,25 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
 
     let mut allowed_internal: BTreeMap<&str, Option<BTreeSet<&str>>> = BTreeMap::new();
     allowed_internal.insert("gs-domain", Some(BTreeSet::new()));
+    allowed_internal.insert("gs-edge", Some(BTreeSet::new()));
     allowed_internal.insert("gs-protocol", Some(BTreeSet::from(["gs-domain"])));
     allowed_internal.insert("gs-config", Some(BTreeSet::from(["gs-domain"])));
     allowed_internal.insert("gs-observability", Some(BTreeSet::from(["gs-domain"])));
     allowed_internal.insert("gs-auth", Some(BTreeSet::from(["gs-domain", "gs-config"])));
     allowed_internal.insert("gs-store", Some(BTreeSet::from(["gs-domain"])));
-    allowed_internal.insert(
-        "gs-ephemeral",
-        Some(BTreeSet::from(["gs-domain", "gs-protocol"])),
-    );
     allowed_internal.insert("gs-bus", Some(BTreeSet::from(["gs-domain"])));
     allowed_internal.insert("gs-geo", Some(BTreeSet::from(["gs-domain"])));
+    allowed_internal.insert("gs-track", Some(BTreeSet::from(["gs-domain", "gs-geo"])));
+    allowed_internal.insert("gs-mobility", Some(BTreeSet::from(["gs-domain", "gs-geo"])));
+    allowed_internal.insert(
+        "gs-analytics",
+        Some(BTreeSet::from(["gs-domain", "gs-geo", "gs-track"])),
+    );
+    allowed_internal.insert("gs-providers", Some(BTreeSet::from(["gs-domain"])));
+    allowed_internal.insert(
+        "gs-ephemeral",
+        Some(BTreeSet::from(["gs-domain", "gs-protocol", "gs-mobility"])),
+    );
     allowed_internal.insert(
         "gs-service",
         Some(BTreeSet::from([
@@ -47,22 +55,73 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
             "gs-bus",
             "gs-protocol",
             "gs-domain",
+            "gs-track",
+            "gs-mobility",
+            "gs-analytics",
+            "gs-providers",
+            "gs-edge",
         ])),
     );
     allowed_internal.insert("gs-api", Some(BTreeSet::from(["gs-service"])));
-    allowed_internal.insert("gs-stream", Some(BTreeSet::from(["gs-service", "gs-geo"])));
+    allowed_internal.insert(
+        "gs-stream",
+        Some(BTreeSet::from(["gs-service", "gs-geo", "gs-track"])),
+    );
     allowed_internal.insert("gs-worker", Some(BTreeSet::from(["gs-service"])));
     allowed_internal.insert(
         "geostream",
-        Some(BTreeSet::from(["gs-api", "gs-stream", "gs-worker"])),
+        Some(BTreeSet::from([
+            "gs-api",
+            "gs-stream",
+            "gs-worker",
+            "gs-config",
+        ])),
     );
+    allowed_internal.insert(
+        "gs-client-core",
+        Some(BTreeSet::from([
+            "gs-domain",
+            "gs-protocol",
+            "gs-geo",
+            "gs-track",
+            "gs-edge",
+        ])),
+    );
+    allowed_internal.insert(
+        "gs-client-runtime",
+        Some(BTreeSet::from(["gs-client-core"])),
+    );
+    allowed_internal.insert("gs-ffi", Some(BTreeSet::from(["gs-client-runtime"])));
     allowed_internal.insert("gs-testkit", None);
     allowed_internal.insert("gs-devclient", None);
     allowed_internal.insert("gs-loadgen", None);
     allowed_internal.insert("geostream-tools", None);
 
-    let forbidden_external_domain: BTreeSet<&str> =
-        BTreeSet::from(["tokio", "sqlx", "axum", "redis"]);
+    let pure_crates: BTreeSet<&str> = BTreeSet::from([
+        "gs-domain",
+        "gs-track",
+        "gs-mobility",
+        "gs-analytics",
+        "gs-edge",
+        "gs-client-core",
+    ]);
+    let forbidden_external_pure: BTreeSet<&str> =
+        BTreeSet::from(["tokio", "sqlx", "axum", "redis", "reqwest"]);
+
+    let server_crates: BTreeSet<&str> = BTreeSet::from([
+        "gs-store",
+        "gs-ephemeral",
+        "gs-bus",
+        "gs-auth",
+        "gs-config",
+        "gs-service",
+        "gs-api",
+        "gs-stream",
+        "gs-worker",
+        "geostream",
+    ]);
+    let client_only_crates: BTreeSet<&str> =
+        BTreeSet::from(["gs-client-core", "gs-client-runtime", "gs-ffi"]);
 
     let mut errors = Vec::new();
 
@@ -96,9 +155,13 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
             }
         }
 
-        // 1. Allowed internal deps
+        // 1. Allowed internal deps (`gs-observability` is permitted for any crate except `gs-domain` and `gs-edge`)
         if let Some(Some(allowed)) = allowed_internal.get(name) {
-            let illegal: Vec<_> = internal_deps.difference(allowed).copied().collect();
+            let illegal: Vec<_> = internal_deps
+                .difference(allowed)
+                .copied()
+                .filter(|&d| !(d == "gs-observability" && !matches!(name, "gs-domain" | "gs-edge")))
+                .collect();
             if !illegal.is_empty() {
                 errors.push(format!(
                     "{name}: illegal internal dependencies {illegal:?} (allowed: {allowed:?})"
@@ -106,15 +169,15 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
             }
         }
 
-        // 2. Forbidden external deps on gs-domain
-        if name == "gs-domain" {
+        // 2. Forbidden external I/O deps on pure crates
+        if pure_crates.contains(name) {
             let illegal: Vec<_> = external_deps
-                .intersection(&forbidden_external_domain)
+                .intersection(&forbidden_external_pure)
                 .copied()
                 .collect();
             if !illegal.is_empty() {
                 errors.push(format!(
-                    "gs-domain: forbidden external dependencies {illegal:?}"
+                    "{name}: forbidden external dependencies {illegal:?}"
                 ));
             }
         }
@@ -165,6 +228,19 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
         // 6. gs-observability: gs-domain must not depend on it
         if name == "gs-domain" && internal_deps.contains("gs-observability") {
             errors.push("gs-domain must not depend on gs-observability".to_string());
+        }
+
+        // 7. Server crates must not depend on gs-client-*
+        if server_crates.contains(name) {
+            let direct: Vec<_> = internal_deps
+                .intersection(&client_only_crates)
+                .copied()
+                .collect();
+            if !direct.is_empty() {
+                errors.push(format!(
+                    "{name}: server crate must not depend on client crates {direct:?}"
+                ));
+            }
         }
     }
 

@@ -3,9 +3,12 @@
 
 pub mod admin;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -16,7 +19,7 @@ use crate::admin::{AdminArgs, run_admin};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_COMMIT: &str = env!("GEOSTREAM_GIT_COMMIT");
 
-/// Available server roles (FR-OPS-001).
+/// Available server roles (FR-OPS-001, docs/04 §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lowercase")]
 pub enum Role {
@@ -26,6 +29,8 @@ pub enum Role {
     Stream,
     /// Asynchronous jobs and background workers.
     Worker,
+    /// Heavy batch analytics jobs (optional role, docs/04 §5).
+    Analytics,
 }
 
 impl FromStr for Role {
@@ -36,7 +41,10 @@ impl FromStr for Role {
             "api" => Ok(Self::Api),
             "stream" => Ok(Self::Stream),
             "worker" => Ok(Self::Worker),
-            other => bail!("unknown role '{other}', expected one of: api, stream, worker"),
+            "analytics" => Ok(Self::Analytics),
+            other => {
+                bail!("unknown role '{other}', expected one of: api, stream, worker, analytics")
+            }
         }
     }
 }
@@ -69,7 +77,7 @@ pub enum Commands {
 /// Arguments for `serve` subcommand.
 #[derive(Debug, Args)]
 pub struct ServeArgs {
-    /// Active roles (comma-separated or repeated: api, stream, worker). Defaults to all three.
+    /// Active roles (comma-separated or repeated: api, stream, worker, analytics). Defaults to api,stream,worker.
     #[arg(long, value_delimiter = ',')]
     pub roles: Option<Vec<Role>>,
 
@@ -151,35 +159,110 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 }
 
-/// Run the server listener.
+/// Run the server listener (docs/04 §5, DR-20261012-04, DR-20261013-01).
 async fn run_serve(args: ServeArgs) -> Result<()> {
-    // Plain tracing subscriber. Wiring `gs_observability::init_from_env` (JSON logs with the
-    // fields of docs/16 §4.3, GS_LOG_FORMAT, GS_LOG_UNSAFE_LOCATIONS) is blocked by
-    // DR-20261012-04: `tools/check_crate_deps` does not allow `geostream` to depend on
-    // `gs-observability`, which docs/04 §4.1 explicitly permits.
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .try_init();
+    // 1. Validate auto_migrate environment rule immediately (docs/11 §4, FR-OPS-004).
+    if args.auto_migrate && args.env != "dev" {
+        bail!(
+            "GS_AUTO_MIGRATE=true is only allowed in GS_ENV=dev (current env: {})",
+            args.env
+        );
+    }
 
-    // Verify database schema version or auto-migrate (docs/11 §4)
-    let database_url = std::env::var("GS_DATABASE_URL")
-        .ok()
-        .or_else(|| args.database_url.clone());
-    if let Some(db_url) = database_url.clone() {
-        let pool = gs_api::migrate::connect_pool(&db_url)
+    // 2. Initialise structured logging from `gs-observability` (DR-20261012-04, NFR-OBS-001).
+    let unsafe_locations = std::env::var("GS_LOG_UNSAFE_LOCATIONS")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false);
+    gs_observability::logging_policy(&args.env, unsafe_locations)
+        .context("logging policy validation failed")?;
+    gs_observability::init_from_env().context("failed to initialize structured logging")?;
+    gs_observability::record_build_info(VERSION, GIT_COMMIT);
+
+    // 3. Build environment map with CLI overrides for `gs_config::ServerConfig` (DR-20261013-01).
+    let mut env_map: HashMap<String, String> = std::env::vars().collect();
+    if let Some(config_path) = &args.config {
+        env_map.insert(
+            "GS_CONFIG_FILE".to_string(),
+            config_path.to_string_lossy().into_owned(),
+        );
+    }
+    env_map.insert("GS_ENV".to_string(), args.env.clone());
+    env_map.insert("GS_HTTP_ADDR".to_string(), args.http_addr.to_string());
+    env_map.insert("GS_AUTO_MIGRATE".to_string(), args.auto_migrate.to_string());
+    if let Some(db_url) = &args.database_url {
+        env_map.insert("GS_DATABASE_URL".to_string(), db_url.clone());
+    }
+
+    // Try loading full `ServerConfig` when all required keys exist; if running in lightweight
+    // dev/test mode without JWT key dir, supply ephemeral defaults in `env_map` if not in prod.
+    let mut ephemeral_key_dir: Option<PathBuf> = None;
+    if args.env != "prod"
+        && env_map.contains_key("GS_DATABASE_URL")
+        && (!env_map.contains_key("GS_JWT_KEYS_DIR") || !env_map.contains_key("GS_JWT_ACTIVE_KID"))
+        && !env_map.contains_key("GS_CONFIG_FILE")
+    {
+        let dir = std::env::temp_dir().join(format!(
+            "geostream-dev-keys-{}-{}",
+            std::process::id(),
+            gs_api::gs_service::gs_domain::ids::RequestId::new()
+        ));
+        std::fs::create_dir_all(&dir).context("failed to create ephemeral dev JWT key dir")?;
+        let kid = "dev-key-1";
+        let generated = gs_api::gs_service::gs_auth::generate_signing_key(kid)
+            .context("failed to generate ephemeral dev signing key")?;
+        std::fs::write(dir.join(format!("{kid}.key.pem")), generated.private_pem())
+            .context("failed to write ephemeral dev private key")?;
+        std::fs::write(dir.join(format!("{kid}.pub.pem")), &generated.public_pem)
+            .context("failed to write ephemeral dev public key")?;
+        env_map
+            .entry("GS_JWT_KEYS_DIR".to_string())
+            .or_insert_with(|| dir.to_string_lossy().into_owned());
+        env_map
+            .entry("GS_JWT_ACTIVE_KID".to_string())
+            .or_insert_with(|| kid.to_string());
+        ephemeral_key_dir = Some(dir);
+    }
+
+    let server_config =
+        if env_map.contains_key("GS_DATABASE_URL") || env_map.contains_key("GS_CONFIG_FILE") {
+            Some(
+                gs_config::ServerConfig::load_from_map(&env_map)
+                    .context("failed to load ServerConfig")?,
+            )
+        } else {
+            None
+        };
+
+    let roles = args
+        .roles
+        .unwrap_or_else(|| vec![Role::Api, Role::Stream, Role::Worker]);
+    let http_addr = server_config
+        .as_ref()
+        .map(|c| c.http_addr)
+        .unwrap_or(args.http_addr);
+    let max_body_bytes = server_config
+        .as_ref()
+        .map(|c| c.rest_max_body_bytes)
+        .unwrap_or(gs_api::DEFAULT_MAX_BODY_BYTES);
+
+    let database_url = server_config
+        .as_ref()
+        .map(|c| c.database_url.expose_secret().to_string())
+        .or_else(|| env_map.get("GS_DATABASE_URL").cloned());
+
+    // 4. Connect to PostgreSQL, verify schema version (or auto-migrate in dev), and build routers.
+    let mut app = gs_api::http_router_with_readiness(
+        max_body_bytes,
+        readiness_probe(database_url.as_deref()),
+    );
+
+    if let Some(cfg) = &server_config {
+        let db_url = cfg.database_url.expose_secret();
+        let pool = gs_api::migrate::connect_pool(db_url)
             .await
             .context("failed to connect to database on server startup")?;
 
-        if args.auto_migrate {
-            if args.env != "dev" {
-                bail!(
-                    "GS_AUTO_MIGRATE=true is only allowed in GS_ENV=dev (current env: {})",
-                    args.env
-                );
-            }
+        if cfg.auto_migrate {
             info!("auto-migrating database schema in dev environment");
             gs_api::migrate::run_migrations(&pool)
                 .await
@@ -193,32 +276,180 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                 "database schema version verified"
             );
         }
+
+        // Load JWT signing keys
+        let mut keyset =
+            gs_api::gs_service::gs_auth::jwt::SigningKeySet::load_from_dir(&cfg.jwt_keys_dir)
+                .context("failed to load JWT signing keys from GS_JWT_KEYS_DIR")?;
+        keyset
+            .set_active_kid(&cfg.jwt_active_kid)
+            .context("failed to set active JWT signing key GS_JWT_ACTIVE_KID")?;
+        let (_, active_signing_key) = keyset
+            .active_signing_key()
+            .context("active signing key not present in keyset")?;
+        let active_signing_key = active_signing_key.clone();
+        let keyset_arc = Arc::new(keyset);
+
+        // Optional data encryption rotator for idempotency responses
+        let crypto_rotator = cfg.data_encryption_key.as_ref().and_then(|active| {
+            let active_cipher =
+                gs_api::gs_service::gs_auth::crypto::cipher_from_config_key(active).ok()?;
+            let mut rotator = gs_api::gs_service::gs_auth::crypto::CryptoRotator::empty()
+                .with_active(active_cipher);
+            for old in &cfg.data_encryption_keys_old {
+                if let Ok(old_cipher) =
+                    gs_api::gs_service::gs_auth::crypto::cipher_from_config_key(old)
+                {
+                    rotator = rotator.with_old(old_cipher);
+                }
+            }
+            Some(Arc::new(rotator))
+        });
+
+        let ephemeral = gs_api::gs_service::InMemoryEphemeralStore::new();
+        let bus = gs_api::gs_service::InMemoryBus::new();
+        let prefix = cfg.redis_key_prefix.clone();
+
+        if roles.contains(&Role::Api) {
+            let session_state = gs_api::SessionApiState {
+                pool: pool.clone(),
+                signing_keys: keyset_arc.clone(),
+                issuer: cfg.jwt_issuer.clone(),
+                leeway_seconds: cfg.jwt_leeway_s,
+                crypto_rotator,
+                idempotency_retention: Duration::from_secs(
+                    u64::from(cfg.retention_idempotency_h) * 3600,
+                ),
+                ephemeral: ephemeral.clone(),
+                bus: bus.clone(),
+                redis_key_prefix: prefix.clone(),
+                stream_ticket: gs_api::StreamTicketConfig {
+                    ttl: Duration::from_secs(cfg.ticket_ttl_s),
+                    app_max_connection_age: Duration::from_secs(
+                        cfg.stream_app_max_connection_age_s,
+                    ),
+                    public_base_url: cfg.public_base_url.clone(),
+                },
+                rate_limit_config: gs_api::RateLimitConfig {
+                    device_rpm: cfg.rest_rate_limit_device_rpm,
+                    app_rpm: cfg.rest_rate_limit_app_rpm,
+                    invite_redeem_rpm: cfg.invite_redeem_rpm,
+                    auth_failure_rpm: cfg.auth_failure_rpm_per_ip,
+                },
+            };
+
+            let token_state = gs_api::TokenState {
+                pool: pool.clone(),
+                ttl_bounds: gs_api::gs_service::TokenTtlBounds {
+                    min_seconds: cfg.token_min_ttl_s as u32,
+                    default_seconds: cfg.token_default_ttl_s as u32,
+                    max_seconds: cfg.token_max_ttl_s as u32,
+                },
+                issuer: cfg.jwt_issuer.clone(),
+                signing_key: gs_api::SigningKeyRef::new(
+                    active_signing_key,
+                    cfg.jwt_active_kid.clone(),
+                ),
+            };
+
+            app = app
+                .merge(gs_api::sessions_router(session_state))
+                .merge(gs_api::v1_router(token_state));
+        }
+
+        if roles.contains(&Role::Stream) {
+            let stream_config = gs_stream::StreamConfig {
+                json_subprotocol_enabled: cfg.stream_json_enabled,
+                max_connections: cfg.stream_max_connections,
+                max_frame_bytes: cfg.stream_max_frame_bytes,
+                hello_timeout: Duration::from_millis(cfg.stream_hello_timeout_ms),
+                heartbeat_interval: Duration::from_millis(cfg.stream_heartbeat_interval_ms),
+                idle_timeout: Duration::from_millis(cfg.stream_idle_timeout_ms),
+                max_subscriptions: cfg.stream_max_subscriptions,
+                max_subscriptions_app: cfg.stream_max_subscriptions_app,
+                max_protocol_errors: cfg.stream_max_protocol_errors,
+                max_inbound_msgs_per_s: cfg.stream_max_inbound_msgs_per_s,
+                abuse_window: Duration::from_secs(cfg.stream_abuse_window_s),
+                max_event_age: Duration::from_millis(cfg.location_max_event_age_ms),
+                max_future_skew_ms: cfg.location_max_future_skew_ms as i64,
+                authz_cache_ttl: Duration::from_millis(cfg.authz_cache_ttl_ms),
+                outbound_control_queue: cfg.stream_outbound_control_queue,
+                instance_id: cfg.instance_id.clone(),
+                presence_ttl: Duration::from_secs(cfg.presence_ttl_s),
+                offline_grace: Duration::from_millis(cfg.stream_offline_grace_ms),
+                auth_expiring_lead: Duration::from_secs(cfg.stream_auth_expiring_lead_s),
+            };
+
+            let stream_state = Arc::new(gs_stream::StreamState {
+                pool: pool.clone(),
+                ephemeral: ephemeral.clone(),
+                bus: bus.clone(),
+                authz: Arc::new(gs_api::gs_service::AuthzCache::new(
+                    stream_config.authz_cache_ttl,
+                )),
+                fanout: Arc::new(gs_stream::Fanout::new(bus.clone(), prefix.clone())),
+                redis_key_prefix: prefix.clone(),
+                config: stream_config,
+                signing_keys: keyset_arc.clone(),
+                jwt_issuer: cfg.jwt_issuer.clone(),
+                jwt_leeway_seconds: cfg.jwt_leeway_s,
+            });
+
+            let runner: gs_api::SessionRunner =
+                Arc::new(move |accepted: gs_api::AcceptedWebSocket| {
+                    let state = Arc::clone(&stream_state);
+                    Box::pin(async move {
+                        gs_stream::run_session(
+                            gs_stream::AcceptedSession {
+                                subprotocol: accepted.subprotocol,
+                                grant: accepted.grant,
+                                request_id: accepted.request_id,
+                                socket: accepted.socket,
+                            },
+                            state,
+                        )
+                        .await;
+                    })
+                });
+
+            let stream_api_state = gs_api::StreamApiState {
+                pool: pool.clone(),
+                ephemeral,
+                redis_key_prefix: prefix,
+                upgrade_rpm_per_ip: cfg.stream_upgrade_rpm_per_ip,
+                max_connections: cfg.stream_max_connections,
+                max_frame_bytes: cfg.stream_max_frame_bytes,
+                connections: gs_api::ConnectionCounter::new(),
+                json_subprotocol_enabled: cfg.stream_json_enabled,
+                session_runner: runner,
+            };
+
+            app = app.merge(gs_api::stream_route(stream_api_state));
+        }
     }
 
-    let roles = args
-        .roles
-        .unwrap_or_else(|| vec![Role::Api, Role::Stream, Role::Worker]);
     info!(
         version = VERSION,
         commit = GIT_COMMIT,
         roles = ?roles,
-        http_addr = %args.http_addr,
+        http_addr = %http_addr,
         "starting geostream server"
     );
 
-    // Readiness checks the configured dependencies (docs/16 §4.1, FR-OPS-002).
-    let probe = readiness_probe(database_url.as_deref());
-    let app = gs_api::http_router_with_readiness(gs_api::DEFAULT_MAX_BODY_BYTES, probe);
-    let listener = tokio::net::TcpListener::bind(args.http_addr)
+    let listener = tokio::net::TcpListener::bind(http_addr)
         .await
-        .with_context(|| format!("failed to bind HTTP listener to {}", args.http_addr))?;
+        .with_context(|| format!("failed to bind HTTP listener to {http_addr}"))?;
 
-    info!(addr = %args.http_addr, "listening for incoming HTTP requests");
+    info!(addr = %http_addr, "listening for incoming HTTP requests");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("server error while running HTTP listener")?;
+
+    if let Some(dir) = ephemeral_key_dir {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     info!("geostream server shutdown completed");
     Ok(())

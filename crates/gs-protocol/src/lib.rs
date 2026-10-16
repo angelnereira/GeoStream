@@ -7,5 +7,5 @@ pub mod v1 {
     include!(concat!(env!("OUT_DIR"), "/geostream.v1.serde.rs"));
 }
 
-pub use v1::*;
 pub use pbjson_types;
+pub use v1::*;

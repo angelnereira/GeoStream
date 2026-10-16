@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 gs-api.workspace = true
+gs-config.workspace = true
+gs-observability.workspace = true
 gs-stream.workspace = true
 gs-worker.workspace = true
 anyhow.workspace = true

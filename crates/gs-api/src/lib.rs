@@ -22,6 +22,7 @@ pub mod tokens;
 // Storage access stays behind `gs-service` (docs/04 §4.1); these re-exports exist so the
 // binary can reach the repositories through the same facade it already used before the
 // router existed.
+pub use gs_service;
 pub use gs_service::admin;
 pub use gs_service::migrate;
 

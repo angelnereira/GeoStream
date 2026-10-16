@@ -187,3 +187,64 @@ async fn test_serve_with_database_schema_check() {
         "server with db schema check must start and respond on /health/live"
     );
 }
+
+#[tokio::test]
+async fn test_serve_mounts_v1_and_stream_according_to_roles() {
+    // covers: FR-OPS-001, docs/04 §5, DR-20261013-01, DR-20261012-04
+    let db_url = std::env::var("GS_DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://geostream:geostream_dev_password@127.0.0.1:5432/geostream_test".to_string()
+    });
+
+    let mig_output = Command::new(BIN)
+        .args(["migrate", "--database-url", &db_url])
+        .output()
+        .expect("run migrate");
+    assert!(mig_output.status.success());
+
+    // 1. Role `api` only: `/v1/sessions` is mounted (401 without credentials), `/v1/stream` is 404.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+    let port = listener.local_addr().expect("local addr").port();
+    drop(listener);
+    let http_addr = format!("127.0.0.1:{port}");
+
+    let mut child = Command::new(BIN)
+        .args([
+            "serve",
+            "--http-addr",
+            &http_addr,
+            "--database-url",
+            &db_url,
+            "--roles",
+            "api",
+        ])
+        .spawn()
+        .expect("spawn geostream serve --roles api");
+
+    let client = reqwest::Client::new();
+    let live_url = format!("http://{http_addr}/health/live");
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if let Ok(resp) = client.get(&live_url).send().await
+            && resp.status().is_success()
+        {
+            break;
+        }
+    }
+
+    let sessions_resp = client
+        .get(format!("http://{http_addr}/v1/sessions"))
+        .send()
+        .await
+        .expect("GET /v1/sessions");
+    assert_eq!(sessions_resp.status().as_u16(), 401);
+
+    let stream_resp = client
+        .get(format!("http://{http_addr}/v1/stream"))
+        .send()
+        .await
+        .expect("GET /v1/stream");
+    assert_eq!(stream_resp.status().as_u16(), 404);
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
