@@ -6,7 +6,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 
 ### Added
-- `gs-client-runtime`: runtime nativo (T-E1-03) — tokio WebSocket + reqwest, con una prueba de humo que monta un eco local y recorre el pump.
+- `gs-track`: núcleo server-side del motor de trayectoria (E2, parcial). Filtro de Kalman velocidad constante 4×4 en `LocalFrame` con Joseph y puerta de Mahalanobis, puerta de plausibilidad (las 7 banderas), ZUPT, odometer por ancla y detector de paradas O(1). Compila sin warnings.
+- `gs-client-runtime`: runtime nativo
+ (T-E1-03) — tokio WebSocket + reqwest, con una prueba de humo que monta un eco local y recorre el pump.
 - `gs-ffi`: superficie C mínima (T-E1-04) con handles opacos, `catch_unwind` alrededor de cada llamada y `// SAFETY:` en cada bloque inseguro (único crate con `unsafe`). 4 pruebas.
 - Consistencia: `cargo run -p geostream-tools -- all` sigue en 10/10 con el verificador de dependencias de crate actualizado para el enlace documentado entre `gs-ffi` y los núcleos.
 ### Added

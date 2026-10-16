@@ -50,7 +50,8 @@ Ninguno abierto. Las cuatro decisiones que bloqueaban F4 están resueltas.
 | **F4 (M1)** | **completada** | 2026-10-15 | T-F4-01 a T-F4-13 cerradas. SCN-001..010 verdes en ambos subprotocolos; plazo de revocación medido dentro de NFR-SEC-002; `gs-devclient` con demo M1 (dos publicadores y un lector); suite de privacidad T-F4-13 verde (3/3). Release `server-v0.1.0-alpha.1` |
 | F5 (M2) | pendiente | | El SDK Flutter pasa a ser uno más: la lógica de cliente vive en `gs-client-core` (ADR-0022 sustituye a ADR-0012) |
 | E0 | **completada** | 2026-10-15 | Adopción documental del addendum A-02: `docs/22`–`docs/26`, ADR-0021..0032, enmiendas de `docs/00`–`docs/21`, contrato ampliado, vectores `TRK/SMP/POOL/ETA/PRD/ASG/EDGE` y escenarios SCN-014..026. `geostream-tools all` con 9 comprobaciones en verde |
-| E1 | **completada** (T-E1-01..T-E1-06) | | Ver detalle arriba; siguiente E2 |
+| E1 | **completada** (T-E1-01..T-E1-06) | | Ver detalle arriba | 
+| E2 | **en curso** (núcleo) | | gs-track añadido: Kalman CV, plausibilidad, odometer, stops. Integración storage/webhooks en E3+ |
 | E2 | pendiente | | |
 | E3 | pendiente | | |
 | E4 | pendiente | | |

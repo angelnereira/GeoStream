@@ -1913,6 +1913,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gs-track"
+version = "0.0.0"
+dependencies = [
+ "gs-domain",
+ "gs-geo",
+ "proptest",
+]
+
+[[package]]
 name = "gs-worker"
 version = "0.0.0"
 dependencies = [
