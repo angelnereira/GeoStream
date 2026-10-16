@@ -1,7 +1,7 @@
 # 00 — Índice, gobierno y convenciones
 
-**ID:** GS-DOC-000 · **Versión del paquete documental:** 0.2.0 · **Fecha:** 2026-10-11
-**Estado:** baseline normativo para iniciar la implementación desde un repositorio vacío.
+**ID:** GS-DOC-000 · **Versión del paquete documental:** 0.3.0 · **Fecha:** 2026-10-15
+**Estado:** baseline normativo v0.2.0 más la pista de fases E (motor de ubicación y movilidad), adoptada según `docs/proposals/GeoStream_Addendum_A02_Motor_Ubicacion_Movilidad.md`.
 
 ## 1. Principio de gobierno
 
@@ -41,7 +41,12 @@ Corolarios obligatorios:
 | `18_TESTING_STRATEGY.md` | GS-TST-001 | Tipos de prueba, vectores, escenarios, CI | Escribas pruebas o CI |
 | `19_ENGINEERING_STANDARDS.md` | GS-ENG-001 | Reglas de código Rust/Dart, dependencias, git, versionado, DoD | Escribas código |
 | `20_AGENT_PROTOCOL.md` | GS-AGT-001 | Ciclo de trabajo obligatorio para agentes de IA | Seas un agente |
-| `21_ROADMAP.md` | GS-RMP-001 | Fases F0–F16, tareas, entregables y criterios de salida | Elijas la siguiente tarea |
+| `21_ROADMAP.md` | GS-RMP-001 | Fases F0–F16 y E0–E9, tareas, entregables y criterios de salida | Elijas la siguiente tarea |
+| `22_TRACKING_ENGINE.md` | GS-TRK-001 | Motor de trayectoria en el servidor, muestreo adaptativo y predicción visual en el cliente | Trabajes en `gs-track` o `gs-client-core` |
+| `23_MOBILITY.md` | GS-MBL-001 | Pools de disponibilidad, índice espacial vivo, ETA, asignación y grafo vial propio | Trabajes en `gs-mobility` |
+| `24_HISTORY_ANALYTICS.md` | GS-HAN-001 | Historial opt-in, capa de mapa aprendida, analítica y trabajos por lotes | Trabajes en `gs-analytics` o en el historial |
+| `25_EDGE_DEVICES.md` | GS-EDG-001 | Red de búsqueda BLE cifrada, ingesta LPWAN y rastreadores celulares | Trabajes en `gs-edge` |
+| `26_CORE_AND_BINDINGS.md` | GS-CBN-001 | Núcleo Rust sans-IO compartido, FFI y SDKs por lenguaje | Trabajes en `gs-client-core`, `gs-ffi` o `sdks/*` |
 | `TRACEABILITY.md` | GS-TRC-001 | Requisito → pruebas → estado | Cierres una tarea |
 | `PROGRESS.md` | GS-PRG-001 | Bitácora de avance (la actualizan los agentes) | Cierres una tarea |
 | `adr/` | ADR-NNNN | Decisiones de arquitectura | Una decisión técnica esté en juego |
@@ -57,9 +62,10 @@ De mayor a menor autoridad:
 4. `05_DOMAIN_MODEL.md` y `06_IDENTITY_AUTH.md`.
 5. `04_ARCHITECTURE.md` y ADR con estado **Aceptado**.
 6. `17_CONFIGURATION.md` (valores) y `11_DATA_STORAGE.md` (esquema).
-7. `19_ENGINEERING_STANDARDS.md`, `20_AGENT_PROTOCOL.md`, `18_TESTING_STRATEGY.md`.
-8. `21_ROADMAP.md` (secuencia; no define comportamiento).
-9. Guías (`12`–`16`) en lo que no contradiga lo anterior.
+7. `22_TRACKING_ENGINE.md`, `23_MOBILITY.md`, `24_HISTORY_ANALYTICS.md`, `25_EDGE_DEVICES.md` y `26_CORE_AND_BINDINGS.md` (motor; comparten rango con `03` salvo que regulen un control de seguridad, que cae bajo `10`).
+8. `19_ENGINEERING_STANDARDS.md`, `20_AGENT_PROTOCOL.md`, `18_TESTING_STRATEGY.md`.
+9. `21_ROADMAP.md` (secuencia; no define comportamiento).
+10. Guías (`12`–`16`) en lo que no contradiga lo anterior.
 
 Un documento de menor rango que contradiga a uno superior es un defecto documental: se corrige el de menor rango mediante PR.
 
@@ -84,13 +90,19 @@ En `03_REQUIREMENTS.md` la prioridad usa MUST / SHOULD / COULD:
 ### 4.2 Identificadores
 
 - Requisitos: `FR-<ÁREA>-<NNN>` y `NFR-<ÁREA>-<NNN>`. Son estables: nunca se reutilizan ni se renumeran. Un requisito retirado se marca `RETIRADO` y conserva su ID.
-- Tareas de roadmap: `T-F<fase>-<NN>` (por ejemplo `T-F4-07`).
-- Escenarios: `SCN-<NNN>`. Vectores de prueba: `<GRUPO>-<V|I>-<NNN>` (V = válido, I = inválido).
+- Tareas de roadmap: `T-F<fase>-<NN>` (por ejemplo `T-F4-07`) para las fases F, y `T-E<fase>-<NN>` (por ejemplo `T-E2-05`) para las fases E.
+- Escenarios: `SCN-<NNN>`. Vectores de prueba: `<GRUPO>-<V|I|-<NNN>` (V = válido, I = inválido, y los grupos del motor añaden sufijo descriptivo).
 - ADR: `ADR-<NNNN>`.
 
 ### 4.3 Fases
 
-`F0`–`F12` conducen a **v1.0 GA**. `F13`–`F16` son pistas posteriores a GA con criterios de entrada propios. Detalle en `21_ROADMAP.md`.
+`F0`–`F12` conducen a **v1.0 GA**. `F13`–`F16` son pistas posteriores a GA con criterios de entrada propios.
+
+Las fases `E0`–`E9` son la **pista del motor de ubicación y movilidad** (`22`–`26`, ADR-0021). Se ejecutan según las dependencias de `21_ROADMAP.md` §18 y conviven con las fases F que comparten crates:
+
+- **E0** es el único PR (o serie de PR) de adopción documental y de contratos, sin código de producción.
+- **E1–E9** comparten crates con F, así que una tarea E no puede tocar un crate que una tarea F en curso posea (`20` §11).
+- Los cambios de contrato de la pista E deben entrar **antes** de la congelación del contrato v1 en T-F5-13 (`08` §11).
 
 ### 4.4 Idioma
 
@@ -119,4 +131,4 @@ Todo bloque de código en `docs/` es **normativo en su forma** (firmas, nombres,
 
 ## 6. Estado de este paquete
 
-Este repositorio contiene **solo documentación y contratos**. No existe código. Las cifras de rendimiento son **objetivos a medir**, nunca resultados. Nada de lo descrito está implementado, auditado ni probado a escala hasta que `PROGRESS.md` y la evidencia de CI lo demuestren.
+Las cifras de rendimiento son **objetivos a medir**, nunca resultados (P-6). Nada de lo descrito está implementado, auditado ni probado a escala hasta que `PROGRESS.md` y la evidencia de CI lo demuestren. El paquete documental v0.2.0 sigue vigente en todo lo que la pista E no modifica; la v0.3.0 añade los documentos `22`–`26`, los ADR-0021..0032 y los requisitos con fase `E`.

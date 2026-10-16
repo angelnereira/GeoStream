@@ -1,32 +1,32 @@
 # Trazabilidad de requisitos
 
-**ID:** GS-TRC-001 · Generado inicialmente desde `03_REQUIREMENTS.md` (v0.2.0).
+**ID:** GS-TRC-001 · Generado desde `03_REQUIREMENTS.md` (v0.3.0).
 
 Reglas:
 - Una fila por requisito, en el orden de `03`. Nunca se borran filas (un requisito retirado se marca `RETIRADO`).
 - La columna **Pruebas** se regenera con el script de `tools/` a partir de los `covers:` de las pruebas (`18` §11); hasta que exista, la mantienen los agentes a mano.
-- **Estado**: `pendiente` → `en curso` → `implementado` (código + pruebas verdes) → `verificado` (incluido en un release o hito con evidencia).
-- CI falla si un requisito MUST de una fase cerrada no está `implementado` con pruebas.
+- **Estado**: `pendiente` → `en curso` → `cumplido` (código + pruebas verdes) → `verificado` (incluido en un release o hito con evidencia).
+- CI falla si un requisito MUST de una fase cerrada no está `cumplido` con pruebas.
 
 | Requisito | Prioridad | Fase | Título | Pruebas | Estado |
 |---|---|---|---|---|---|
-| FR-AUTH-001 | MUST | F2 | API keys de aplicación | `crates/gs-store/tests/repos_test.rs`, `crates/gs-auth/tests/api_key_test.rs` | en curso |
-| FR-AUTH-002 | MUST | F2 | Emisión de tokens de dispositivo | `crates/gs-service/tests/tokens_test.rs` | en curso |
-| FR-AUTH-003 | MUST | F2 | Verificación de tokens | `crates/gs-auth/tests/jwt_test.rs`, `crates/gs-service/tests/tokens_test.rs` | en curso |
-| FR-AUTH-004 | MUST | F2 | Rotación de claves de firma | `crates/gs-auth/tests/jwt_test.rs`, `crates/gs-auth/tests/signing_key_test.rs` | en curso |
+| FR-AUTH-001 | MUST | F2 | API keys de aplicación | `crates/gs-store/tests/repos_test.rs`, `crates/gs-auth/tests/api_key_test.rs` | cumplido |
+| FR-AUTH-002 | MUST | F2 | Emisión de tokens de dispositivo | `crates/gs-service/tests/tokens_test.rs` | cumplido |
+| FR-AUTH-003 | MUST | F2 | Verificación de tokens | `crates/gs-auth/tests/jwt_test.rs`, `crates/gs-service/tests/tokens_test.rs` | cumplido |
+| FR-AUTH-004 | MUST | F2 | Rotación de claves de firma | `crates/gs-auth/tests/jwt_test.rs`, `crates/gs-auth/tests/signing_key_test.rs` | cumplido |
 | FR-AUTH-005 | MUST | F3 | Revocación de tokens y desactivación de dispositivos | `crates/gs-service/tests/subjects_test.rs`, `crates/gs-api/tests/subjects_test.rs`, `crates/gs-service/tests/control_events_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-AUTH-006 | MUST | F4 | Tickets de stream de un solo uso | `crates/gs-auth/src/ticket.rs`, `crates/gs-service/tests/tickets_test.rs`, `crates/gs-api/tests/stream_ticket_test.rs` | cumplido |
 | FR-AUTH-007 | MUST | F4 | Renovación de autenticación dentro de la conexión | `crates/gs-stream/src/connection.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
-| FR-AUTH-008 | MUST | F2 | Scopes | `crates/gs-auth/tests/scopes_test.rs` | en curso |
+| FR-AUTH-008 | MUST | F2 | Scopes | `crates/gs-auth/tests/scopes_test.rs`, `crates/gs-api/tests/conformance_test.rs` | cumplido |
 | FR-AUTH-009 | COULD | F15 | Tokens firmados por el integrador | — | pendiente |
-| FR-ADM-001 | MUST | F2 | CLI de administración | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs` | en curso |
-| FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | en curso |
+| FR-ADM-001 | MUST | F2 | CLI de administración | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs` | cumplido |
+| FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | cumplido |
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs`, `crates/gs-service/tests/tokens_test.rs`, `crates/gs-api/tests/account_disabled_test.rs` | cumplido |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | pendiente |
 | FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs`, `crates/gs-api/tests/skeleton_test.rs`, `crates/gs-api/tests/conformance_test.rs` | cumplido |
-| FR-API-002 | MUST | F3 | Idempotencia | `crates/gs-service/tests/idempotency_test.rs`, `crates/gs-auth/tests/crypto_test.rs` | en curso |
-| FR-API-003 | MUST | F3 | Paginación por cursor | `crates/gs-domain/src/pagination.rs`, `crates/gs-api/src/pagination.rs` | en curso |
-| FR-API-004 | MUST | F3 | Rate limit REST | crates/gs-api/src/rate_limit.rs; crates/gs-api/tests/rate_limit_test.rs | cumplido |
+| FR-API-002 | MUST | F3 | Idempotencia | `crates/gs-service/tests/idempotency_test.rs`, `crates/gs-auth/tests/crypto_test.rs` | cumplido |
+| FR-API-003 | MUST | F3 | Paginación por cursor | `crates/gs-domain/src/pagination.rs`, `crates/gs-api/src/pagination.rs` | cumplido |
+| FR-API-004 | MUST | F3 | Rate limit REST | `crates/gs-api/src/rate_limit.rs`, `crates/gs-api/tests/rate_limit_test.rs` | cumplido |
 | FR-API-005 | MUST | F3 | OpenAPI como fuente de verdad | `crates/gs-api/tests/conformance_test.rs` | cumplido |
 | FR-API-006 | MUST | F3 | No enumeración de recursos | `crates/gs-api/tests/conformance_test.rs` | cumplido |
 | FR-SES-001 | MUST | F3 | Crear sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
@@ -53,11 +53,11 @@ Reglas:
 | FR-SHR-004 | MUST | F3 | Un único dispositivo publicador | `crates/gs-store/tests/constraints_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-SHR-005 | MUST | F3 | Auditoría de compartición | `crates/gs-service/tests/audit_test.rs` | cumplido |
 | FR-LOC-001 | MUST | F4 | Modelo de muestra | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
-| FR-LOC-002 | MUST | F4 | Validación de campos | `tests/location_vectors_test.rs` | en curso |
+| FR-LOC-002 | MUST | F4 | Validación de campos | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs` | cumplido |
 | FR-LOC-003 | MUST | F4 | Orden y deduplicación | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-LOC-004 | MUST | F4 | Validación temporal | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-LOC-005 | MUST | F4 | Tiempo de recepción del servidor | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
-| FR-LOC-006 | MUST | F4 | Calidad y tipo de dato | `tests/location_vectors_test.rs` | en curso |
+| FR-LOC-006 | MUST | F4 | Calidad y tipo de dato | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs` | cumplido |
 | FR-LOC-007 | MUST | F4 | Rate limit de publicación | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-LOC-008 | MUST | F4 | Sequence floor | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-LOC-009 | MUST | F8 | Ingesta HTTP por lotes | — | pendiente |
@@ -96,7 +96,7 @@ Reglas:
 | FR-MAP-002 | MUST | F9 | Stacks de proveedor | — | pendiente |
 | FR-MAP-003 | MUST | F9 | Adaptador MapLibre | — | pendiente |
 | FR-MAP-004 | SHOULD | F9 | Adaptador Google Maps | — | pendiente |
-| FR-MAP-005 | MUST | F9 | Interpolación visual etiquetada | — | pendiente |
+| FR-MAP-005 | MUST | F9 | Predicción e interpolación visual etiquetadas | — | pendiente |
 | FR-MAP-006 | MUST | F9 | Documentación de licencias | — | pendiente |
 | FR-WHK-001 | MUST | F8 | Registro de endpoints | — | pendiente |
 | FR-WHK-002 | MUST | F8 | Outbox y entrega at-least-once | — | pendiente |
@@ -111,51 +111,120 @@ Reglas:
 | FR-GEO-002 | MUST | F11 | Evaluación con histéresis | — | pendiente |
 | FR-GEO-003 | MUST | F11 | Eventos | — | pendiente |
 | FR-GEO-004 | SHOULD | F11 | Índice espacial en proceso | — | pendiente |
-| FR-PRV-001 | MUST | F4 | Efímero por defecto | `crates/gs-testkit/tests/scenarios_test.rs` | cumplido |
+| FR-GEO-005 | SHOULD | E5 | Transición DWELL | — | pendiente |
+| FR-GEO-006 | SHOULD | E5 | Proximidad dinámica | — | pendiente |
+| FR-GEO-007 | COULD | E5 | Geocercas asistidas en el dispositivo | — | pendiente |
+| FR-PRV-001 | MUST | F4 | Efímero por defecto | `crates/gs-testkit/tests/scenarios_test.rs`, `crates/gs-testkit/tests/privacy_test.rs` | cumplido |
 | FR-PRV-002 | MUST | F10 | Borrado y exportación de subject | — | pendiente |
 | FR-PRV-003 | MUST | F10 | Jobs de retención | — | pendiente |
-| FR-PRV-004 | MUST | F4 | Redacción de coordenadas | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/log_verifier.rs` | en curso |
+| FR-PRV-004 | MUST | F4 | Redacción de coordenadas | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/log_verifier.rs`, `crates/gs-testkit/tests/privacy_test.rs` | cumplido |
 | FR-PRV-005 | MUST | F3 | Auditoría | `crates/gs-store/tests/repos_test.rs`, `crates/gs-service/tests/audit_test.rs` | cumplido |
-| FR-HIS-001 | COULD | F13 | Historial opt-in | — | pendiente |
-| FR-HIS-002 | COULD | F13 | Cola offline acumulada | — | pendiente |
-| FR-HIS-003 | COULD | F13 | Consulta de historial | — | pendiente |
-| FR-HIS-004 | COULD | F13 | Calidad de trayectoria y map-matching | — | pendiente |
-| FR-OPS-001 | MUST | F0 | Binario único con roles | tests/cli_test.rs | cumplido |
-| FR-OPS-002 | MUST | F2 | Salud y métricas | `crates/gs-api/tests/skeleton_test.rs` | en curso |
+| FR-HIS-001 | MUST | E6 | Historial con política, modo y consentimiento | — | pendiente |
+| FR-HIS-002 | MUST | E6 | Cola offline acumulada | — | pendiente |
+| FR-HIS-003 | MUST | E6 | Consulta de trazas y viajes | — | pendiente |
+| FR-HIS-004 | SHOULD | E7 | Calidad de trayectoria y map-matching | — | pendiente |
+| FR-HIS-005 | MUST | E6 | Retención por particiones y supresión del subject | — | pendiente |
+| FR-HIS-006 | SHOULD | E6 | Exportación de historial | — | pendiente |
+| FR-HIS-007 | COULD | E6 | Reproducción de traza en vivo (`replay_trace`) | — | pendiente |
+| FR-ANA-001 | MUST | E6 | Agregados H3 con k-anonimato | — | pendiente |
+| FR-ANA-002 | SHOULD | E6 | Perfil de movilidad con consentimiento | — | pendiente |
+| FR-ANA-003 | SHOULD | E6 | Eventos de conducción estimados | — | pendiente |
+| FR-ANA-004 | COULD | E6 | Matrices origen-destino | — | pendiente |
+| FR-LRN-001 | SHOULD | E7 | Perfiles de velocidad y corrección de ETA | — | pendiente |
+| FR-LRN-002 | SHOULD | E7 | Lugares aprendidos | — | pendiente |
+| FR-LRN-003 | SHOULD | E7 | Map-matching integrado sobre grafo propio | — | pendiente |
+| FR-LRN-004 | COULD | E7 | Ruta sobre grafo propio | — | pendiente |
+| FR-OPS-001 | MUST | F0 | Binario único con roles | `apps/geostream/tests/cli_test.rs` | cumplido |
+| FR-OPS-002 | MUST | F2 | Salud y métricas | `crates/gs-api/tests/skeleton_test.rs`, `apps/geostream/tests/cli_test.rs` | cumplido |
 | FR-OPS-003 | MUST | F1 | Configuración validada | `crates/gs-config/tests/server_config_test.rs` | cumplido |
-| FR-OPS-004 | MUST | F2 | Migraciones versionadas | migrations/0001_init.sql, apps/geostream (migrate), crates/gs-store/tests/constraints_test.rs | cumplido |
+| FR-OPS-004 | MUST | F2 | Migraciones versionadas | `migrations/0001_init.sql`, `apps/geostream/tests/cli_test.rs`, `crates/gs-store/tests/constraints_test.rs` | cumplido |
 | FR-OPS-005 | MUST | F6 | Imagen y compose | — | pendiente |
 | FR-OPS-006 | MUST | F12 | Runbooks y backups | — | pendiente |
+| FR-OPS-007 | MUST | E1 | Compilación multiarquitectura Linux en CI | — | pendiente |
+| FR-TRK-001 | MUST | E2 | Estimación por muestra | — | pendiente |
+| FR-TRK-002 | MUST | E2 | Puerta de plausibilidad | — | pendiente |
+| FR-TRK-003 | MUST | E2 | Anti-deriva en reposo | — | pendiente |
+| FR-TRK-004 | MUST | E2 | Odómetro por (sesión, miembro) | — | pendiente |
+| FR-TRK-005 | MUST | E2 | Paradas online y TrackEvent | — | pendiente |
+| FR-TRK-006 | MUST | E2 | Estado con puntos de control y continuidad entre instancias | — | pendiente |
+| FR-TRK-007 | SHOULD | E2 | Webhooks de paradas sin coordenadas | — | pendiente |
+| FR-SMP-001 | MUST | E3 | Muestreo adaptativo por estado e intención | — | pendiente |
+| FR-SMP-002 | MUST | E3 | Publicación por cambio significativo | — | pendiente |
+| FR-SMP-003 | MUST | E3 | SamplingPolicy remota acotada a rangos | — | pendiente |
+| FR-SMP-004 | SHOULD | E3 | Despertar por región del sistema operativo | — | pendiente |
+| FR-SMP-005 | MUST | E3 | Predicción visual acotada | — | pendiente |
+| FR-SMP-006 | MUST | E6 | Cola buffered cifrada y backfill de historial | — | pendiente |
+| FR-CORE-001 | MUST | E3 | Núcleo sans-IO del cliente | — | pendiente |
+| FR-CORE-002 | MUST | E3 | Runtime nativo del cliente | — | pendiente |
+| FR-CORE-003 | MUST | E3 | Cliente REST en el núcleo | — | pendiente |
+| FR-BND-001 | MUST | E3 | Binding Kotlin/Android | — | pendiente |
+| FR-BND-002 | MUST | E3 | Binding Swift/iOS | — | pendiente |
+| FR-BND-003 | MUST | E3 | SDK Flutter sobre el núcleo Rust | — | pendiente |
+| FR-BND-004 | MUST | E9 | SDK TypeScript (Web WASM y Node) | — | pendiente |
+| FR-BND-005 | SHOULD | E9 | SDK Go | — | pendiente |
+| FR-BND-006 | SHOULD | E9 | SDK Ruby | — | pendiente |
+| FR-BND-007 | MUST | E9 | Conformidad multilenguaje | — | pendiente |
+| FR-POOL-001 | MUST | E4 | Modo POOL e invariante INV-POOL-1 | — | pendiente |
+| FR-POOL-002 | MUST | E4 | Disponibilidad y atributos con minimización | — | pendiente |
+| FR-POOL-003 | MUST | E4 | Índice espacial vivo con borrado síncrono | — | pendiente |
+| FR-POOL-004 | MUST | E4 | Búsqueda de cercanos (`nearby`) | — | pendiente |
+| FR-POOL-005 | SHOULD | E4 | Anillos de expansión (`rings`) | — | pendiente |
+| FR-POOL-006 | SHOULD | E4 | Densidad aproximada y anónima (`density`) | — | pendiente |
+| FR-MOB-001 | MUST | E5 | Estimación de ETA por niveles | — | pendiente |
+| FR-MOB-002 | MUST | E5 | Asignación óptima por lotes | — | pendiente |
+| FR-MOB-003 | MUST | E5 | Provider Gateway BYOK | — | pendiente |
+| FR-EDGE-001 | MUST | E8 | Registro de tags sin EIK | — | pendiente |
+| FR-EDGE-002 | MUST | E8 | Reportes Beacon cifrados E2E y lookup | — | pendiente |
+| FR-EDGE-003 | MUST | E8 | Relevo en el núcleo del cliente | — | pendiente |
+| FR-EDGE-004 | MUST | E8 | Protección contra rastreo no deseado (DULT) | — | pendiente |
+| FR-EDGE-005 | SHOULD | E8 | Ingesta LPWAN | — | pendiente |
+| FR-EDGE-006 | COULD | E8 | Pasarela de rastreadores celulares | — | pendiente |
+| FR-EDGE-007 | COULD | E8 | Puente de tag a dispositivo virtual | — | pendiente |
+| FR-EDGE-008 | COULD | E8 | Firmware de referencia para tag BLE | — | pendiente |
 | FR-IOT-001 | COULD | F14 | Puente MQTT | — | pendiente |
-| FR-NAT-001 | COULD | F15 | SDKs nativos Kotlin/Swift | — | pendiente |
-| FR-E2E-001 | COULD | F16 | Modo cifrado de extremo a extremo | — | pendiente |
+| FR-NAT-001 | RETIRADO | F15 | SDKs nativos Kotlin/Swift | — | RETIRADO |
+| FR-E2E-001 | COULD | F16 | Modo cifrado de extremo a extremo en sesiones | — | pendiente |
 | FR-P2P-001 | COULD | F16 | Transporte P2P WebRTC | — | pendiente |
 | NFR-PERF-001 | MUST | F6 | Latencia interna del servidor | — | pendiente |
 | NFR-PERF-002 | MUST | F6 | Latencia extremo a extremo | — | pendiente |
 | NFR-PERF-003 | MUST | F6 | Capacidad de un nodo de referencia | — | pendiente |
 | NFR-PERF-004 | SHOULD | F6 | Memoria por conexión | — | pendiente |
+| NFR-PERF-005 | MUST | E2 | Latencia del motor de trayectoria por muestra | — | pendiente |
+| NFR-PERF-006 | MUST | E2 | Latencia interna con el motor activo | — | pendiente |
+| NFR-PERF-007 | MUST | E4 | Latencia de consulta `nearby` en pool | — | pendiente |
+| NFR-PERF-008 | MUST | E5 | Latencia de asignación por lotes | — | pendiente |
+| NFR-PERF-009 | MUST | E6 | Pérdida acotada del escritor de historial | — | pendiente |
+| NFR-QUAL-001 | MUST | E2 | Calidad de estimación del filtro de Kalman | — | pendiente |
+| NFR-QUAL-002 | MUST | E2 | Precisión y estabilidad del odómetro | — | pendiente |
+| NFR-QUAL-003 | MUST | E2 | Precisión y recobrado de detección de paradas | — | pendiente |
 | NFR-SCALE-001 | MUST | F6 | Escalado horizontal | — | pendiente |
 | NFR-SCALE-002 | MUST | F6 | Tormenta de reconexión | — | pendiente |
 | NFR-AVAIL-001 | SHOULD | F12 | Objetivo de disponibilidad | — | pendiente |
-| NFR-SEC-001 | MUST | F2 | Transporte cifrado | deploy/caddy/Caddyfile, deploy/nginx/geostream.conf, docs/templates/RELEASE_TEMPLATE.md | implementado |
+| NFR-SEC-001 | MUST | F2 | Transporte cifrado | `deploy/caddy/Caddyfile`, `deploy/nginx/geostream.conf`, `docs/templates/RELEASE_TEMPLATE.md` | cumplido |
 | NFR-SEC-002 | MUST | F4 | Plazo de revocación | `crates/gs-service/tests/authz_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
-| NFR-SEC-003 | MUST | F2 | Secretos fuera de registros | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/redacted.rs` | en curso |
-| NFR-SEC-004 | MUST | F3 | Aislamiento de tenant | `crates/gs-api/tests/conformance_test.rs` (REST; mensajes de stream en F4) | en curso |
+| NFR-SEC-003 | MUST | F2 | Secretos fuera de registros | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/redacted.rs`, `crates/gs-testkit/tests/privacy_test.rs` | cumplido |
+| NFR-SEC-004 | MUST | F3 | Aislamiento de tenant | `crates/gs-api/tests/conformance_test.rs`, `crates/gs-testkit/tests/scenarios_test.rs` | cumplido |
 | NFR-SEC-005 | MUST | F10 | Fuzzing | — | pendiente |
-| NFR-SEC-006 | MUST | F0 | Auditoría de dependencias | CI (cargo deny, cargo audit) | cumplido |
-| NFR-PRIV-001 | MUST | F4 | Sin persistencia de coordenadas | — | pendiente |
-| NFR-PRIV-002 | MUST | F4 | Borrado de snapshot inmediato | — | pendiente |
+| NFR-SEC-006 | MUST | F0 | Auditoría de dependencias | CI (`cargo deny`, `cargo audit`) | cumplido |
+| NFR-PRIV-001 | MUST | F4 | Sin persistencia de coordenadas | `crates/gs-testkit/tests/privacy_test.rs` | cumplido |
+| NFR-PRIV-002 | MUST | F4 | Borrado de snapshot inmediato | `crates/gs-testkit/tests/privacy_test.rs` | cumplido |
+| NFR-PRIV-003 | MUST | E6 | k-anonimato en todo agregado expuesto | — | pendiente |
+| NFR-PRIV-004 | MUST | E8 | Reportes Beacon no vinculables al buscador | — | pendiente |
 | NFR-RES-001 | MUST | F9 | Independencia de proveedores | — | pendiente |
 | NFR-RES-002 | MUST | F6 | Degradación ante caída de Redis/Valkey | — | pendiente |
 | NFR-RES-003 | MUST | F6 | Apagado ordenado | — | pendiente |
 | NFR-MOB-001 | MUST | F7 | Matriz de dispositivos | — | pendiente |
 | NFR-MOB-002 | SHOULD | F7 | Consumo de batería medido | — | pendiente |
+| NFR-MOB-003 | SHOULD | E3 | Ahorro del muestreo adaptativo | — | pendiente |
+| NFR-MOB-004 | MUST | E3 | Tamaño del núcleo nativo móvil | — | pendiente |
+| NFR-MOB-005 | MUST | E3 | Tiempo de reacción a cambios de movimiento | — | pendiente |
 | NFR-COMPAT-001 | MUST | F5 | Matriz de compatibilidad | — | pendiente |
 | NFR-COMPAT-002 | MUST | F5 | Compatibilidad de contratos | — | pendiente |
-| NFR-MAINT-001 | MUST | F0 | Versionado | docs/templates/RELEASE_TEMPLATE.md, tools (geostream-tools changelog) | cumplido |
-| NFR-MAINT-002 | MUST | F1 | Cobertura de pruebas | crates/gs-domain/tests/property_tests.rs, llvm-cov 90.76% | cumplido |
-| NFR-OBS-001 | MUST | F2 | Observabilidad estructurada | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/metrics.rs` | en curso |
-| NFR-OBS-002 | MUST | F2 | Cardinalidad acotada | `crates/gs-observability/src/metrics.rs` | en curso |
+| NFR-COMPAT-003 | MUST | E9 | Paridad de vectores entre lenguajes | — | pendiente |
+| NFR-MAINT-001 | MUST | F0 | Versionado | `docs/templates/RELEASE_TEMPLATE.md`, `tools` (`geostream-tools changelog`) | cumplido |
+| NFR-MAINT-002 | MUST | F1 | Cobertura de pruebas | `crates/gs-domain/tests/property_tests.rs`, `llvm-cov 90.76%` | cumplido |
+| NFR-OBS-001 | MUST | F2 | Observabilidad estructurada | `crates/gs-observability/tests/logging_test.rs`, `crates/gs-observability/src/metrics.rs`, `apps/geostream/tests/cli_test.rs` | cumplido |
+| NFR-OBS-002 | MUST | F2 | Cardinalidad acotada | `crates/gs-observability/src/metrics.rs` | cumplido |
 | NFR-COST-001 | MUST | F6 | Operación sin proveedores comerciales | — | pendiente |
 | NFR-DX-001 | MUST | F8 | Quickstart en menos de 30 minutos | — | pendiente |
-| NFR-DOC-001 | MUST | F0 | Documentación completa | CI (geostream-tools all) | cumplido |
+| NFR-DOC-001 | MUST | F0 | Documentación completa | CI (`geostream-tools all`) | cumplido |

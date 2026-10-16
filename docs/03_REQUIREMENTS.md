@@ -465,10 +465,10 @@ Cada requisito tiene el formato:
 - Aceptación: la app de ejemplo puede cambiar a Google Maps por configuración.
 - Ref: `13` §5.
 
-#### FR-MAP-005 · MUST · F9 — Interpolación visual etiquetada
-- Descripción: la animación entre puntos es solo visual, desactivable y nunca se publica ni se reporta como medición.
-- Aceptación: prueba que verifica que las posiciones interpoladas no salen del renderer.
-- Ref: `13` §6.
+#### FR-MAP-005 · MUST · F9 — Predicción e interpolación visual etiquetadas
+- Descripción: la animación y predicción visual entre muestras (`MemberView.renderPosition`, etiquetada `PREDICTED`) es solo visual, acotada por `predict_horizon_ms`, desactivable y nunca se publica, persiste ni se reporta como medición.
+- Aceptación: prueba y vectores `PRD` que verifican el horizonte, el decaimiento y que las posiciones `PREDICTED` o interpoladas no salen del cliente ni del renderer.
+- Ref: `13` §6; `22` §8.6; ADR-0030.
 
 #### FR-MAP-006 · MUST · F9 — Documentación de licencias
 - Descripción: documentar términos, cuotas, atribución y costos de cada proveedor soportado.
@@ -539,6 +539,21 @@ Cada requisito tiene el formato:
 - Descripción: R-tree en memoria por tenant con límites `max_geofences_per_tenant`.
 - Aceptación: benchmark con el máximo de geocercas dentro del objetivo NFR-PERF-001.
 
+#### FR-GEO-005 · SHOULD · E5 — Transición DWELL
+- Descripción: transición `GEOFENCE_TRANSITION_DWELL` emitida tras permanecer `INSIDE` durante `dwell_seconds` configurados en la geocerca.
+- Aceptación: escenario `SCN-024` verifica la emisión por stream y el webhook `geofence.dwell` sin coordenadas tras cumplir la duración.
+- Ref: `14` §4–§5; `23` §6.
+
+#### FR-GEO-006 · SHOULD · E5 — Proximidad dinámica
+- Descripción: geocerca circular anclada a un miembro (`anchor_member_id`) de la misma sesión (hasta `max_dynamic_geofences_per_session`), evaluada con la misma histéresis de `14` §4 cuando se mueve cualquiera de los dos miembros.
+- Aceptación: escenario `SCN-024` verifica entrada y salida relativas entre dos miembros en movimiento.
+- Ref: `14` §4; `23` §6.
+
+#### FR-GEO-007 · COULD · E5 — Geocercas asistidas en el dispositivo
+- Descripción: el núcleo del cliente registra las geocercas cercanas en los huecos de monitorización de región del sistema operativo para despertar la app y ajustar el muestreo, manteniendo la transición canónica en el servidor.
+- Aceptación: pruebas de integración del cliente con `RegionMonitor` simulado.
+- Ref: `14` §6; `22` §8.7.
+
 ### 2.16 Privacidad y datos (PRV)
 
 #### FR-PRV-001 · MUST · F4 — Efímero por defecto
@@ -564,25 +579,87 @@ Cada requisito tiene el formato:
 - Descripción: registrar acciones sensibles (`10` §8.3) sin coordenadas.
 - Aceptación: cada acción listada produce un registro.
 
-### 2.17 Historial y trayectorias (HIS) — post-GA
+### 2.17 Historial y analítica (HIS / ANA / LRN)
 
-#### FR-HIS-001 · COULD · F13 — Historial opt-in
-- Descripción: historial por sesión solo si la política del tenant lo permite y la sesión lo activa, con retención ≤ política.
-- Aceptación: requiere ADR de base legal y retención.
+#### FR-HIS-001 · MUST · E6 — Historial con política, modo y consentimiento
+- Descripción: se persisten puntos de historial solo cuando `tenant.history_allowed == true`, `session.history_mode ∈ {TRACE, TRACE_AND_ANALYTICS}` y el propio subject otorgó `HISTORY ∈ member.consent_purposes` (`INV-SHR-5`). Retirar el consentimiento detiene las escrituras de inmediato.
+- Aceptación: escenario `SCN-020` verifica que con consentimiento la traza queda disponible y sin consentimiento no se escribe ninguna fila en `location_points`.
+- Ref: `24_HISTORY_ANALYTICS.md` §1; ADR-0024.
 
-#### FR-HIS-002 · COULD · F13 — Cola offline acumulada
-- Descripción: modo `buffered` del SDK, cifrado en reposo, solo para sesiones con historial.
+#### FR-HIS-002 · MUST · E6 — Cola offline acumulada
+- Descripción: modo `buffered` del núcleo del cliente, cifrado en reposo con AES-256-GCM y simplificado en línea, activo cuando la sesión tiene historial (`history_mode ≠ OFF`); remite a `FR-SMP-006`.
+- Aceptación: escenario `SCN-021` verifica la subida por `POST /v1/ingest/history` al reconectar sin alterar el snapshot vivo.
+- Ref: `22` §8.5; `24` §2; ADR-0025.
 
-#### FR-HIS-003 · COULD · F13 — Consulta de historial
-- Descripción: endpoint de historial con capacidad dedicada.
+#### FR-HIS-003 · MUST · E6 — Consulta de trazas y viajes
+- Descripción: `GET /v1/sessions/{id}/members/{member_id}/trace` (formatos `json`, `polyline`, `gsp1` y simplificación `simplify_m`) y `GET /v1/trips` / `GET /v1/trips/{trip_id}` con resumen estadístico y polilínea compacta.
+- Aceptación: pruebas de integración y escenario `SCN-020` verifican autorización (`history:read` o dispositivo con `read` en sesión activa) y formatos de respuesta.
+- Ref: `07` §9; `24` §2–§4.
 
-#### FR-HIS-004 · COULD · F13 — Calidad de trayectoria y map-matching
-- Descripción: filtros opcionales y map-matching desacoplados del canal crítico, con salida etiquetada.
+#### FR-HIS-004 · SHOULD · E7 — Calidad de trayectoria y map-matching
+- Descripción: puerto `MapMatcher` (por lotes y online con retardo fijo `mm_fixed_lag`) mediante proveedores (Valhalla, OSRM) o HMM/Viterbi integrado sobre grafo propio, emitiendo polilínea ajustada y `LocationKind.MAP_MATCHED`.
+- Aceptación: pruebas con trazas sintéticas ruidosas ajustadas a la red vial.
+- Ref: `24` §3; `23` §5; ADR-0032.
+
+#### FR-HIS-005 · MUST · E6 — Retención por particiones y supresión del subject
+- Descripción: creación anticipada (`GS_HISTORY_PARTITION_LOOKAHEAD_DAYS`) y eliminación de particiones diarias de `location_points` según `history_raw_retention_days`, purga de viajes según `history_trip_retention_days` y borrado completo de puntos, viajes y paradas en `DELETE /v1/subjects/{id}`.
+- Aceptación: escenario `SCN-022` verifica que suprimir el subject elimina todo su historial personal.
+- Ref: `11_DATA_STORAGE.md` §2, §5; `24` §5.
+
+#### FR-HIS-006 · SHOULD · E6 — Exportación de historial
+- Descripción: `POST /v1/exports` y `GET /v1/exports/{export_id}` generan exportaciones asíncronas en NDJSON o CSV con URL de descarga de TTL corto, e incluyen el historial en la exportación del subject (`10` §7.3).
+- Aceptación: prueba de integración del ciclo completo de exportación.
+- Ref: `07` §9; `24` §4.
+
+#### FR-HIS-007 · COULD · E6 — Reproducción de traza en vivo (`replay_trace`)
+- Descripción: al suscribirse con `Subscribe.replay_trace = true`, el servidor entrega tras `SubscribeAck` la traza simplificada de la sesión activa como `LocationUpdate` con `delivery = REPLAY`.
+- Aceptación: prueba de integración de stream con `replay_trace`.
+- Ref: `08` §6.3; `24` §4.
+
+#### FR-ANA-001 · MUST · E6 — Agregados H3 con k-anonimato
+- Descripción: trabajo horario que alimenta `h3_activity_hourly` y endpoint `GET /v1/analytics/heatmap` (`metric ∈ {presence, stops, speed}`) suprimiendo toda celda con menos de `analytics_k_anonymity` subjects distintos que hayan consentido `ANALYTICS`.
+- Aceptación: escenario `SCN-023` verifica la supresión de celdas por debajo de *k*.
+- Ref: `24` §3–§4; ADR-0024; `NFR-PRIV-003`.
+
+#### FR-ANA-002 · SHOULD · E6 — Perfil de movilidad con consentimiento
+- Descripción: `GET /v1/subjects/{id}/mobility-profile` calcula estadísticas agregadas del subject (viajes, distancia, horas activas, paradas y eventos estimados) exigiendo consentimiento `ANALYTICS` vigente (`403 CONSENT_REQUIRED` si falta).
+- Aceptación: pruebas de autorización y consentimiento positivo/negativo.
+- Ref: `24` §3–§4.
+
+#### FR-ANA-003 · SHOULD · E6 — Eventos de conducción estimados
+- Descripción: en el cierre de viaje, detectar aceleraciones y frenadas bruscas estimadas desde la velocidad GNSS solo cuando `speed_accuracy_mps` está presente y `dt ≤ 2 s` (`driving_harsh_accel_mps2`, `driving_harsh_brake_mps2`), etiquetándolas explícitamente como estimadas.
+- Aceptación: pruebas unitarias y de integración sobre trazas sintéticas.
+- Ref: `24` §3.
+
+#### FR-ANA-004 · COULD · E6 — Matrices origen-destino
+- Descripción: `GET /v1/analytics/od` devuelve conteos diarios entre celdas H3 de origen y destino respetando `analytics_k_anonymity`.
+- Aceptación: prueba de integración con verificación de k-anonimato.
+- Ref: `24` §3–§4.
+
+#### FR-LRN-001 · SHOULD · E7 — Perfiles de velocidad y corrección de ETA
+- Descripción: cálculo diario de histogramas de velocidad por celda H3, hora de la semana y modo, factor de sinuosidad y residuos de duración, usando exclusivamente datos GNSS propios del tenant con consentimiento `ANALYTICS`, expuestos en `GET /v1/analytics/speed-profile` y consumidos por el estimador de ETA.
+- Aceptación: pruebas de integración que verifican la mejora del estimador y el cumplimiento de k-anonimato.
+- Ref: `24` §3; ADR-0032.
+
+#### FR-LRN-002 · SHOULD · E7 — Lugares aprendidos
+- Descripción: clustering DBSCAN sobre centroides de paradas (`GS_LEARNED_PLACES_EPS_M`, `GS_LEARNED_PLACES_MIN_POINTS`) con k-anonimato de subjects distintos, expuesto en `GET /v1/analytics/places`.
+- Aceptación: prueba sobre paradas sintéticas agrupadas con verificación de k-anonimato.
+- Ref: `24` §3; ADR-0032.
+
+#### FR-LRN-003 · SHOULD · E7 — Map-matching integrado sobre grafo propio
+- Descripción: implementación de HMM/Viterbi (Newson & Krumm, 2009) sobre un grafo regional `.gsg` construido con `geostream graph build --osm <region>.osm.pbf --out <region>.gsg` y cargado desde `GS_GRAPH_PATHS`.
+- Aceptación: pruebas deterministas de ajuste de trazas sobre un grafo sintético/regional.
+- Ref: `23` §5; `24` §3; ADR-0032.
+
+#### FR-LRN-004 · COULD · E7 — Ruta sobre grafo propio
+- Descripción: `POST /v1/tools/route` calcula rutas con A* o jerarquías de contracción (CH) sobre el grafo propio (`source = OWN_GRAPH`).
+- Aceptación: prueba de contrato y exactitud de ruta más corta en grafo de prueba.
+- Ref: `23` §5; ADR-0032.
 
 ### 2.18 Operación (OPS)
 
 #### FR-OPS-001 · MUST · F0 — Binario único con roles
-- Descripción: binario `geostream` con subcomandos `serve`, `migrate`, `admin`, `version`; `serve --roles api,stream,worker`.
+- Descripción: binario `geostream` con subcomandos `serve`, `migrate`, `admin`, `version`; `serve --roles api,stream,worker,analytics`.
 - Aceptación: cada rol puede ejecutarse por separado y juntos.
 - Ref: `04` §5.
 
@@ -609,16 +686,229 @@ Cada requisito tiene el formato:
 - Descripción: runbooks de `16` §8 y restauración de backup probada.
 - Aceptación: ejercicio de restauración documentado con resultado.
 
-### 2.19 Pistas posteriores a GA
+#### FR-OPS-007 · MUST · E1 — Compilación multiarquitectura Linux en CI
+- Descripción: el servidor y las librerías puras compilan y se verifican en CI para Linux `x86_64` (`gnu` y `musl`) y `aarch64` (`gnu` y `musl`).
+- Aceptación: job de CI verde generando artefactos para los triples Linux definidos en `26_CORE_AND_BINDINGS.md` §2.
+- Ref: `16` §10; `26` §2.
+
+### 2.19 Motor de trayectoria y muestreo (TRK / SMP)
+
+#### FR-TRK-001 · MUST · E2 — Estimación por muestra
+- Descripción: `gs-track` aplica un filtro de Kalman de velocidad constante 4×4 en coordenadas ENU (`LocalFrame`) con actualización en forma de Joseph y puerta de Mahalanobis (`track_outlier_chi2`), adjuntando `LocationEstimate` (`kind = FILTERED`) en `LocationUpdate.estimate` sin modificar nunca la muestra `MEASURED` (`FR-LOC-006`).
+- Aceptación: vectores `TRK-KF` y escenario `SCN-014` en verde; cero asignaciones dinámicas por muestra.
+- Ref: `22_TRACKING_ENGINE.md` §2; ADR-0023.
+
+#### FR-TRK-002 · MUST · E2 — Puerta de plausibilidad
+- Descripción: evaluar antes del filtro cada muestra aceptada produciendo `plausibility_flags` (`IMPLAUSIBLE_SPEED`, `IMPLAUSIBLE_ACCELERATION`, `LOW_ACCURACY`, `MOCK_REPORTED`, `FROZEN_FIX`, `NETWORK_ONLY`, `FILTER_OUTLIER`, `TIME_GAP`) y puntuación `plausibility ∈ [0, 1]`.
+- Aceptación: vectores `TRK-PLAUS` en verde.
+- Ref: `22` §2.2; ADR-0023.
+
+#### FR-TRK-003 · MUST · E2 — Anti-deriva en reposo
+- Descripción: aplicar pseudo-medición de velocidad cero (`GS_TRACK_ZUPT_SIGMA_MPS`) cuando `motion == STATIONARY` o el detector de paradas está en `STOPPED`.
+- Aceptación: prueba sintética en reposo con ruido GNSS verifica convergencia y cumplimiento de `NFR-QUAL-002`.
+- Ref: `22` §2.4.
+
+#### FR-TRK-004 · MUST · E2 — Odómetro por (sesión, miembro)
+- Descripción: acumular distancia en vivo por el método del ancla (`track_odometer_noise_factor`), puenteo opcional de huecos (`track_odometer_bridge_gaps`), reinicio al activar compartición o vía `POST /v1/sessions/{id}/members/{member_id}/odometer/reset`, y borrado síncrono junto al snapshot.
+- Aceptación: vectores `TRK-ODO` y prueba de reinicio y borrado en verde.
+- Ref: `22` §2.5.
+
+#### FR-TRK-005 · MUST · E2 — Paradas online y TrackEvent
+- Descripción: detector de paradas en streaming con memoria O(1) (`track_stop_radius_m`, `track_stop_min_duration_s`, `track_stop_exit_confirm`) que emite `TrackEvent` (`STOP_STARTED`, `STOP_ENDED`, `TRACKING_LOST`, `TRACKING_RESUMED`) por el stream a los suscriptores autorizados.
+- Aceptación: vectores `TRK-STOP` y escenario `SCN-015` en verde.
+- Ref: `22` §2.6–§2.7.
+
+#### FR-TRK-006 · MUST · E2 — Estado con puntos de control y continuidad entre instancias
+- Descripción: la unidad de estimación es `(device_id, sequence)` con caché para publicaciones multi-sesión; el estado se guarda en `{p}:trk:{device}` al desconectar y cada `GS_TRACK_CHECKPOINT_INTERVAL_S` con TTL `GS_TRACK_STATE_TTL_S`, y se actualiza con `track_cas.lua` en la ingesta HTTP.
+- Aceptación: prueba de reconexión entre instancias y concurrencia en ingesta HTTP.
+- Ref: `22` §2.1.
+
+#### FR-TRK-007 · SHOULD · E2 — Webhooks de paradas sin coordenadas
+- Descripción: emitir los webhooks `track.stop_started` y `track.stop_ended` con `session_id`, `member_id`, `occurred_at` y `duration_s`, sin incluir jamás coordenadas (`FR-WHK-005`).
+- Aceptación: escenario `SCN-015` verifica la entrega del webhook y la ausencia de coordenadas.
+- Ref: `07` §10.2; `22` §2.7.
+
+#### FR-SMP-001 · MUST · E3 — Muestreo adaptativo por estado e intención
+- Descripción: máquina de estados en `gs-client-core` (`STILL`, `ON_FOOT`, `CYCLING`, `VEHICLE`, `UNKNOWN`) combinada con `TrackingIntent` (`REALTIME_TRIP`, `REALTIME_IDLE`, `BACKGROUND_TRACKING`, `HISTORY_ONLY`) e histéresis de bajada `sampling_downgrade_confirm_s`.
+- Aceptación: vectores `SMP-DEC` en verde.
+- Ref: `22` §3.2.
+
+#### FR-SMP-002 · MUST · E3 — Publicación por cambio significativo
+- Descripción: publicar la muestra `MEASURED` cuando cambia significativamente distancia, rumbo en giro, velocidad, estado de movimiento o parada, o al alcanzar `t_max = min(publish_max_silence_s, stale_after_seconds / 2)`, respetando siempre `min_publish_interval_ms`.
+- Aceptación: vectores `PUB-SIG` en verde.
+- Ref: `22` §3.3.
+
+#### FR-SMP-003 · MUST · E3 — SamplingPolicy remota acotada a rangos
+- Descripción: `ServerHello.sampling` entrega la `SamplingPolicy` del tenant; el núcleo del cliente acota cada campo a los rangos seguros de `17_CONFIGURATION.md` antes de aplicarlo (`T-30`).
+- Aceptación: escenario `SCN-026` verifica la aplicación y el acotamiento de valores extremos.
+- Ref: `08` §6.1; `22` §3.4; `10` §4 (`T-30`).
+
+#### FR-SMP-004 · SHOULD · E3 — Despertar por región del sistema operativo
+- Descripción: al entrar en `STILL`, registrar una región de despertar (`wake_region_radius_m`) en el sistema operativo vía `RegionMonitor` y pasar el GPS a modo pasivo hasta salir de la región.
+- Aceptación: pruebas del núcleo con `RegionMonitor` simulado.
+- Ref: `22` §3.7.
+
+#### FR-SMP-005 · MUST · E3 — Predicción visual acotada
+- Descripción: `MemberView.renderPosition(now_ms)` en `gs-client-core` devuelve posición `PREDICTED` con decaimiento exponencial de velocidad (`predict_speed_decay_s`), proyección opcional sobre polilínea de ruta, radio de confianza creciente y reconciliación amortiguada (`predict_blend_ms`), sin publicar ni persistir jamás puntos predichos.
+- Aceptación: vectores `PRD` en verde.
+- Ref: `22` §3.6; `13` §6; ADR-0030.
+
+#### FR-SMP-006 · MUST · E6 — Cola buffered cifrada y backfill de historial
+- Descripción: en sesiones con historial activo, encolar muestras sin conexión simplificadas en línea (`offline_simplify_tolerance_m`) y cifradas con AES-256-GCM (`SecureStore`), subiendo al reconectar las antiguas (`> max_event_age_ms`) por `POST /v1/ingest/history`.
+- Aceptación: escenario `SCN-021` en verde.
+- Ref: `22` §3.5; `24` §2; ADR-0025.
+
+### 2.20 Núcleo compartido y bindings multilenguaje (CORE / BND)
+
+#### FR-CORE-001 · MUST · E3 — Núcleo sans-IO del cliente
+- Descripción: `gs-client-core` implementa sin I/O ni `tokio` (compilable a `wasm32`) toda la máquina de estados de conexión, reconexión, cierres, `AuthRefresh`, `ClockSync`, `SequenceAllocator`, `SessionView` y pipeline de publicación de `12` §4–§15 y `22` §3.
+- Aceptación: suite determinista con reloj simulado y compilación `wasm32-unknown-unknown` en CI.
+- Ref: `26_CORE_AND_BINDINGS.md` §1; ADR-0022.
+
+#### FR-CORE-002 · MUST · E3 — Runtime nativo del cliente
+- Descripción: `gs-client-runtime` acopla `gs-client-core` con `tokio`, WebSocket (`gs.v1.proto`/`gs.v1.json`), cliente HTTP y temporizadores nativos para Android, iOS, escritorio y backends.
+- Aceptación: pruebas de integración del runtime contra servidor real.
+- Ref: `26` §1.
+
+#### FR-CORE-003 · MUST · E3 — Cliente REST en el núcleo
+- Descripción: todas las operaciones REST del cliente se modelan de forma sans-IO en `gs-client-core` (`Output::Http` / `Input::HttpResponse`) con `CredentialManager` integrado.
+- Aceptación: pruebas unitarias sans-IO y de integración contra `gs-api`.
+- Ref: `26` §1.
+
+#### FR-BND-001 · MUST · E3 — Binding Kotlin/Android
+- Descripción: binding generado sobre `gs-ffi` con fachada idiomática Kotlin (`suspend`/`Flow`) y anfitrión Android (FusedLocation, Activity Recognition, GeofencingClient, Keystore, Foreground Service), empaquetado como AAR para las 3 ABI de Android.
+- Aceptación: compila en CI y pasa el 100 % de los vectores aplicables.
+- Ref: `26` §2–§3; ADR-0031.
+
+#### FR-BND-002 · MUST · E3 — Binding Swift/iOS
+- Descripción: binding generado sobre `gs-ffi` con fachada idiomática Swift (`async`/`AsyncSequence`) y anfitrión iOS (CoreLocation, CoreMotion, Keychain), empaquetado como XCFramework + Swift Package.
+- Aceptación: compila en macOS y pasa el 100 % de los vectores aplicables.
+- Ref: `26` §2–§3; ADR-0031.
+
+#### FR-BND-003 · MUST · E3 — SDK Flutter sobre el núcleo Rust
+- Descripción: el paquete `geostream` en `sdks/flutter` mantiene la API pública de `12_FLUTTER_SDK.md` §4 delegando protocolo, validación, muestreo y vistas en `gs-client-core`/`gs-ffi` y los puertos de plataforma en los anfitriones nativos.
+- Aceptación: `flutter test` y vectores dorados en verde; app de ejemplo operativa.
+- Ref: `12` §3–§4; `26` §3; ADR-0022, ADR-0031.
+
+#### FR-BND-004 · MUST · E9 — SDK TypeScript (Web WASM y Node)
+- Descripción: paquete TypeScript para navegador (núcleo en WASM vía `wasm-bindgen` y transporte WebSocket/fetch en TS) y paquete de backend para Node (`napi-rs`).
+- Aceptación: pasa todos los vectores y escenarios aplicables en CI.
+- Ref: `26` §3; ADR-0031.
+
+#### FR-BND-005 · SHOULD · E9 — SDK Go
+- Descripción: binding Go para backends integradores (cliente REST tipado, emisión de tokens, verificación de webhooks, consumidor de stream y herramientas locales de `gs-mobility`).
+- Aceptación: pasa la suite de conformidad de vectores y escenarios de backend en CI.
+- Ref: `26` §3; ADR-0031.
+
+#### FR-BND-006 · SHOULD · E9 — SDK Ruby
+- Descripción: binding Ruby sobre `gs-ffi` para backends integradores con las mismas capacidades de servidor que Go y Node.
+- Aceptación: pasa la suite de conformidad de vectores y escenarios de backend en CI.
+- Ref: `26` §3; ADR-0031.
+
+#### FR-BND-007 · MUST · E9 — Conformidad multilenguaje
+- Descripción: arnés de CI que ejecuta los vectores dorados de `contracts/test-vectors/` y el subconjunto de escenarios sobre cada binding habilitado, verificando además que ningún `panic` cruce `gs-ffi`.
+- Aceptación: etapa de conformidad multilenguaje 100 % verde en CI.
+- Ref: `18` §5; `26` §4; `NFR-COMPAT-003`.
+
+### 2.21 Movilidad: pools, índice vivo y herramientas (POOL / MOB)
+
+#### FR-POOL-001 · MUST · E4 — Modo POOL e invariante INV-POOL-1
+- Descripción: sesiones con `mode = POOL` creadas solo por aplicaciones con `pools:manage`, donde ningún miembro dispositivo tiene `read`, `invite` ni `manage` (`INV-POOL-1`).
+- Aceptación: pruebas de dominio, repositorio y API verifican `INV-POOL-1` y el rechazo 403/422 de capacidades prohibidas.
+- Ref: `05` §4.2; `23_MOBILITY.md` §1; ADR-0027.
+
+#### FR-POOL-002 · MUST · E4 — Disponibilidad y atributos con minimización
+- Descripción: estado `availability ∈ {AVAILABLE, BUSY, PAUSED}` modificable por el propio dispositivo (`PUT …/members/me/availability`, `sharing:write`) o la aplicación (`PATCH …/members/{id}`, `pools:manage`), y mapa `attributes` (hasta `pool_max_attributes`) escrito solo por la aplicación y visible únicamente para principales de aplicación.
+- Aceptación: pruebas de autorización y minimización en REST y stream.
+- Ref: `05` §5; `08` §6.3; `23` §1.
+
+#### FR-POOL-003 · MUST · E4 — Índice espacial vivo con borrado síncrono
+- Descripción: trait `LiveIndex` con implementación `H3LiveIndex` en memoria y `ValkeyGeoIndex` en Redis/Valkey (`pool_upsert.lua`), actualizado de forma asíncrona con coalescencia y borrado **síncronamente antes de responder** cuando el miembro deja de compartir, sale, es revocado o la sesión termina.
+- Aceptación: vectores `POOL-Q` y escenario `SCN-016` en verde.
+- Ref: `23` §2; ADR-0026, ADR-0027.
+
+#### FR-POOL-004 · MUST · E4 — Búsqueda de cercanos (`nearby`)
+- Descripción: `POST /v1/pools/{session_id}/nearby` (`pools:query`) filtra por radio, antigüedad, disponibilidad y hasta 3 atributos, y ordena por `distance` o por `eta` (refinando los `pool_eta_prefilter` más cercanos).
+- Aceptación: escenario `SCN-016` y benchmark `NFR-PERF-007` en verde.
+- Ref: `07` §9; `23` §3.
+
+#### FR-POOL-005 · SHOULD · E4 — Anillos de expansión (`rings`)
+- Descripción: `POST /v1/pools/{session_id}/rings` (`pools:query`) agrupa los candidatos disponibles en anillos crecientes (`ring_step_m` o `k`-anillos H3) respetando `max_rings` y `per_ring_limit`.
+- Aceptación: escenario `SCN-017` en verde.
+- Ref: `23` §3.
+
+#### FR-POOL-006 · SHOULD · E4 — Densidad aproximada y anónima (`density`)
+- Descripción: `GET /v1/pools/{session_id}/density` (`pools:density` o `pools:query`) devuelve hasta `pool_density_max_markers` marcadores sin IDs, ajustados al centroide de celda H3 (`pool_density_resolution`) con desplazamiento aleatorio acotado, rumbo cuantizado a 8 sectores y retraso mínimo `pool_density_delay_s`.
+- Aceptación: escenario `SCN-017` verifica ausencia total de identificadores y cuantización espacial.
+- Ref: `10` §4 (`T-25`); `23` §3.
+
+#### FR-MOB-001 · MUST · E5 — Estimación de ETA por niveles
+- Descripción: `POST /v1/tools/eta` (`tools:use`) calcula matrices de tiempo estimado de llegada prefiriendo `PROVIDER → LEARNED → ESTIMATED`, devolviendo `source` y `confidence` por celda y degradando al siguiente nivel si el proveedor falla (salvo `source_preference=provider`, que devuelve `503 PROVIDER_UNAVAILABLE`).
+- Aceptación: vectores `ETA-EST` y escenario `SCN-018` en verde.
+- Ref: `23` §4.
+
+#### FR-MOB-002 · MUST · E5 — Asignación óptima por lotes
+- Descripción: `POST /v1/tools/assignment` y librería en `gs-mobility` implementan los algoritmos Hungarian (Kuhn–Munkres, 1-a-1) y flujo de coste mínimo (capacidad > 1) con cota `max_cost` y desempate determinista por ID.
+- Aceptación: vectores `ASG`, escenario `SCN-019` y benchmark `NFR-PERF-008` en verde.
+- Ref: `23` §5.
+
+#### FR-MOB-003 · MUST · E5 — Provider Gateway BYOK
+- Descripción: crate `gs-providers` y endpoints `GET/PUT/DELETE /v1/providers/{port}` (`providers:manage`) con manifiestos declarativos, `ContentPolicy`, credenciales BYOK cifradas por tenant y adaptadores para OSRM, Valhalla y Google Routes.
+- Aceptación: pruebas de integración contra contenedores OSRM/Valhalla y verificación de aislamiento ante fallos.
+- Ref: `13` §8; `23` §4; ADR-0028.
+
+### 2.22 Dispositivos Edge y sin internet (EDGE)
+
+#### FR-EDGE-001 · MUST · E8 — Registro de tags sin EIK
+- Descripción: `POST/GET/DELETE /v1/tags…` (`tags:manage`) registra y da de baja tags BLE guardando únicamente metadatos; el servidor rechaza y nunca almacena la clave `EIK`.
+- Aceptación: pruebas de contrato y de almacenamiento verifican la ausencia de `EIK` en el servidor.
+- Ref: `25_EDGE_DEVICES.md` §2; ADR-0029.
+
+#### FR-EDGE-002 · MUST · E8 — Reportes Beacon cifrados E2E y lookup
+- Descripción: `gs-edge` (`no_std`) implementa la derivación de `EID` rotatorio en P-256 y el cifrado híbrido `ECDH P-256 + HKDF-SHA256 + AES-256-GCM`; `POST /v1/edge/reports` (`edge:report`) guarda blobs opacos con TTL `edge_report_ttl_hours` sin identidad del buscador, y `POST /v1/edge/reports:lookup` (`edge:lookup`) permite al dueño recuperarlos y descifrarlos localmente.
+- Aceptación: vectores `EDGE-EID`, `EDGE-RPT` y escenario `SCN-025` en verde.
+- Ref: `25` §2; ADR-0029; `NFR-PRIV-004`.
+
+#### FR-EDGE-003 · MUST · E8 — Relevo en el núcleo del cliente
+- Descripción: `gs-client-core` procesa `Input::BleSighting`, verifica precisión de ubicación propia (`≤ edge_finder_max_accuracy_m`), construye el reporte cifrado y controla el ciclo de trabajo del escáner (`ConfigureBleScan`).
+- Aceptación: pruebas unitarias sans-IO e integración en el cliente.
+- Ref: `25` §2; `26` §1.
+
+#### FR-EDGE-004 · MUST · E8 — Protección contra rastreo no deseado (DULT)
+- Descripción: detección en `gs-client-core` de tags desconocidos en estado separado que acompañan al usuario (`dult_min_sightings`, `dult_min_distinct_locations`, `dult_min_distance_m`, `dult_min_duration_min`), emitiendo `UnwantedTrackerAlert`.
+- Aceptación: pruebas con trazas sintéticas de seguimiento malicioso frente a coincidencias pasajeras en transporte público.
+- Ref: `10` §4 (`T-26`); `25` §3; ADR-0029.
+
+#### FR-EDGE-005 · SHOULD · E8 — Ingesta LPWAN
+- Descripción: `POST /v1/ingest/lpwan/{integration_id}` autenticado con HMAC, gestión de integraciones (`lpwan:manage`), asociación `DevEUI → device_id` y trait decodificador en `gs-edge`.
+- Aceptación: pruebas de integración de ingesta LPWAN con firma HMAC válida e inválida.
+- Ref: `25` §4.
+
+#### FR-EDGE-006 · COULD · E8 — Pasarela de rastreadores celulares
+- Descripción: listener TCP opcional para protocolos de rastreadores GPS de flota tras verificar especificación oficial y registrar ADR.
+- Aceptación: definida en el ADR del protocolo específico.
+- Ref: `25` §4.
+
+#### FR-EDGE-007 · COULD · E8 — Puente de tag a dispositivo virtual
+- Descripción: opción explícita del dueño para republicar la posición descifrada de su tag como muestra de un dispositivo virtual (`source = EXTERNAL_DEVICE`) en una sesión.
+- Aceptación: prueba de extremo a extremo de republicación autorizada.
+- Ref: `25` §2.
+
+#### FR-EDGE-008 · COULD · E8 — Firmware de referencia para tag BLE
+- Descripción: firmware `no_std` de referencia (`firmware/gs-tag`) sobre `gs-edge` con rotación de EID, estado separado y sonido a pedido.
+- Aceptación: compilación para objetivo embebido ARM Cortex-M y vectores `EDGE-EID` verdes.
+- Ref: `25` §5.
+
+### 2.23 Pistas posteriores a GA
 
 #### FR-IOT-001 · COULD · F14 — Puente MQTT
 - Descripción: ingesta desde un broker MQTT para dispositivos IoT. Requiere ADR.
 
-#### FR-NAT-001 · COULD · F15 — SDKs nativos Kotlin/Swift
-- Descripción: SDKs nativos; reevaluar un núcleo Rust compartido. Requiere ADR.
+#### FR-NAT-001 · RETIRADO · F15 — SDKs nativos Kotlin/Swift
+- Descripción: retirado y sustituido por `FR-BND-001` y `FR-BND-002` en la fase E3 sobre el núcleo Rust compartido (ADR-0022, ADR-0031).
 
-#### FR-E2E-001 · COULD · F16 — Modo cifrado de extremo a extremo
-- Descripción: el servidor distribuye coordenadas cifradas que no puede leer. Incompatible con snapshots en claro y geocercas del servidor. Requiere ADR y revisión criptográfica externa.
+#### FR-E2E-001 · COULD · F16 — Modo cifrado de extremo a extremo en sesiones
+- Descripción: el servidor distribuye coordenadas cifradas de sesión que no puede leer (los tags Beacon ya tienen E2E en E8 por `FR-EDGE-002`). Incompatible con snapshots en claro y geocercas del servidor. Requiere ADR y revisión criptográfica externa.
 
 #### FR-P2P-001 · COULD · F16 — Transporte P2P WebRTC
 - Descripción: canal P2P con señalización, STUN/TURN y fallback al servidor. Requiere ADR.
@@ -644,6 +934,45 @@ Los valores son **objetivos a medir** con el método indicado. No son SLA. Los p
 #### NFR-PERF-004 · SHOULD · F6 — Memoria por conexión
 - Descripción: ≤ 64 KiB promedio por conexión inactiva suscrita a 1 sesión.
 - Aceptación: medido con 10 000 conexiones.
+
+#### NFR-PERF-005 · MUST · E2 — Latencia del motor de trayectoria por muestra
+- Descripción: `gs-track` procesa una muestra (plausibilidad, Kalman CV, anti-deriva, odómetro y paradas) en p99 ≤ 10 µs en un núcleo del nodo de referencia y con cero asignaciones dinámicas de memoria.
+- Aceptación: benchmark `criterion` con contador de asignaciones y métrica `gs_track_update_seconds`.
+- Ref: `22_TRACKING_ENGINE.md` §2.8.
+
+#### NFR-PERF-006 · MUST · E2 — Latencia interna con el motor activo
+- Descripción: `NFR-PERF-001` (p99 ≤ 50 ms en perfil P-M) se mantiene sin degradación con `gs-track` activo en el camino de aceptación.
+- Aceptación: medido con `gs-loadgen` y escenarios E2E.
+
+#### NFR-PERF-007 · MUST · E4 — Latencia de consulta `nearby` en pool
+- Descripción: `POST /v1/pools/{id}/nearby` con 10 000 entidades activas, radio 3 km y límite 20 responde con p99 ≤ 2 ms en memoria (`H3LiveIndex`) y p99 ≤ 10 ms con Redis/Valkey (`ValkeyGeoIndex`).
+- Aceptación: benchmark `criterion` + `gs-loadgen`.
+- Ref: `23_MOBILITY.md` §2–§3.
+
+#### NFR-PERF-008 · MUST · E5 — Latencia de asignación por lotes
+- Descripción: el algoritmo Hungarian en `gs-mobility` resuelve una matriz 200 × 200 en ≤ 50 ms en un núcleo de referencia.
+- Aceptación: benchmark `criterion`.
+- Ref: `23` §5.
+
+#### NFR-PERF-009 · MUST · E6 — Pérdida acotada del escritor de historial
+- Descripción: la tasa de muestras descartadas por cola llena en el escritor asíncrono de historial es ≤ 0,1 % sostenido bajo el perfil P-M.
+- Aceptación: medido con `gs-loadgen` y métrica `gs_history_dropped_total`.
+- Ref: `24_HISTORY_ANALYTICS.md` §2.
+
+#### NFR-QUAL-001 · MUST · E2 — Calidad de estimación del filtro de Kalman
+- Descripción: el error RMS de la posición estimada (`FILTERED`) es ≤ 0,7 × el error RMS de la medición cruda en trazas sintéticas con ruido gaussiano y urbano, sin divergencia numérica bajo pruebas de propiedades.
+- Aceptación: suite `gs-testkit::synthetic` y `proptest` en `gs-track`.
+- Ref: `22` §2.3.
+
+#### NFR-QUAL-002 · MUST · E2 — Precisión y estabilidad del odómetro
+- Descripción: error acumulado del odómetro ≤ 2 % en trayectorias sintéticas en movimiento y deriva fantasma ≤ 5 m/h en reposo con ruido GNSS.
+- Aceptación: suite `gs-testkit::synthetic` en `gs-track`.
+- Ref: `22` §2.5.
+
+#### NFR-QUAL-003 · MUST · E2 — Precisión y recobrado de detección de paradas
+- Descripción: precisión (*precision*) y recobrado (*recall*) ≥ 0,95 en la detección de paradas sobre trazas sintéticas etiquetadas.
+- Aceptación: suite `gs-testkit::synthetic` en `gs-track`.
+- Ref: `22` §2.6.
 
 #### NFR-SCALE-001 · MUST · F6 — Escalado horizontal
 - Descripción: perfil P-L en 3 nodos de stream con Redis/Valkey sin cambiar el protocolo.
@@ -689,6 +1018,16 @@ Los valores son **objetivos a medir** con el método indicado. No son SLA. Los p
 - Descripción: el snapshot de un miembro se borra antes de responder 200 a la detención de compartición, revocación, salida o cierre.
 - Aceptación: lectura del almacén efímero inmediatamente después de la respuesta.
 
+#### NFR-PRIV-003 · MUST · E6 — k-anonimato en todo agregado expuesto
+- Descripción: ningún agregado analítico (mapa de calor, matriz OD, perfil de velocidad o lugar aprendido) expone una celda, par o lugar con menos de `analytics_k_anonymity` subjects distintos que hayan otorgado consentimiento `ANALYTICS`.
+- Aceptación: escenario `SCN-023` y pruebas de unidad/integración de `gs-analytics`.
+- Ref: `10` §4 (`T-23`); `24` §3–§4; ADR-0024.
+
+#### NFR-PRIV-004 · MUST · E8 — Reportes Beacon no vinculables al buscador
+- Descripción: el servidor no almacena el `device_id`, `subject_id` ni la IP del dispositivo buscador junto a los reportes de `POST /v1/edge/reports`, y agrupa las marcas temporales en cubetas horarias.
+- Aceptación: escenario `SCN-025` e inspección de almacenamiento de reportes Beacon.
+- Ref: `10` §4 (`T-28`); `25` §2; ADR-0029.
+
 #### NFR-RES-001 · MUST · F9 — Independencia de proveedores
 - Descripción: fallos de mapas, geocodificación o rutas no afectan al stream ni a la compartición.
 - Aceptación: prueba del SDK con adaptador de mapa que falla.
@@ -709,6 +1048,21 @@ Los valores son **objetivos a medir** con el método indicado. No son SLA. Los p
 - Descripción: medir el consumo por perfil de muestreo en cada plataforma y publicarlo. No hay objetivo contractual.
 - Aceptación: informe por release.
 
+#### NFR-MOB-003 · SHOULD · E3 — Ahorro del muestreo adaptativo
+- Descripción: reducción del consumo de batería del perfil `adaptive` frente a `balanced` fijo medida en una jornada de reparto simulada con paradas (objetivo inicial a medir ≥ 25 %).
+- Aceptación: informe en `docs/device-tests/` sobre la matriz de dispositivos `NFR-MOB-001`.
+- Ref: `22` §3.2.
+
+#### NFR-MOB-004 · MUST · E3 — Tamaño del núcleo nativo móvil
+- Descripción: el binario compilado de `gs-ffi` + `gs-client-runtime` es ≤ 4 MB por ABI (stripped) en Android e iOS.
+- Aceptación: verificación automatizada de tamaño de artefacto en CI desde el spike `T-E3-01`.
+- Ref: `26` §2.
+
+#### NFR-MOB-005 · MUST · E3 — Tiempo de reacción a cambios de movimiento
+- Descripción: ante un cambio de actividad o movimiento detectado, el núcleo emite el nuevo `ConfigureLocation(LocationRequest)` en ≤ 1 intervalo del nuevo estado.
+- Aceptación: pruebas deterministas del núcleo con fuente de ubicación simulada.
+- Ref: `22` §3.2.
+
 #### NFR-COMPAT-001 · MUST · F5 — Matriz de compatibilidad
 - Descripción: publicar versiones soportadas: Rust (toolchain fijada), Flutter/Dart mínimos, Android `minSdk`/`targetSdk`, iOS mínimo, PostgreSQL y Redis/Valkey.
 - Aceptación: tabla en `README.md` verificada en CI.
@@ -716,6 +1070,11 @@ Los valores son **objetivos a medir** con el método indicado. No son SLA. Los p
 #### NFR-COMPAT-002 · MUST · F5 — Compatibilidad de contratos
 - Descripción: a partir de M2, `buf breaking` y `oasdiff` no reportan cambios incompatibles dentro de v1.
 - Aceptación: checks obligatorios en CI.
+
+#### NFR-COMPAT-003 · MUST · E9 — Paridad de vectores entre lenguajes
+- Descripción: cada binding de lenguaje (Kotlin, Swift, Dart, TypeScript Web/Node, Go y Ruby) ejecuta y pasa el 100 % de los vectores dorados aplicables de `contracts/test-vectors/`.
+- Aceptación: suite de conformidad por lenguaje en CI (`FR-BND-007`).
+- Ref: `18` §5; `26` §4.
 
 #### NFR-MAINT-001 · MUST · F0 — Versionado
 - Descripción: SemVer para servidor, contratos y SDK; `CHANGELOG.md`; deprecaciones anunciadas con ≥ 6 meses.
