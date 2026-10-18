@@ -47,6 +47,80 @@ impl SamplingThresholds {
     }
 }
 
+/// Motion class as used by the adaptive sampler (`22` §3.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionClass {
+    Stationary,
+    OnFoot,
+    Cycling,
+    Vehicle,
+    Unknown,
+}
+
+impl MotionClass {
+    /// Only a genuinely moving class can select a speed/accuracy zone rule.
+    #[must_use]
+    pub const fn is_moving(self) -> bool {
+        matches!(self, Self::OnFoot | Self::Cycling | Self::Vehicle)
+    }
+}
+
+/// A zone rule from `SamplingPolicy.sampling_rules`.
+#[derive(Debug, Clone, Copy)]
+pub struct SamplingRule {
+    pub zone: &'static str,
+    pub max_speed_mps: f64,
+    pub max_accuracy_m: f64,
+    pub interval_ms: u32,
+}
+
+impl SamplingRule {
+    /// A rule with both maxima at zero is the *open* catch-all: it matches
+    /// anything and guarantees publication never stops (`SMP-INT-004/005`).
+    #[must_use]
+    pub fn is_open(self) -> bool {
+        self.max_speed_mps <= 0.0 && self.max_accuracy_m <= 0.0
+    }
+}
+
+/// Selects the sampling interval (ms) for a fix, per `22` §3.2 and the
+/// `sampling_rules` of the policy.
+///
+/// Rules are evaluated in order and the **first match wins**. `motion` is
+/// `None` when the platform did not report it (the class is then inferred from
+/// speed) and `Some(Unknown)` when it reported "unknown" or "stationary" —
+/// both mean "not moving", which selects the open rule.
+///
+/// The function never returns "stop": if no rule matches and there is no open
+/// rule, the last rule's interval is used, because a sampler that stops
+/// publishing is worse than one that publishes too often.
+#[must_use]
+pub fn select_interval_ms(
+    rules: &[SamplingRule],
+    speed_mps: f64,
+    accuracy_m: f64,
+    motion: Option<MotionClass>,
+) -> u32 {
+    if rules.is_empty() {
+        return 0;
+    }
+    let moving = match motion {
+        // Not reported: infer from speed.
+        None => speed_mps > 0.0,
+        // Reported and not a moving class: the open rule applies.
+        Some(m) => m.is_moving(),
+    };
+    for rule in rules {
+        if rule.is_open() {
+            return rule.interval_ms;
+        }
+        if moving && speed_mps <= rule.max_speed_mps && accuracy_m <= rule.max_accuracy_m {
+            return rule.interval_ms;
+        }
+    }
+    rules[rules.len() - 1].interval_ms
+}
+
 /// A compact summary of the fix the sampler needs. The caller (`ClientCore`)
 /// builds it from a `PlatformFix`; the sampler does not read platform fields
 /// directly, which keeps this function testable in isolation.
@@ -207,5 +281,79 @@ impl SamplingState {
             accuracy_m: fix.accuracy_m,
         });
         self.samples_published += 1;
+    }
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use super::*;
+
+    /// Rules from `contracts/test-vectors/sampling_policy.json`.
+    const RULES: &[SamplingRule] = &[
+        SamplingRule {
+            zone: "URBAN",
+            max_speed_mps: 8.0,
+            max_accuracy_m: 25.0,
+            interval_ms: 1000,
+        },
+        SamplingRule {
+            zone: "HIGHWAY",
+            max_speed_mps: 40.0,
+            max_accuracy_m: 50.0,
+            interval_ms: 3000,
+        },
+        SamplingRule {
+            zone: "RURAL",
+            max_speed_mps: 0.0,
+            max_accuracy_m: 0.0,
+            interval_ms: 5000,
+        },
+    ];
+
+    #[test]
+    fn smp_int_001_urban_by_speed() {
+        assert_eq!(select_interval_ms(RULES, 4.0, 8.0, None), 1000);
+    }
+
+    #[test]
+    fn smp_int_002_highway_not_urban() {
+        assert_eq!(select_interval_ms(RULES, 25.0, 8.0, None), 3000);
+    }
+
+    #[test]
+    fn smp_int_003_poor_accuracy_falls_to_open() {
+        assert_eq!(select_interval_ms(RULES, 4.0, 120.0, None), 5000);
+    }
+
+    #[test]
+    fn smp_int_004_stationary_uses_open_rule() {
+        assert_eq!(
+            select_interval_ms(RULES, 0.0, 5.0, Some(MotionClass::Stationary)),
+            5000
+        );
+    }
+
+    #[test]
+    fn smp_int_005_unknown_motion_never_stops_publishing() {
+        let interval = select_interval_ms(RULES, 12.0, 8.0, Some(MotionClass::Unknown));
+        assert_eq!(interval, 5000);
+        assert!(interval > 0, "publishing must never stop");
+    }
+
+    #[test]
+    fn moving_class_enables_zone_rules() {
+        assert_eq!(
+            select_interval_ms(RULES, 12.0, 8.0, Some(MotionClass::Vehicle)),
+            3000
+        );
+        assert_eq!(
+            select_interval_ms(RULES, 1.0, 8.0, Some(MotionClass::OnFoot)),
+            1000
+        );
+    }
+
+    #[test]
+    fn empty_rules_are_zero_not_a_panic() {
+        assert_eq!(select_interval_ms(&[], 1.0, 1.0, None), 0);
     }
 }

@@ -40,7 +40,8 @@ pub use crate::connection::Connection;
 pub use crate::heading::*;
 pub use crate::ports::*;
 pub use crate::sampler::{
-    FixSample, LastPublished, PublishReason, SamplingState, SamplingThresholds,
+    FixSample, LastPublished, MotionClass, PublishReason, SamplingRule, SamplingState,
+    SamplingThresholds, select_interval_ms,
 };
 pub use crate::sequence::*;
 

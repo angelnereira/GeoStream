@@ -30,7 +30,11 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 
 ## Bloqueos y solicitudes de decisión abiertas
 
-Ninguno abierto. Las cuatro decisiones que bloqueaban F4 están resueltas.
+| ID | Tarea | Estado | Qué bloquea |
+|---|---|---|---|
+| DR-20261017-01 | T-E3-02 | **pendiente** | Contradicción `docs/22` §3.3 ↔ `contracts/test-vectors/sampling_policy.json`: el vector `SMP-PUB-002` publica por debajo del umbral que fija el documento y `SMP-PUB-003` usa una razón `accuracy` que el documento no define. La selección de intervalo (`SMP-INT`) sí está implementada. |
+
+Las cuatro decisiones que bloqueaban F4 están resueltas.
 
 | ID | Tarea | Estado | Decisión | Fecha |
 |---|---|---|---|---|

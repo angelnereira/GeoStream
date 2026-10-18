@@ -12,6 +12,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 - `gs-ffi`: superficie C mínima (T-E1-04) con handles opacos, `catch_unwind` alrededor de cada llamada y `// SAFETY:` en cada bloque inseguro (único crate con `unsafe`). 4 pruebas.
 - Consistencia: `cargo run -p geostream-tools -- all` sigue en 10/10 con el verificador de dependencias de crate actualizado para el enlace documentado entre `gs-ffi` y los núcleos.
 ### Added
+- `gs-client-core`: muestreo adaptativo por zonas (`select_interval_ms`, `SamplingRule`, `MotionClass`) que reproduce los vectores `SMP-INT-001..005`: la primera regla que casa gana, `motion` ausente se infiere de la velocidad y `motion` presente no-móvil (STATIONARY/UNKNOWN) usa la regla abierta, de modo que la publicación nunca se detiene.
+- `docs/decisions/pending/DR-20261017-01.md`: contradicción entre `docs/22` §3.3 (cinco condiciones, umbral con `max(min_distance, factor·accuracy)`) y `contracts/test-vectors/sampling_policy.json` (`SMP-PUB-002` publica con un desplazamiento por debajo de ese umbral; `SMP-PUB-003` usa una razón `accuracy` que el documento no define). Requiere decisión del propietario antes de implementar la publicación por cambio significativo completa.
 - `gs-client-core`: núcleo sans-IO del cliente (T-E1-02). 11 pruebas, compila a `wasm32-unknown-unknown` (verificado).
   - `Input`/`Output` con la forma de `26` §1.1, pensada para ampliar, no remodelar.
   - Máquina de conexión con la tabla de códigos de cierre de `08` §8 (14 códigos → `Immediate`, `After(ms)`, `RateLimited`, `Backoff`, `RefreshToken`, `Stop`) y backoff full-jitter (500 ms / 30 s, reset a los 60 s). Pruebas por código.
