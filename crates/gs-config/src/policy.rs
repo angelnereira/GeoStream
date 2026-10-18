@@ -38,6 +38,7 @@ pub const POLICY_KEYS: &[&str] = &[
     "edge_allowed",
     "analytics_allowed",
     "analytics_k_anonymity",
+    "history_backfill_max_age_s",
 ];
 
 /// Tenant policy stored in `tenants.policy` (JSONB) with normative defaults and ranges (docs/17 §4).
@@ -78,6 +79,8 @@ pub struct TenantPolicy {
     pub analytics_allowed: bool,
     /// The `k` applied to every aggregate (`24` §6).
     pub analytics_k_anonymity: u32,
+    /// Oldest retroactive sample accepted by the history backfill (`24` §2).
+    pub history_backfill_max_age_s: u64,
 }
 
 impl Default for TenantPolicy {
@@ -113,6 +116,7 @@ impl Default for TenantPolicy {
             edge_allowed: false,
             analytics_allowed: false,
             analytics_k_anonymity: 5,
+            history_backfill_max_age_s: 604_800,
         }
     }
 }
@@ -671,6 +675,14 @@ impl TenantPolicy {
                     message: "expected boolean".to_string(),
                 })?;
             }
+        }
+
+        if let Some(v) = obj.get("history_backfill_max_age_s") {
+            policy.history_backfill_max_age_s =
+                v.as_u64().ok_or_else(|| PolicyError::InvalidType {
+                    key: "history_backfill_max_age_s".to_string(),
+                    message: "expected non-negative integer".to_string(),
+                })?;
         }
 
         if let Some(v) = obj.get("analytics_k_anonymity") {

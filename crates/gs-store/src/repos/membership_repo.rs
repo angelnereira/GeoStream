@@ -1503,3 +1503,28 @@ impl MembershipRepository {
         })
     }
 }
+
+impl MembershipRepository {
+    /// The consent purposes granted to a member (`docs/05` §7.2, INV-SHR-5).
+    ///
+    /// Only the subject can grant them, so this is a read of what the subject
+    /// already decided — never something the backend can set.
+    pub async fn consent_purposes(
+        pool: &Pool,
+        tenant_id: TenantId,
+        session_id: SessionId,
+        member_id: gs_domain::ids::MemberId,
+    ) -> Result<Vec<String>, StoreError> {
+        let purposes: Option<Vec<String>> = sqlx::query_scalar(
+            "SELECT consent_purposes FROM memberships \
+             WHERE id = $1 AND session_id = $2 AND tenant_id = $3;",
+        )
+        .bind(member_id.into_uuid())
+        .bind(session_id.into_uuid())
+        .bind(tenant_id.into_uuid())
+        .fetch_optional(pool)
+        .await
+        .map_err(StoreError::Database)?;
+        Ok(purposes.unwrap_or_default())
+    }
+}

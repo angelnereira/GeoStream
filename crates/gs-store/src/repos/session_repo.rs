@@ -507,3 +507,27 @@ fn map_closed_reason(value: &str) -> Result<ClosedReason, StoreError> {
         ))),
     }
 }
+
+impl SessionRepository {
+    /// The `history_mode` of a session (`docs/24` §1): `OFF`, `TRACE` or
+    /// `TRACE_AND_ANALYTICS`. `None` when the session does not exist.
+    ///
+    /// Read directly instead of widening the `Session` entity: the E-track
+    /// column only concerns the history gate, and adding it to the entity would
+    /// touch every construction site for no benefit.
+    pub async fn history_mode(
+        pool: &Pool,
+        tenant_id: TenantId,
+        session_id: SessionId,
+    ) -> Result<Option<String>, StoreError> {
+        let mode: Option<String> = sqlx::query_scalar(
+            "SELECT history_mode FROM sessions WHERE id = $1 AND tenant_id = $2;",
+        )
+        .bind(session_id.into_uuid())
+        .bind(tenant_id.into_uuid())
+        .fetch_optional(pool)
+        .await
+        .map_err(StoreError::Database)?;
+        Ok(mode)
+    }
+}

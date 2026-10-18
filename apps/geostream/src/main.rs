@@ -367,6 +367,9 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                     sessions: session_state.clone(),
                 }))
                 .merge(gs_api::analytics_router(gs_api::AnalyticsState {
+                    sessions: session_state.clone(),
+                }))
+                .merge(gs_api::history_router(gs_api::HistoryState {
                     sessions: session_state,
                 }));
         }
