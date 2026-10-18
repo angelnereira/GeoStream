@@ -42,6 +42,7 @@ ed25519-dalek = "3.0.0"
 figment = { version = "0.10.19", features = ["toml", "env"] }
 futures = "0.3.34"
 geo = "0.33.1"
+h3o = "0.11.0"
 getrandom = "0.4.3"
 hmac = "0.13.0"
 http = "1.5.0"

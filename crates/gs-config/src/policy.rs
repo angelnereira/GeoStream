@@ -36,6 +36,8 @@ pub const POLICY_KEYS: &[&str] = &[
     "tools_allowed",
     "pools_allowed",
     "edge_allowed",
+    "analytics_allowed",
+    "analytics_k_anonymity",
 ];
 
 /// Tenant policy stored in `tenants.policy` (JSONB) with normative defaults and ranges (docs/17 §4).
@@ -72,6 +74,10 @@ pub struct TenantPolicy {
     pub pools_allowed: bool,
     /// Tags, beacon reports and LPWAN (`25`). Off by default.
     pub edge_allowed: bool,
+    /// k-anonymous aggregates (`24` §6). Requires `history_allowed`.
+    pub analytics_allowed: bool,
+    /// The `k` applied to every aggregate (`24` §6).
+    pub analytics_k_anonymity: u32,
 }
 
 impl Default for TenantPolicy {
@@ -105,6 +111,8 @@ impl Default for TenantPolicy {
             tools_allowed: false,
             pools_allowed: false,
             edge_allowed: false,
+            analytics_allowed: false,
+            analytics_k_anonymity: 5,
         }
     }
 }
@@ -385,6 +393,23 @@ impl TenantPolicy {
             });
         }
 
+        if !(2..=100).contains(&self.analytics_k_anonymity) {
+            return Err(PolicyError::OutOfRange {
+                key: "analytics_k_anonymity".to_string(),
+                message: format!("value {} outside range 2..=100", self.analytics_k_anonymity),
+            });
+        }
+
+        // `analytics_allowed = true` requires `history_allowed = true`: there are
+        // no aggregates without history to aggregate (`17` §4, cross-validation).
+        if self.analytics_allowed && !self.history_allowed {
+            return Err(PolicyError::CrossValidation {
+                key1: "analytics_allowed".to_string(),
+                key2: "history_allowed".to_string(),
+                message: "analytics_allowed = true requires history_allowed = true".to_string(),
+            });
+        }
+
         Ok(())
     }
 
@@ -638,6 +663,7 @@ impl TenantPolicy {
             ("tools_allowed", &mut policy.tools_allowed),
             ("pools_allowed", &mut policy.pools_allowed),
             ("edge_allowed", &mut policy.edge_allowed),
+            ("analytics_allowed", &mut policy.analytics_allowed),
         ] {
             if let Some(v) = obj.get(key) {
                 *slot = v.as_bool().ok_or_else(|| PolicyError::InvalidType {
@@ -645,6 +671,16 @@ impl TenantPolicy {
                     message: "expected boolean".to_string(),
                 })?;
             }
+        }
+
+        if let Some(v) = obj.get("analytics_k_anonymity") {
+            policy.analytics_k_anonymity = v
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| PolicyError::InvalidType {
+                    key: "analytics_k_anonymity".to_string(),
+                    message: "expected positive 32-bit integer".to_string(),
+                })?;
         }
 
         // Validate complete policy ranges and cross-validations

@@ -9,3 +9,7 @@ publish.workspace = true
 [dependencies]
 geo.workspace = true
 rstar.workspace = true
+h3o = { workspace = true, optional = true }
+
+[features]
+h3 = ["dep:h3o"]

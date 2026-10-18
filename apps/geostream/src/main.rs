@@ -364,6 +364,9 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                     limits: gs_api::PoolsLimits::default(),
                 }))
                 .merge(gs_api::ingest_router(gs_api::IngestState {
+                    sessions: session_state.clone(),
+                }))
+                .merge(gs_api::analytics_router(gs_api::AnalyticsState {
                     sessions: session_state,
                 }));
         }

@@ -8,7 +8,7 @@ publish.workspace = true
 
 [dependencies]
 gs-service.workspace = true
-gs-geo.workspace = true
+gs-geo = { workspace = true, features = ["h3"] }
 gs-mobility.workspace = true
 gs-pools.workspace = true
 gs-track.workspace = true

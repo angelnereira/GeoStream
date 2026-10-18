@@ -6,6 +6,7 @@
 //! PostgreSQL and the `/v1` operations arrive with the service layer of F3.
 #![forbid(unsafe_code)]
 
+pub mod analytics;
 pub mod ingest;
 pub mod invitations;
 pub mod members;
@@ -29,6 +30,7 @@ pub use gs_service;
 pub use gs_service::admin;
 pub use gs_service::migrate;
 
+pub use analytics::{AnalyticsState, analytics_router};
 pub use ingest::{IngestState, ingest_router};
 pub use invitations::invitations_routes;
 pub use members::members_router;

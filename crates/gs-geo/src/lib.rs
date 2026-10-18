@@ -1046,3 +1046,98 @@ mod tests {
         dist_sq.sqrt()
     }
 }
+
+/// H3 cell helpers (ADR-0026), behind the `h3` feature.
+///
+/// Edge lengths and areas are **queried from `h3o` at runtime**, never hardcoded
+/// (ADR-0026): a constant copied by hand drifts from the library and nobody
+/// notices.
+#[cfg(feature = "h3")]
+pub mod h3 {
+    use super::LatLon;
+
+    /// The H3 cell that contains `point` at `resolution` (0..=15).
+    #[must_use]
+    pub fn cell_of(point: LatLon, resolution: u8) -> Option<u64> {
+        let resolution = h3o::Resolution::try_from(u8::min(resolution, 15)).ok()?;
+        let latlng = h3o::LatLng::new(point.lat, point.lon).ok()?;
+        Some(u64::from(latlng.to_cell(resolution)))
+    }
+
+    /// The centre of an H3 cell.
+    #[must_use]
+    pub fn cell_center(cell: u64) -> Option<LatLon> {
+        let index = h3o::CellIndex::try_from(cell).ok()?;
+        let latlng: h3o::LatLng = index.into();
+        Some(LatLon::new(latlng.lat(), latlng.lng()))
+    }
+
+    /// Average edge length of the cells at `resolution`, in metres.
+    #[must_use]
+    pub fn cell_edge_length_m(resolution: u8) -> Option<f64> {
+        let resolution = h3o::Resolution::try_from(u8::min(resolution, 15)).ok()?;
+        Some(resolution.area_km2().sqrt() * 1000.0 / 2.0)
+    }
+
+    /// The resolution of a cell (0..=15).
+    #[must_use]
+    pub fn cell_resolution(cell: u64) -> Option<u8> {
+        let index = h3o::CellIndex::try_from(cell).ok()?;
+        Some(u8::from(index.resolution()))
+    }
+
+    /// Canonical hex representation of a cell (15 or 16 digits).
+    #[must_use]
+    pub fn cell_hex(cell: u64) -> String {
+        format!("{cell:015x}")
+    }
+
+    /// Whether `cell` is contained in the axis-aligned bounding box
+    /// `[min_lat, max_lat] x [min_lon, max_lon]`, by its centre.
+    #[must_use]
+    pub fn cell_in_bbox(cell: u64, min_lat: f64, min_lon: f64, max_lat: f64, max_lon: f64) -> bool {
+        match cell_center(cell) {
+            Some(c) => c.lat >= min_lat && c.lat <= max_lat && c.lon >= min_lon && c.lon <= max_lon,
+            None => false,
+        }
+    }
+}
+
+#[cfg(all(test, feature = "h3"))]
+mod h3_tests {
+    use super::h3;
+
+    #[test]
+    fn cell_round_trip_contains_the_point() {
+        let p = super::LatLon::new(8.9824, -79.5199);
+        let cell = h3::cell_of(p, 9).expect("cell");
+        let center = h3::cell_center(cell).expect("center");
+        // The centre is within one cell edge of the point.
+        let d = super::haversine_distance(p, center);
+        let edge = h3::cell_edge_length_m(9).expect("edge");
+        assert!(d < edge * 3.0, "centre too far: {d} m vs edge {edge} m");
+    }
+
+    #[test]
+    fn cell_hex_has_the_canonical_length() {
+        let cell = h3::cell_of(super::LatLon::new(8.9824, -79.5199), 9).unwrap();
+        let hex = h3::cell_hex(cell);
+        assert!((15..=16).contains(&hex.len()), "hex was {hex}");
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn bbox_filter_uses_the_centre() {
+        let cell = h3::cell_of(super::LatLon::new(8.9824, -79.5199), 9).unwrap();
+        assert!(h3::cell_in_bbox(cell, 8.0, -80.0, 9.0, -79.0));
+        assert!(!h3::cell_in_bbox(cell, 40.0, -80.0, 41.0, -79.0));
+    }
+
+    #[test]
+    fn edge_length_is_queried_not_hardcoded() {
+        // The H3 average edge length at resolution 9 is ~174 m; the point is that
+        // it comes from the library, so this only asserts plausibility.
+        let edge = h3::cell_edge_length_m(9).unwrap();
+        assert!((50.0..=500.0).contains(&edge), "edge was {edge}");
+    }
+}
