@@ -404,7 +404,13 @@ impl TrackStateMachine {
         let (pe, pn, ve, vn) = k.state();
         // enu -> lat/lon using frame anchor
         let pos = frame.from_enu(pe, pn);
-        let speed = Some((ve * ve + vn * vn).sqrt());
+        // After a reset the filter has no velocity history: report `None` rather
+        // than a fabricated 0 (TRK-RESET-001).
+        let speed = if do_reset {
+            None
+        } else {
+            Some((ve * ve + vn * vn).sqrt())
+        };
         let heading = if ve.abs() + vn.abs() > 1e-9 {
             Some(ve.atan2(vn).to_degrees().rem_euclid(360.0))
         } else {
