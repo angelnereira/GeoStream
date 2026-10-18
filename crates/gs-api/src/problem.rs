@@ -152,6 +152,9 @@ pub const fn title_for(code: ErrorCode) -> &'static str {
         ErrorCode::TooManySubscriptions => "Too many subscriptions",
         ErrorCode::TemporarilyUnavailable => "Temporarily unavailable",
         ErrorCode::Internal => "Internal error",
+        ErrorCode::FeatureDisabled => "Feature disabled",
+        ErrorCode::ConsentRequired => "Consent required",
+        ErrorCode::ProviderUnavailable => "Provider unavailable",
     }
 }
 

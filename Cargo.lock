@@ -1620,6 +1620,8 @@ name = "gs-api"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "gs-geo",
+ "gs-mobility",
  "gs-service",
  "http",
  "jsonschema",

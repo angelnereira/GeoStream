@@ -33,6 +33,9 @@ pub const POLICY_KEYS: &[&str] = &[
     "geofence_exit_buffer_m",
     "geofence_max_accuracy_m",
     "history_allowed",
+    "tools_allowed",
+    "pools_allowed",
+    "edge_allowed",
 ];
 
 /// Tenant policy stored in `tenants.policy` (JSONB) with normative defaults and ranges (docs/17 §4).
@@ -63,6 +66,12 @@ pub struct TenantPolicy {
     pub geofence_exit_buffer_m: f64,
     pub geofence_max_accuracy_m: f64,
     pub history_allowed: bool,
+    /// `POST /v1/tools/*` (`23` §4–§7). Off by default (`403 FEATURE_DISABLED`).
+    pub tools_allowed: bool,
+    /// `POOL` sessions and `nearby`/`rings`/`density` (`23`). Off by default.
+    pub pools_allowed: bool,
+    /// Tags, beacon reports and LPWAN (`25`). Off by default.
+    pub edge_allowed: bool,
 }
 
 impl Default for TenantPolicy {
@@ -93,6 +102,9 @@ impl Default for TenantPolicy {
             geofence_exit_buffer_m: 20.0,
             geofence_max_accuracy_m: 100.0,
             history_allowed: false,
+            tools_allowed: false,
+            pools_allowed: false,
+            edge_allowed: false,
         }
     }
 }
@@ -620,6 +632,19 @@ impl TenantPolicy {
                 key: "history_allowed".to_string(),
                 message: "expected boolean".to_string(),
             })?;
+        }
+
+        for (key, slot) in [
+            ("tools_allowed", &mut policy.tools_allowed),
+            ("pools_allowed", &mut policy.pools_allowed),
+            ("edge_allowed", &mut policy.edge_allowed),
+        ] {
+            if let Some(v) = obj.get(key) {
+                *slot = v.as_bool().ok_or_else(|| PolicyError::InvalidType {
+                    key: key.to_string(),
+                    message: "expected boolean".to_string(),
+                })?;
+            }
         }
 
         // Validate complete policy ranges and cross-validations

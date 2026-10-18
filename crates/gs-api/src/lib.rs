@@ -18,6 +18,7 @@ pub mod stream;
 pub mod stream_tickets;
 pub mod subjects;
 pub mod tokens;
+pub mod tools;
 
 // Storage access stays behind `gs-service` (docs/04 §4.1); these re-exports exist so the
 // binary can reach the repositories through the same facade it already used before the
@@ -59,3 +60,7 @@ pub use stream_tickets::{
 };
 pub use subjects::subjects_routes;
 pub use tokens::{SigningKeyRef, TokenState, mint_token_handler, v1_router};
+pub use tools::{
+    AssignmentRequest, AssignmentResponse, EtaRequest, EtaResponse, ToolsLimits, ToolsState,
+    tools_router,
+};

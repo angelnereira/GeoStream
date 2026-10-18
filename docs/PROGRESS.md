@@ -103,6 +103,13 @@ Formato de cada entrada (más reciente arriba):
 - `tools/src/crate_deps`: se declara que `gs-ffi` depende directamente de `gs-client-core` además del runtime, porque la FFI llama al núcleo sin pasar por I/O.
 - Siguiente: T-E1-05 ya cubierto en el workflow de CI (musl + wasm32), T-E1-06 cubierto por `crates/gs-client-core/tests/properties.rs`.
 
+### 2026-10-17 — REST de la pista E: herramientas de movilidad (E5)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: parcial (endpoints de herramientas).
+- Evidencia: `POST /v1/tools/eta` y `POST /v1/tools/assignments` montados en `serve` (rol `api`); verificados en vivo contra el binario y la base de test: `401 UNAUTHENTICATED` sin credencial y con credencial malformada, con Problem Details y `request_id`. 31 pruebas de `gs-api`.
+- Decisiones: se añaden al `ErrorCode` de Rust los tres códigos de la pista E que faltaban (`FEATURE_DISABLED`, `CONSENT_REQUIRED`, `PROVIDER_UNAVAILABLE`) y a la política del tenant `tools_allowed`/`pools_allowed`/`edge_allowed`, todos por defecto `false`.
+- Pendiente: `min_cost_flow` con capacidad usa una asignación voraz con capacidad (el solver MCF es T-E5-02 dedicado); prueba de integración con API key real y política habilitada.
+
 ### 2026-10-17 — Migraciones de la pista E (E2/E6/E8)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada (esquema).

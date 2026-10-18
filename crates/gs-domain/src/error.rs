@@ -40,6 +40,12 @@ pub enum ErrorCode {
     TooManySubscriptions,
     TemporarilyUnavailable,
     Internal,
+    /// The capability is off in the tenant policy (`403 FEATURE_DISABLED`).
+    FeatureDisabled,
+    /// The subject has not granted the required consent purpose (`403 CONSENT_REQUIRED`).
+    ConsentRequired,
+    /// The explicit provider is down: never silently degrade (`503 PROVIDER_UNAVAILABLE`).
+    ProviderUnavailable,
 }
 
 impl ErrorCode {
@@ -71,6 +77,9 @@ impl ErrorCode {
             Self::TooManySubscriptions => "TOO_MANY_SUBSCRIPTIONS",
             Self::TemporarilyUnavailable => "TEMPORARILY_UNAVAILABLE",
             Self::Internal => "INTERNAL",
+            Self::FeatureDisabled => "FEATURE_DISABLED",
+            Self::ConsentRequired => "CONSENT_REQUIRED",
+            Self::ProviderUnavailable => "PROVIDER_UNAVAILABLE",
         }
     }
 
@@ -102,6 +111,9 @@ impl ErrorCode {
             Self::TooManySubscriptions => 23,
             Self::TemporarilyUnavailable => 24,
             Self::Internal => 25,
+            Self::FeatureDisabled => 26,
+            Self::ConsentRequired => 27,
+            Self::ProviderUnavailable => 28,
         }
     }
 
@@ -133,6 +145,9 @@ impl ErrorCode {
             23 => Some(Self::TooManySubscriptions),
             24 => Some(Self::TemporarilyUnavailable),
             25 => Some(Self::Internal),
+            26 => Some(Self::FeatureDisabled),
+            27 => Some(Self::ConsentRequired),
+            28 => Some(Self::ProviderUnavailable),
             _ => None,
         }
     }
@@ -160,8 +175,9 @@ impl ErrorCode {
             Self::RateLimited => Some(429),
             Self::ProtocolVersionUnsupported => Some(400),
             Self::ProtocolError | Self::TooManySubscriptions => None,
-            Self::TemporarilyUnavailable => Some(503),
+            Self::TemporarilyUnavailable | Self::ProviderUnavailable => Some(503),
             Self::Internal => Some(500),
+            Self::FeatureDisabled | Self::ConsentRequired => Some(403),
         }
     }
 
@@ -213,6 +229,9 @@ impl ErrorCode {
                 "temporarily unavailable: service dependency unavailable"
             }
             Self::Internal => "internal server error",
+            Self::FeatureDisabled => "feature disabled: capability is off in the tenant policy",
+            Self::ConsentRequired => "consent required: subject has not granted the purpose",
+            Self::ProviderUnavailable => "provider unavailable: the explicit provider is down",
         }
     }
 }

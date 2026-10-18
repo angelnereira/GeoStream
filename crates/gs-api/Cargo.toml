@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 gs-service.workspace = true
+gs-geo.workspace = true
+gs-mobility.workspace = true
 axum.workspace = true
 thiserror.workspace = true
 http.workspace = true

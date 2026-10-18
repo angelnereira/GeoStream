@@ -353,8 +353,12 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
             };
 
             app = app
-                .merge(gs_api::sessions_router(session_state))
-                .merge(gs_api::v1_router(token_state));
+                .merge(gs_api::sessions_router(session_state.clone()))
+                .merge(gs_api::v1_router(token_state))
+                .merge(gs_api::tools_router(gs_api::ToolsState {
+                    sessions: session_state,
+                    limits: gs_api::ToolsLimits::default(),
+                }));
         }
 
         if roles.contains(&Role::Stream) {

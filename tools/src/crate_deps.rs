@@ -63,7 +63,10 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
             "gs-edge",
         ])),
     );
-    allowed_internal.insert("gs-api", Some(BTreeSet::from(["gs-service"])));
+    allowed_internal.insert(
+        "gs-api",
+        Some(BTreeSet::from(["gs-service", "gs-geo", "gs-mobility"])),
+    );
     allowed_internal.insert(
         "gs-stream",
         Some(BTreeSet::from(["gs-service", "gs-geo", "gs-track"])),
