@@ -118,6 +118,33 @@ pub fn driving_events(
     )
 }
 
+/// 1 m/s speed bucket of the `h3_activity_hourly` histogram (`24` §3.1).
+#[must_use]
+pub fn speed_bucket(speed_mps: f64) -> usize {
+    if !speed_mps.is_finite() || speed_mps <= 0.0 {
+        return 0;
+    }
+    speed_mps.floor() as usize
+}
+
+/// Origin-destination cell pair (`24` §3.1, `od_resolution`).
+#[must_use]
+pub fn od_pair(origin_cell: i64, destination_cell: i64) -> (i64, i64) {
+    (origin_cell, destination_cell)
+}
+
+/// Circuity of a trip: the travelled distance over the straight-line distance.
+///
+/// Used by the own ETA estimator (`23` §4) per origin cell. Returns `None` when
+/// the straight-line distance is zero (a trip that never moved has no circuity).
+#[must_use]
+pub fn sinuosity(odometer_m: f64, straight_line_m: f64) -> Option<f64> {
+    if straight_line_m <= 0.0 || !straight_line_m.is_finite() {
+        return None;
+    }
+    Some(odometer_m / straight_line_m)
+}
+
 #[cfg(test)]
 mod kanon_tests {
     use super::*;
@@ -148,6 +175,28 @@ mod kanon_tests {
     #[test]
     fn ana_kan_005_learned_place_below_k_is_suppressed() {
         assert_eq!(suppress_count(2, 5), None);
+    }
+
+    #[test]
+    fn speed_buckets_are_one_mps() {
+        assert_eq!(speed_bucket(0.0), 0);
+        assert_eq!(speed_bucket(6.9), 6);
+        assert_eq!(speed_bucket(12.0), 12);
+        assert_eq!(speed_bucket(-1.0), 0);
+        assert_eq!(speed_bucket(f64::NAN), 0);
+    }
+
+    #[test]
+    fn sinuosity_of_a_straight_trip_is_one() {
+        assert_eq!(sinuosity(100.0, 100.0), Some(1.0));
+        assert_eq!(sinuosity(135.0, 100.0), Some(1.35));
+        assert_eq!(sinuosity(0.0, 0.0), None);
+    }
+
+    #[test]
+    fn od_pair_is_the_ordered_cell_pair() {
+        assert_eq!(od_pair(10, 20), (10, 20));
+        assert_ne!(od_pair(10, 20), od_pair(20, 10));
     }
 
     #[test]
