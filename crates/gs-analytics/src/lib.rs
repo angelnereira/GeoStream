@@ -145,6 +145,37 @@ pub fn sinuosity(odometer_m: f64, straight_line_m: f64) -> Option<f64> {
     Some(odometer_m / straight_line_m)
 }
 
+/// Residual of an ETA estimate: `actual / estimated` (`24` §3.1).
+///
+/// Used to correct the own ETA per origin cell and week hour. Returns `None`
+/// when the estimate is zero or non-finite (no correction to learn from).
+#[must_use]
+pub fn eta_correction_residual(actual_s: f64, estimated_s: f64) -> Option<f64> {
+    if !estimated_s.is_finite() || estimated_s <= 0.0 {
+        return None;
+    }
+    Some(actual_s / estimated_s)
+}
+
+/// A learned place (`24` §3.1). Deliberately **no** subject, session or member
+/// identifier: a learned place is a property of the map, not of a person.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LearnedPlace {
+    pub h3_cell: i64,
+    pub lat: f64,
+    pub lon: f64,
+    pub radius_m: f64,
+    pub distinct_subjects: u64,
+}
+
+/// Whether a learned place may be published: its `distinct_subjects` must reach
+/// `k` (`NFR-PRIV-003`). A place visited by fewer people is a person's routine,
+/// not a place.
+#[must_use]
+pub fn learned_place_releasable(place: &LearnedPlace, k: u64) -> bool {
+    k_anon_ok(place.distinct_subjects, k)
+}
+
 #[cfg(test)]
 mod kanon_tests {
     use super::*;
@@ -175,6 +206,30 @@ mod kanon_tests {
     #[test]
     fn ana_kan_005_learned_place_below_k_is_suppressed() {
         assert_eq!(suppress_count(2, 5), None);
+    }
+
+    #[test]
+    fn eta_residual_is_actual_over_estimated() {
+        assert_eq!(eta_correction_residual(90.0, 60.0), Some(1.5));
+        assert_eq!(eta_correction_residual(0.0, 0.0), None);
+        assert_eq!(eta_correction_residual(10.0, f64::NAN), None);
+    }
+
+    #[test]
+    fn learned_place_below_k_is_not_releasable() {
+        let place = LearnedPlace {
+            h3_cell: 1,
+            lat: 8.98,
+            lon: -79.52,
+            radius_m: 30.0,
+            distinct_subjects: 2,
+        };
+        assert!(!learned_place_releasable(&place, 5));
+        let busy = LearnedPlace {
+            distinct_subjects: 5,
+            ..place
+        };
+        assert!(learned_place_releasable(&busy, 5));
     }
 
     #[test]

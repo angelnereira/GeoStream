@@ -79,6 +79,39 @@ int main(void) {
         return 1;
     }
 
+    /* Feed a couple more fixes and drain the whole queue in a loop: the host
+     * event loop is "poll until empty", so the ABI must support it. */
+    fix.timestamp_ms = 2000;
+    if (gs_client_location_fix(handle, &fix) < 0) {
+        fprintf(stderr, "second fix rejected\n");
+        return 1;
+    }
+    fix.timestamp_ms = 3000;
+    if (gs_client_location_fix(handle, &fix) < 0) {
+        fprintf(stderr, "third fix rejected\n");
+        return 1;
+    }
+    int drained = 0;
+    for (;;) {
+        int32_t got = gs_client_poll_event(handle, buffer, sizeof(buffer));
+        if (got < 0) {
+            fprintf(stderr, "poll failed: %d\n", got);
+            return 1;
+        }
+        if (got == 0) {
+            break;
+        }
+        drained++;
+        if (drained > 1000) {
+            fprintf(stderr, "event loop did not terminate\n");
+            return 1;
+        }
+    }
+    if (drained == 0) {
+        fprintf(stderr, "expected queued events after three fixes\n");
+        return 1;
+    }
+
     if (gs_client_location_fix(NULL, &fix) >= 0) {
         fprintf(stderr, "a NULL handle must be rejected\n");
         return 1;
