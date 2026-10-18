@@ -12,6 +12,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 - `gs-ffi`: superficie C mínima (T-E1-04) con handles opacos, `catch_unwind` alrededor de cada llamada y `// SAFETY:` en cada bloque inseguro (único crate con `unsafe`). 4 pruebas.
 - Consistencia: `cargo run -p geostream-tools -- all` sigue en 10/10 con el verificador de dependencias de crate actualizado para el enlace documentado entre `gs-ffi` y los núcleos.
 ### Added
+- `gs-analytics`: eventos de conducción estimados (`ANA-HRS-001`, comparación estricta contra los umbrales, nunca presentados como medición) y prueba de DBSCAN de lugares aprendidos con dos grupos densos y ruido descartado (`ANA-DBS-001`).
 - `gs-edge`: rotación de EID por estado (`EDGE-EID-001/002/003`: 1024 s activo, 86 400 s `SEPARATED`), alerta DULT con los cuatro umbrales (`EDGE-DULT-001..003`: distancia, duración, sightings y localizaciones) y ventana de marca de tiempo LPWAN (`EDGE-LPW-003`). La alerta nunca lleva coordenadas.
 - Vectores del motor de trayectoria `TRK-ODO-001` (odómetro acumula el desplazamiento recto) y `TRK-STOP-001/002` (permanencia emite `STOP_STARTED`; salida confirmada emite `STOP_ENDED`), en `gs-track`.
 - Vectores de supresión k-anónima `ANA-KAN-001..006` en `gs-analytics`: la supresión es completa (nunca redondeo ni «al menos k») y el informe declara el `k` aplicado y cuántas unidades se ocultaron.

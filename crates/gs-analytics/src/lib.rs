@@ -84,6 +84,40 @@ pub fn suppression_report(k: u64, distinct_subjects_per_unit: &[u64]) -> Suppres
     SuppressionReport { k, suppressed }
 }
 
+/// Driving-event thresholds (`24` §3.2, `17` §2.10).
+#[derive(Debug, Clone, Copy)]
+pub struct DrivingThresholds {
+    pub harsh_accel_mps2: f64,
+    pub harsh_brake_mps2: f64,
+}
+
+impl Default for DrivingThresholds {
+    fn default() -> Self {
+        Self {
+            harsh_accel_mps2: 3.0,
+            harsh_brake_mps2: 3.5,
+        }
+    }
+}
+
+/// Classifies a single acceleration reading into `(harsh_accel, harsh_braking)`.
+///
+/// The comparison is strict (`>`): a reading exactly on the threshold is not an
+/// event. These are **estimated** events (`24` §3.2): without an accelerometer
+/// they are derived from the position/speed series, so they are never presented
+/// as a measured acceleration nor published on the stream.
+#[must_use]
+pub fn driving_events(
+    accel_mps2: f64,
+    brake_mps2: f64,
+    thresholds: &DrivingThresholds,
+) -> (bool, bool) {
+    (
+        accel_mps2 > thresholds.harsh_accel_mps2,
+        brake_mps2 > thresholds.harsh_brake_mps2,
+    )
+}
+
 #[cfg(test)]
 mod kanon_tests {
     use super::*;
@@ -117,6 +151,15 @@ mod kanon_tests {
     }
 
     #[test]
+    fn ana_hrs_001_harsh_accel_fires_and_braking_does_not_at_the_edge() {
+        // 3,5 > 3,0 (accel) and 3,5 is not > 3,5 (brake): the edge is deliberate.
+        let t = DrivingThresholds::default();
+        let (accel, brake) = driving_events(3.5, 3.5, &t);
+        assert!(accel);
+        assert!(!brake);
+    }
+
+    #[test]
     fn ana_kan_006_report_declares_k_and_suppressed_count() {
         let report = suppression_report(5, &[3, 5, 4, 9, 1, 5]);
         assert_eq!(report.k, 5);
@@ -134,6 +177,22 @@ mod tests {
         assert_eq!(suppress_count(3, 5), None);
         assert_eq!(suppress_count(7, 5), Some(7));
     }
+    #[test]
+    fn ana_dbs_001_two_clusters_and_noise_discarded() {
+        // Two dense groups of 25 stop centroids within ~20 m each, plus one
+        // isolated point that must be classified as noise.
+        let mut pts: Vec<(f64, f64)> = Vec::new();
+        for i in 0..25 {
+            pts.push((8.9824 + (i as f64) * 1e-6, -79.5199));
+            pts.push((8.9900 + (i as f64) * 1e-6, -79.5199));
+        }
+        pts.push((9.0500, -79.4000)); // isolated: noise
+        let labels = dbscan(&pts, 80.0, 20);
+        let clusters: std::collections::HashSet<usize> = labels.iter().filter_map(|l| *l).collect();
+        assert_eq!(clusters.len(), 2, "two dense groups");
+        assert_eq!(*labels.last().unwrap(), None, "the isolated point is noise");
+    }
+
     #[test]
     fn dbscan_clusters() {
         // two tight clusters of 3 points
