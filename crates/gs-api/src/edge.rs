@@ -33,7 +33,10 @@ pub struct EdgeState {
 pub fn edge_router(state: EdgeState) -> axum::Router {
     axum::Router::new()
         .route("/v1/tags", axum::routing::post(create_tag).get(list_tags))
-        .route("/v1/tags/{tag_id}", axum::routing::get(get_tag))
+        .route(
+            "/v1/tags/{tag_id}",
+            axum::routing::get(get_tag).delete(delete_tag),
+        )
         .with_state(state)
 }
 
@@ -304,6 +307,61 @@ async fn get_tag(
         Ok(None) => problem(ErrorCode::NotFound, &request_id, "tag not found"),
         Err(_) => problem(ErrorCode::Internal, &request_id, "failed to load tag"),
     }
+}
+
+/// `DELETE /v1/tags/{tag_id}`: idempotent soft delete (`state = REMOVED`).
+async fn delete_tag(
+    State(state): State<EdgeState>,
+    Path(tag_id_raw): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authorize(&state, &headers, &request_id).await {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let tenant_id = caller.tenant_id();
+    let tag_id = match TagId::from_str(&tag_id_raw) {
+        Ok(id) => id,
+        Err(_) => return problem(ErrorCode::ValidationFailed, &request_id, "malformed tag id"),
+    };
+    // A device may only remove its own tags.
+    if let TagCaller::Device(_, owner) = caller {
+        match TagRepository::get(&state.sessions.pool, tenant_id, tag_id).await {
+            Ok(Some(tag)) if tag.owner_subject_id == owner => {}
+            Ok(Some(_)) => {
+                return problem(
+                    ErrorCode::PermissionDenied,
+                    &request_id,
+                    "a device may only remove its own tags",
+                );
+            }
+            Ok(None) => return problem(ErrorCode::NotFound, &request_id, "tag not found"),
+            Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to load tag"),
+        }
+    }
+    let now = OffsetDateTime::now_utc();
+    match TagRepository::set_state(
+        &state.sessions.pool,
+        tenant_id,
+        tag_id,
+        "REMOVED",
+        None,
+        now,
+    )
+    .await
+    {
+        Ok(_) => {}
+        Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to remove tag"),
+    }
+    // Idempotent: 204 whether or not it changed.
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    if let Ok(value) = axum::http::HeaderValue::from_str(&request_id) {
+        response
+            .headers_mut()
+            .insert(crate::REQUEST_ID_HEADER, value);
+    }
+    response
 }
 
 fn problem(code: ErrorCode, request_id: &str, detail: &str) -> Response {

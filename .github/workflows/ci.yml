@@ -86,6 +86,23 @@ jobs:
         if: matrix.target != 'wasm32-unknown-unknown'
         run: cargo build --workspace --target ${{ matrix.target }} --all-features --exclude gs-client-runtime --exclude gs-ffi
 
+  stage5-ffi-abi:
+    name: "Etapa 5c: ABI C de gs-ffi (E9)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar toolchain
+        run: rustup show
+      - name: Construir la cdylib
+        run: cargo build -p gs-ffi --release
+      - name: Compilar y ejecutar el consumidor C
+        run: |
+          cc crates/gs-ffi/tests/c/abi_smoke.c \
+             -I crates/gs-ffi/include \
+             -L target/release -lgs_ffi \
+             -o /tmp/abi_smoke
+          LD_LIBRARY_PATH=target/release /tmp/abi_smoke
+
   stage5-docker:
     name: "Etapa 5b: Imagen Docker all-in-one"
     runs-on: ubuntu-latest
