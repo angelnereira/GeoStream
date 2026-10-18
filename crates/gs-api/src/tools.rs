@@ -332,7 +332,11 @@ async fn assignments_handler(
         let (_, mapping) = gs_mobility::assign(&costs, 1);
         build_result(&request, &mapping, &costs, request.max_cost)
     } else {
-        greedy_capacity(&request, &costs)
+        // `min_cost_flow`: worker capacities are the point of the model, so the
+        // solver is a real min-cost flow, not a per-task nearest pick.
+        let capacities: Vec<u32> = request.workers.iter().map(|w| w.capacity).collect();
+        let (_, mapping) = gs_mobility::assign_min_cost_flow(&costs, &capacities);
+        build_result(&request, &mapping, &costs, request.max_cost)
     };
 
     json_ok(
@@ -375,45 +379,6 @@ fn build_result(
         .filter(|(i, _)| !assigned_task[*i])
         .map(|(_, t)| t.id.clone())
         .collect();
-    (assignments, unassigned)
-}
-
-fn greedy_capacity(
-    request: &AssignmentRequest,
-    costs: &[Vec<f64>],
-) -> (Vec<Assignment>, Vec<String>) {
-    let mut remaining: Vec<u32> = request.workers.iter().map(|w| w.capacity).collect();
-    let mut assignments = Vec::new();
-    let mut unassigned = Vec::new();
-    // Tasks in input order; each to the nearest worker with remaining capacity.
-    for (ti, task) in request.tasks.iter().enumerate() {
-        let mut best: Option<(usize, f64)> = None;
-        for (wi, rem) in remaining.iter().enumerate() {
-            if *rem == 0 {
-                continue;
-            }
-            let cost = costs[wi][ti];
-            if let Some(limit) = request.max_cost
-                && cost > limit
-            {
-                continue;
-            }
-            if best.is_none_or(|(_, c)| cost < c) {
-                best = Some((wi, cost));
-            }
-        }
-        match best {
-            Some((wi, cost)) => {
-                remaining[wi] -= 1;
-                assignments.push(Assignment {
-                    task_id: task.id.clone(),
-                    worker_id: request.workers[wi].id.clone(),
-                    cost,
-                });
-            }
-            None => unassigned.push(task.id.clone()),
-        }
-    }
     (assignments, unassigned)
 }
 
@@ -599,7 +564,9 @@ mod tests {
                     .collect()
             })
             .collect();
-        let (assignments, unassigned) = greedy_capacity(&req, &costs);
+        let capacities: Vec<u32> = req.workers.iter().map(|w| w.capacity).collect();
+        let (_, mapping) = gs_mobility::assign_min_cost_flow(&costs, &capacities);
+        let (assignments, unassigned) = build_result(&req, &mapping, &costs, None);
         assert_eq!(assignments.len(), 2, "capacity 2 means two tasks");
         assert_eq!(unassigned.len(), 1);
     }
