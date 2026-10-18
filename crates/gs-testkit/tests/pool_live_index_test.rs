@@ -4,9 +4,7 @@
 use gs_service::EphemeralStore as _;
 use gs_testkit::TestServer;
 use prost::Message as _;
-use serde_json::json;
 use std::collections::BTreeMap;
-use time::OffsetDateTime;
 
 #[tokio::test]
 async fn nearby_returns_a_publisher_with_a_live_snapshot() {

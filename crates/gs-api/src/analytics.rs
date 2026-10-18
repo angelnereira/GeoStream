@@ -16,6 +16,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use gs_service::gs_domain::error::ErrorCode;
 use gs_service::gs_store::repos::HistoryRepository;
+use gs_service::gs_store::repos::TenantRepository;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -34,6 +35,15 @@ pub struct AnalyticsState {
 pub fn analytics_router(state: AnalyticsState) -> axum::Router {
     axum::Router::new()
         .route("/v1/analytics/heatmap", axum::routing::get(heatmap_handler))
+        .route(
+            "/v1/analytics/od-matrix",
+            axum::routing::get(od_matrix_handler),
+        )
+        .route(
+            "/v1/analytics/speed-profile",
+            axum::routing::get(speed_profile_handler),
+        )
+        .route("/v1/analytics/places", axum::routing::get(places_handler))
         .with_state(state)
 }
 
@@ -210,6 +220,191 @@ async fn heatmap_handler(
             // follow-up; it would report how many were dropped, never their
             // values or locations.
             suppressed_cells: 0,
+        },
+    )
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OdMatrixResponse {
+    pub origin_cells: Vec<String>,
+    pub destination_cells: Vec<String>,
+    pub matrix: Vec<Vec<u64>>,
+    pub k_anonymity_applied: u32,
+    pub suppressed_pairs: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SpeedProfileResponse {
+    pub cell: String,
+    pub buckets: Vec<(u32, u64)>,
+    pub k_anonymity_applied: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlacesResponse {
+    pub places: Vec<serde_json::Value>,
+    pub k_anonymity_applied: u32,
+}
+
+async fn od_matrix_handler(
+    State(state): State<AnalyticsState>,
+    Query(_query): Query<HeatmapQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authenticate_caller(&state.sessions, &headers, &request_id).await {
+        Ok(c) => c,
+        Err(resp) => return *resp,
+    };
+    let tenant_id = match &caller {
+        CallerPrincipal::Application(app) => {
+            if !app.api_key.scopes.iter().any(|s| s == "analytics:read") {
+                return problem(
+                    ErrorCode::InsufficientScope,
+                    &request_id,
+                    "application requires analytics:read scope",
+                );
+            }
+            app.tenant.id
+        }
+        CallerPrincipal::Device(_) => {
+            return problem(
+                ErrorCode::PermissionDenied,
+                &request_id,
+                "devices cannot read analytics",
+            );
+        }
+    };
+    let tenant = match TenantRepository::get_by_id(&state.sessions.pool, tenant_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return problem(ErrorCode::NotFound, &request_id, "tenant not found"),
+        Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to load tenant"),
+    };
+    let policy = gs_service::gs_auth::TenantPolicy::from_json_value(tenant.policy.clone())
+        .unwrap_or_default();
+    if !policy.analytics_allowed {
+        return problem(
+            ErrorCode::FeatureDisabled,
+            &request_id,
+            "analytics are disabled for this tenant",
+        );
+    }
+    // The aggregation table for OD pairs is a follow-up of E7 (see
+    // DR-20261018-03); the endpoint is contract-shaped and returns the empty
+    // matrix today rather than inventing numbers.
+    json_ok(
+        &request_id,
+        OdMatrixResponse {
+            origin_cells: Vec::new(),
+            destination_cells: Vec::new(),
+            matrix: Vec::new(),
+            k_anonymity_applied: policy.analytics_k_anonymity,
+            suppressed_pairs: 0,
+        },
+    )
+}
+
+async fn speed_profile_handler(
+    State(state): State<AnalyticsState>,
+    Query(_query): Query<HeatmapQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authenticate_caller(&state.sessions, &headers, &request_id).await {
+        Ok(c) => c,
+        Err(resp) => return *resp,
+    };
+    let tenant_id = match &caller {
+        CallerPrincipal::Application(app) => {
+            if !app.api_key.scopes.iter().any(|s| s == "analytics:read") {
+                return problem(
+                    ErrorCode::InsufficientScope,
+                    &request_id,
+                    "application requires analytics:read scope",
+                );
+            }
+            app.tenant.id
+        }
+        CallerPrincipal::Device(_) => {
+            return problem(
+                ErrorCode::PermissionDenied,
+                &request_id,
+                "devices cannot read analytics",
+            );
+        }
+    };
+    let tenant = match TenantRepository::get_by_id(&state.sessions.pool, tenant_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return problem(ErrorCode::NotFound, &request_id, "tenant not found"),
+        Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to load tenant"),
+    };
+    let policy = gs_service::gs_auth::TenantPolicy::from_json_value(tenant.policy.clone())
+        .unwrap_or_default();
+    if !policy.analytics_allowed {
+        return problem(
+            ErrorCode::FeatureDisabled,
+            &request_id,
+            "analytics are disabled for this tenant",
+        );
+    }
+    json_ok(
+        &request_id,
+        SpeedProfileResponse {
+            cell: String::new(),
+            buckets: Vec::new(),
+            k_anonymity_applied: policy.analytics_k_anonymity,
+        },
+    )
+}
+
+async fn places_handler(
+    State(state): State<AnalyticsState>,
+    Query(_query): Query<HeatmapQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authenticate_caller(&state.sessions, &headers, &request_id).await {
+        Ok(c) => c,
+        Err(resp) => return *resp,
+    };
+    let tenant_id = match &caller {
+        CallerPrincipal::Application(app) => {
+            if !app.api_key.scopes.iter().any(|s| s == "analytics:read") {
+                return problem(
+                    ErrorCode::InsufficientScope,
+                    &request_id,
+                    "application requires analytics:read scope",
+                );
+            }
+            app.tenant.id
+        }
+        CallerPrincipal::Device(_) => {
+            return problem(
+                ErrorCode::PermissionDenied,
+                &request_id,
+                "devices cannot read analytics",
+            );
+        }
+    };
+    let tenant = match TenantRepository::get_by_id(&state.sessions.pool, tenant_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return problem(ErrorCode::NotFound, &request_id, "tenant not found"),
+        Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to load tenant"),
+    };
+    let policy = gs_service::gs_auth::TenantPolicy::from_json_value(tenant.policy.clone())
+        .unwrap_or_default();
+    if !policy.analytics_allowed {
+        return problem(
+            ErrorCode::FeatureDisabled,
+            &request_id,
+            "analytics are disabled for this tenant",
+        );
+    }
+    json_ok(
+        &request_id,
+        PlacesResponse {
+            places: Vec::new(),
+            k_anonymity_applied: policy.analytics_k_anonymity,
         },
     )
 }
