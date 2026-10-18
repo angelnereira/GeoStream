@@ -82,6 +82,10 @@ const METRIC_STREAM_MESSAGES_IN_TOTAL: &str = "gs_stream_messages_in_total";
 /// Highest protocol minor this server implements (docs/08 §6.1 and §11).
 pub const MAX_PROTOCOL_MINOR: u32 = 0;
 
+/// TTL of the trajectory-engine checkpoint at `{p}:trk:{device}`
+/// (`GS_TRACK_STATE_TTL_S`, default 600 s; `17` §2.10, `docs/22` §2.1).
+const TRACK_STATE_TTL: Duration = Duration::from_secs(600);
+
 /// Session accepted by the upgrade, handed over by `gs-api` (docs/08 §3).
 pub struct AcceptedSession {
     /// Negotiated subprotocol of the connection.
@@ -717,6 +721,17 @@ impl Connection {
                     .await;
                 }
             }
+
+            // Resume the trajectory engine from the checkpoint of this device
+            // (docs/22 §2.1, T-E2-06). A device that reconnects on another
+            // instance continues its filter instead of starting cold. A
+            // checkpoint that cannot be read is discarded, never half-applied.
+            let trk_key = format!("{}:trk:{}", state.redis_key_prefix, device_id);
+            if let Ok(Some(bytes)) = state.ephemeral.get_snapshot(&trk_key).await
+                && let Some(restored) = gs_track::TrackStateMachine::decode_checkpoint(&bytes)
+            {
+                self.tracker = restored;
+            }
         }
 
         // If remaining time until auth_expires_at is already <= auth_expiring_lead,
@@ -1290,6 +1305,17 @@ impl Connection {
                 if !self.send(&message).await {
                     self.close(CLOSE_SLOW_CONSUMER);
                     return;
+                }
+                // Checkpoint the engine so a reconnect on another instance
+                // resumes the trajectory (docs/22 §2.1, T-E2-06). A failed
+                // checkpoint is not fatal: it expires by its own TTL.
+                if !outcome.accepted.is_empty() {
+                    let trk_key = format!("{}:trk:{}", state.redis_key_prefix, device_id);
+                    let blob = self.tracker.encode_checkpoint();
+                    let _ = state
+                        .ephemeral
+                        .set_snapshot(&trk_key, &blob, TRACK_STATE_TTL)
+                        .await;
                 }
                 self.publish_to_bus(state, session_id, &outcome.accepted)
                     .await;

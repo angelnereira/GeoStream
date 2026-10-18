@@ -43,6 +43,16 @@ impl KalmanCv {
         self.p[0].sqrt().max(1e-3)
     }
 
+    /// Raw state and covariance, for checkpointing (`22` §2.1).
+    pub(crate) fn raw(&self) -> ([f64; 4], [f64; 16]) {
+        (self.x, self.p)
+    }
+
+    /// Rebuilds a filter from a checkpoint.
+    pub(crate) fn from_raw(x: [f64; 4], p: [f64; 16]) -> Self {
+        Self { x, p }
+    }
+
     /// One step. Returns Mahalanobis d2; side effect marks outlier if > chi2.
     pub fn step(
         &mut self,

@@ -468,3 +468,320 @@ impl TrackStateMachine {
             .collect()
     }
 }
+
+// --- Checkpointing (docs/22 §2.1, docs/11 §3.1) ---------------------------
+//
+// The filter state is checkpointed so a reconnect on another instance resumes
+// the trajectory instead of starting cold. The format is a small, versioned,
+// little-endian blob stored under `{p}:trk:{device}`; it is internal to the
+// engine (never a wire contract), so it carries its own version byte.
+
+const CHECKPOINT_VERSION: u8 = 1;
+
+fn put_f64(out: &mut Vec<u8>, v: f64) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+fn put_u64(out: &mut Vec<u8>, v: u64) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+fn put_u32(out: &mut Vec<u8>, v: u32) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+fn put_u8(out: &mut Vec<u8>, v: u8) {
+    out.push(v);
+}
+
+struct Reader<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+impl<'a> Reader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, pos: 0 }
+    }
+    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
+        let end = self.pos.checked_add(n)?;
+        if end > self.bytes.len() {
+            return None;
+        }
+        let slice = &self.bytes[self.pos..end];
+        self.pos = end;
+        Some(slice)
+    }
+    fn f64(&mut self) -> Option<f64> {
+        Some(f64::from_le_bytes(self.take(8)?.try_into().ok()?))
+    }
+    fn u64(&mut self) -> Option<u64> {
+        Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
+    }
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
+    }
+    fn u8(&mut self) -> Option<u8> {
+        Some(self.take(1)?[0])
+    }
+}
+
+fn state_code(state: TrackState) -> u8 {
+    match state {
+        TrackState::Init => 0,
+        TrackState::Tracking => 1,
+        TrackState::Coasting => 2,
+        TrackState::Reset => 3,
+    }
+}
+fn state_from(code: u8) -> Option<TrackState> {
+    match code {
+        0 => Some(TrackState::Init),
+        1 => Some(TrackState::Tracking),
+        2 => Some(TrackState::Coasting),
+        3 => Some(TrackState::Reset),
+        _ => None,
+    }
+}
+fn motion_code(m: Motion) -> u8 {
+    match m {
+        Motion::Stationary => 0,
+        Motion::Walking => 1,
+        Motion::Running => 2,
+        Motion::Cycling => 3,
+        Motion::Automotive => 4,
+        Motion::Unknown => 5,
+    }
+}
+fn motion_from(code: u8) -> Option<Motion> {
+    match code {
+        0 => Some(Motion::Stationary),
+        1 => Some(Motion::Walking),
+        2 => Some(Motion::Running),
+        3 => Some(Motion::Cycling),
+        4 => Some(Motion::Automotive),
+        5 => Some(Motion::Unknown),
+        _ => None,
+    }
+}
+
+impl TrackStateMachine {
+    /// Serializes the engine state for `{p}:trk:{device}`.
+    #[must_use]
+    pub fn encode_checkpoint(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(256);
+        put_u8(&mut out, CHECKPOINT_VERSION);
+        put_f64(&mut out, self.origin_lat);
+        put_f64(&mut out, self.origin_lon);
+        match &self.kalman {
+            Some(k) => {
+                put_u8(&mut out, 1);
+                let (x, p) = k.raw();
+                for v in x {
+                    put_f64(&mut out, v);
+                }
+                for v in p {
+                    put_f64(&mut out, v);
+                }
+            }
+            None => put_u8(&mut out, 0),
+        }
+        put_u8(&mut out, state_code(self.state));
+        match self.prev_ms {
+            Some(ms) => {
+                put_u8(&mut out, 1);
+                put_u64(&mut out, ms);
+            }
+            None => put_u8(&mut out, 0),
+        }
+        put_u32(&mut out, self.frozen_count as u32);
+        put_f64(&mut out, self.prev_lat);
+        put_f64(&mut out, self.prev_lon);
+        put_f64(&mut out, self.prev_acc);
+        match self.prev_speed {
+            Some(s) => {
+                put_u8(&mut out, 1);
+                put_f64(&mut out, s);
+            }
+            None => put_u8(&mut out, 0),
+        }
+        put_u32(&mut out, self.outlier_run as u32);
+        put_u8(&mut out, motion_code(self.motion));
+        // Odometer.
+        put_u8(&mut out, u8::from(self.odometer.has_anchor));
+        put_f64(&mut out, self.odometer.anchor_lat);
+        put_f64(&mut out, self.odometer.anchor_lon);
+        put_f64(&mut out, self.odometer.value_m);
+        put_f64(&mut out, self.odometer.bridged_m);
+        // Stop detector.
+        put_u8(
+            &mut out,
+            match self.stops.state {
+                stops::StopState::Candidate => 1,
+                stops::StopState::Stopped => 2,
+                stops::StopState::None => 0,
+            },
+        );
+        put_f64(&mut out, self.stops.c_sum_lat);
+        put_f64(&mut out, self.stops.c_sum_lon);
+        put_u32(&mut out, self.stops.c_count as u32);
+        match self.stops.c_started_ms {
+            Some(ms) => {
+                put_u8(&mut out, 1);
+                put_u64(&mut out, ms);
+            }
+            None => put_u8(&mut out, 0),
+        }
+        put_u32(&mut out, self.stops.consecutive_outside as u32);
+        out
+    }
+
+    /// Rebuilds the engine from a checkpoint. Returns `None` on any malformed
+    /// input: a checkpoint that cannot be read is discarded, never trusted
+    /// partially.
+    #[must_use]
+    pub fn decode_checkpoint(bytes: &[u8]) -> Option<Self> {
+        let mut r = Reader::new(bytes);
+        if r.u8()? != CHECKPOINT_VERSION {
+            return None;
+        }
+        let origin_lat = r.f64()?;
+        let origin_lon = r.f64()?;
+        let kalman = if r.u8()? == 1 {
+            let mut x = [0.0f64; 4];
+            for slot in &mut x {
+                *slot = r.f64()?;
+            }
+            let mut p = [0.0f64; 16];
+            for slot in &mut p {
+                *slot = r.f64()?;
+            }
+            Some(K::from_raw(x, p))
+        } else {
+            None
+        };
+        let state = state_from(r.u8()?)?;
+        let prev_ms = if r.u8()? == 1 { Some(r.u64()?) } else { None };
+        let frozen_count = r.u32()? as usize;
+        let prev_lat = r.f64()?;
+        let prev_lon = r.f64()?;
+        let prev_acc = r.f64()?;
+        let prev_speed = if r.u8()? == 1 { Some(r.f64()?) } else { None };
+        let outlier_run = r.u32()? as usize;
+        let motion = motion_from(r.u8()?)?;
+
+        let config = TrackConfig::defaults();
+        let has_anchor = r.u8()? == 1;
+        let anchor_lat = r.f64()?;
+        let anchor_lon = r.f64()?;
+        let value_m = r.f64()?;
+        let bridged_m = r.f64()?;
+
+        let stop_state = match r.u8()? {
+            0 => stops::StopState::None,
+            1 => stops::StopState::Candidate,
+            2 => stops::StopState::Stopped,
+            _ => return None,
+        };
+        let c_sum_lat = r.f64()?;
+        let c_sum_lon = r.f64()?;
+        let c_count = r.u32()? as usize;
+        let c_started_ms = if r.u8()? == 1 { Some(r.u64()?) } else { None };
+        let consecutive_outside = r.u32()? as usize;
+
+        let frame = if kalman.is_some() {
+            Some(LocalFrame::new(LatLon::new(origin_lat, origin_lon)))
+        } else {
+            None
+        };
+
+        let mut stops = StopDetector::new(
+            config.track_stop_radius_m,
+            config.track_stop_min_duration_s,
+            config.track_stop_exit_confirm,
+        );
+        stops.state = stop_state;
+        stops.c_sum_lat = c_sum_lat;
+        stops.c_sum_lon = c_sum_lon;
+        stops.c_count = c_count;
+        stops.c_started_ms = c_started_ms;
+        stops.consecutive_outside = consecutive_outside;
+
+        Some(Self {
+            config,
+            kalman,
+            frame,
+            origin_lat,
+            origin_lon,
+            state,
+            prev_ms,
+            frozen_count,
+            prev_lat,
+            prev_lon,
+            prev_acc,
+            prev_speed,
+            outlier_run,
+            motion,
+            odometer: Odometer {
+                anchor_lat,
+                anchor_lon,
+                value_m,
+                bridged_m,
+                has_anchor,
+            },
+            stops,
+        })
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+
+    fn sample(seq: u64, at_ms: u64, lat: f64) -> Sample {
+        Sample {
+            sequence: seq,
+            sample_at_ms: at_ms,
+            lat,
+            lon: -79.5199,
+            horizontal_accuracy_m: 8.0,
+            speed_mps: Some(4.0),
+            speed_accuracy_mps: None,
+            heading_deg: Some(90.0),
+            is_mock: false,
+            source: "GPS",
+            motion: Motion::Automotive,
+        }
+    }
+
+    #[test]
+    fn checkpoint_round_trip_preserves_the_estimate() {
+        let mut engine = TrackStateMachine::new(TrackConfig::defaults());
+        engine.apply(&sample(1, 0, 8.9824));
+        engine.apply(&sample(2, 2000, 8.9830));
+        let before = engine.apply(&sample(3, 4000, 8.9836));
+
+        let blob = engine.encode_checkpoint();
+        let mut restored = TrackStateMachine::decode_checkpoint(&blob).expect("decode");
+
+        // The next sample on the restored engine must produce the same estimate
+        // as the next sample on the original: continuity across instances.
+        let s4 = sample(4, 6000, 8.9842);
+        let a = engine.apply(&s4);
+        let b = restored.apply(&s4);
+        let ea = a.estimate.unwrap();
+        let eb = b.estimate.unwrap();
+        assert!((ea.position_lat - eb.position_lat).abs() < 1e-9);
+        assert!((ea.position_lon - eb.position_lon).abs() < 1e-9);
+        assert!((ea.odometer_m - eb.odometer_m).abs() < 1e-9);
+        assert_eq!(ea.track_state, eb.track_state);
+        let _ = before;
+    }
+
+    #[test]
+    fn malformed_checkpoint_is_rejected_not_trusted() {
+        assert!(TrackStateMachine::decode_checkpoint(&[]).is_none());
+        assert!(TrackStateMachine::decode_checkpoint(&[99, 1, 2, 3]).is_none());
+        let mut engine = TrackStateMachine::new(TrackConfig::defaults());
+        engine.apply(&sample(1, 0, 8.9824));
+        let blob = engine.encode_checkpoint();
+        // Truncated blob: rejected.
+        assert!(TrackStateMachine::decode_checkpoint(&blob[..blob.len() - 4]).is_none());
+    }
+}
