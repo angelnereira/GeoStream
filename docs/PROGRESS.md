@@ -103,6 +103,15 @@ Formato de cada entrada (más reciente arriba):
 - `tools/src/crate_deps`: se declara que `gs-ffi` depende directamente de `gs-client-core` además del runtime, porque la FFI llama al núcleo sin pasar por I/O.
 - Siguiente: T-E1-05 ya cubierto en el workflow de CI (musl + wasm32), T-E1-06 cubierto por `crates/gs-client-core/tests/properties.rs`.
 
+### 2026-10-17 — E2 en la ingesta y REST de pools
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada (E2 en ingesta + `nearby`).
+- Evidencia:
+  - `publish_batch` aplica `gs-track` a cada muestra aceptada y adjunta `LocationUpdate.estimate` (FILTERED); la muestra `MEASURED` viaja intacta. Prueba `test_fr_trk_001_estimate_is_attached_beside_the_sample`.
+  - `GET /v1/pools/{session_id}/nearby` montado; verificado en vivo (401 sin credencial). Lee el índice de los snapshots y aplica `gs-pools::nearby`.
+- Defecto corregido: el verificador de privacidad marcaba la fracción de un timestamp ISO-8601 (`…18.982593`) como coordenada (`8.982`), haciendo fallar la prueba según el reloj. Ahora exige que el patrón no vaya precedido de un dígito.
+- Pendiente: `rings`/`density` REST, `availability`/`attributes` reales (T-E4-05), checkpoint del filtro en `{p}:trk:{device}` (T-E2-06) y prueba de integración del camino 200 con política habilitada.
+
 ### 2026-10-17 — E4: consultas de pool (núcleo)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: parcial (núcleo de consultas).
