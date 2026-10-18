@@ -12,6 +12,7 @@
  */
 #include "gs_ffi.h"
 #include <stdio.h>
+#include <string.h>
 
 int main(void) {
     if (gs_ffi_abi_version() < 1) {
@@ -52,6 +53,18 @@ int main(void) {
 
     if (gs_client_next_timer_ms(handle) != -1) {
         fprintf(stderr, "no timer was expected yet\n");
+        return 1;
+    }
+
+    /* At least one output event is queued by the fix; poll it as a kind name. */
+    uint8_t buffer[64];
+    int32_t n = gs_client_poll_event(handle, buffer, sizeof(buffer));
+    if (n <= 0) {
+        fprintf(stderr, "expected a queued event, got %d\n", n);
+        return 1;
+    }
+    if (strstr((char *)buffer, "8.98") != NULL) {
+        fprintf(stderr, "event leaked a coordinate: %s\n", buffer);
         return 1;
     }
 

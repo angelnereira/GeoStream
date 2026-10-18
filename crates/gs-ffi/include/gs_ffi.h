@@ -7,6 +7,7 @@
 #ifndef GS_FFI_H
 #define GS_FFI_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -59,6 +60,12 @@ int32_t gs_client_location_fix(GsHandle *handle, const GsPlatformFix *fix);
 
 /* The next timer the core wants, in milliseconds, or -1 when there is none. */
 int64_t gs_client_next_timer_ms(GsHandle *handle);
+
+/* Poll one pending event kind into `buffer` (NUL-terminated). Returns the number
+ * of bytes written (excluding the NUL), 0 when nothing is pending, or a
+ * negative GsResult code. The payload is only a fixed kind name: a payload can
+ * carry coordinates and this buffer crosses into the host language. */
+int32_t gs_client_poll_event(GsHandle *handle, uint8_t *buffer, size_t capacity);
 
 /* 1 when the handle is NULL, 0 otherwise. */
 int32_t gs_handle_is_null(const GsHandle *handle);

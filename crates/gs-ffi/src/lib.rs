@@ -32,6 +32,12 @@ pub struct GsHandle {
     tokio: TokioRuntime,
     /// The core, kept in sync on the Rust side.
     core: ClientCore,
+    /// Event kinds produced by the core, waiting for `gs_client_poll_event`.
+    ///
+    /// Only the **kind** is queued, never a payload: a payload can carry
+    /// coordinates and this buffer crosses into the host language, where
+    /// redaction is not under our control (docs/10 §8.2).
+    events: std::collections::VecDeque<&'static str>,
 }
 
 /// Result codes returned across the FFI boundary.
@@ -54,6 +60,7 @@ pub extern "C" fn gs_client_create() -> *mut GsHandle {
         let handle = Box::new(GsHandle {
             tokio,
             core: ClientCore::new(),
+            events: std::collections::VecDeque::new(),
         });
         Some(Box::into_raw(handle))
     });
@@ -181,6 +188,9 @@ pub unsafe extern "C" fn gs_client_location_fix(
         let outputs = h
             .core
             .handle(gs_client_core::Input::LocationFix(platform), f.timestamp_ms);
+        for output in &outputs {
+            h.events.push_back(output_kind(output));
+        }
         Ok(outputs.len() as i32)
     }));
     match result {
@@ -208,6 +218,67 @@ pub unsafe extern "C" fn gs_client_next_timer_ms(handle: *mut GsHandle) -> i64 {
     match result {
         Ok(Ok(ms)) => ms,
         _ => -1,
+    }
+}
+
+/// Polls one pending event kind into `buffer` (NUL-terminated).
+///
+/// Returns the number of bytes written (excluding the NUL), `0` when there is
+/// nothing pending, or a negative `GsResult` code.
+///
+/// # Safety
+///
+/// `handle` must be valid; `buffer` must be writable for `capacity` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gs_client_poll_event(
+    handle: *mut GsHandle,
+    buffer: *mut u8,
+    capacity: usize,
+) -> i32 {
+    if handle.is_null() || buffer.is_null() || capacity == 0 {
+        return -(GsResult::NullPointer as i32);
+    }
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| -> Result<i32, GsResult> {
+        // SAFETY: checked non-null; the caller upholds the handle contract.
+        let h = unsafe { handle.as_mut() }.ok_or(GsResult::InvalidHandle)?;
+        let Some(kind) = h.events.pop_front() else {
+            // Nothing pending: write a NUL and report 0.
+            // SAFETY: buffer is writable for at least one byte (capacity > 0).
+            unsafe { buffer.write(0) };
+            return Ok(0);
+        };
+        let bytes = kind.as_bytes();
+        let n = bytes.len().min(capacity - 1);
+        // SAFETY: we copy at most `capacity - 1` bytes into a buffer the caller
+        // promised is writable for `capacity` bytes, then NUL-terminate.
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer, n);
+            buffer.add(n).write(0);
+        }
+        Ok(n as i32)
+    }));
+    match result {
+        Ok(Ok(n)) => n,
+        Ok(Err(code)) => -(code as i32),
+        Err(_) => -(GsResult::Panic as i32),
+    }
+}
+
+/// A stable, payload-free name for an output kind.
+fn output_kind(output: &gs_client_core::Output) -> &'static str {
+    use gs_client_core::Output;
+    match output {
+        Output::OpenTransport { .. } => "open_transport",
+        Output::SendFrame(_) => "send_frame",
+        Output::CloseTransport(_) => "close_transport",
+        Output::Http(_, _) => "http",
+        Output::ConfigureLocation(_) => "configure_location",
+        Output::MonitorRegion(_) => "monitor_region",
+        Output::StopMonitoringRegion(_) => "stop_monitoring_region",
+        Output::ConfigureBleScan(_) => "configure_ble_scan",
+        Output::Persist { .. } => "persist",
+        Output::Emit(_) => "emit",
+        Output::ScheduleTimer(_) => "schedule_timer",
     }
 }
 
@@ -264,6 +335,38 @@ mod tests {
         // SAFETY: h is valid.
         assert_eq!(unsafe { gs_client_next_timer_ms(h) }, -1);
         // SAFETY: h is valid.
+        assert_eq!(unsafe { gs_client_destroy(h) }, GsResult::Ok);
+    }
+
+    #[test]
+    fn events_are_polled_as_kinds_without_payloads() {
+        let h = gs_client_create();
+        let fix = GsPlatformFix {
+            lat: 8.9824,
+            lon: -79.5199,
+            horizontal_accuracy_m: 8.0,
+            altitude_m: 0.0,
+            has_altitude: 0,
+            speed_mps: 0.0,
+            has_speed: 0,
+            heading_deg: 0.0,
+            has_heading: 0,
+            timestamp_ms: 1000,
+            is_mock: 0,
+        };
+        // SAFETY: h valid; &fix valid for the call.
+        let _ = unsafe { gs_client_location_fix(h, &fix) };
+        let mut buf = [0u8; 64];
+        // SAFETY: h valid; buf is writable for 64 bytes.
+        let n = unsafe { gs_client_poll_event(h, buf.as_mut_ptr(), buf.len()) };
+        assert!(n > 0, "at least one event must be queued, got {n}");
+        let kind = std::str::from_utf8(&buf[..n as usize]).unwrap();
+        // The kind is a fixed name, never a coordinate.
+        assert!(!kind.contains("8.98"), "event leaked a coordinate: {kind}");
+        // SAFETY: h valid; buf writable.
+        let drained = unsafe { gs_client_poll_event(h, buf.as_mut_ptr(), buf.len()) };
+        assert_eq!(drained, 0, "the queue must drain");
+        // SAFETY: h valid.
         assert_eq!(unsafe { gs_client_destroy(h) }, GsResult::Ok);
     }
 
