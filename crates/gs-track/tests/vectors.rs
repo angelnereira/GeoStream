@@ -7,7 +7,8 @@
 //! are left to the integration harness.
 
 use gs_track::{
-    Motion, PlausibilityFlags, Sample, TrackConfig, TrackResetReason, TrackStateMachine,
+    Motion, PlausibilityFlags, Sample, TrackConfig, TrackEventKind, TrackResetReason,
+    TrackStateMachine,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -188,4 +189,129 @@ fn first_fix_is_tagged_first_fix_and_keeps_the_sample() {
     assert!((est.position_lat - 8.9824).abs() < 1e-9);
     assert!((est.position_lon - (-79.5199)).abs() < 1e-9);
     assert_eq!(est.speed_mps, None);
+}
+
+#[test]
+fn trk_odo_001_accumulates_a_straight_displacement() {
+    // covers: FR-TRK-004, docs/22 §2.5
+    let mut m = TrackStateMachine::new(TrackConfig::defaults());
+    let _ = m.apply(&sample(
+        1,
+        0,
+        8.9824,
+        -79.5199,
+        8.0,
+        Motion::Automotive,
+        "GPS",
+        false,
+    ));
+    let up = m.apply(&sample(
+        2,
+        10,
+        8.98292,
+        -79.5199,
+        8.0,
+        Motion::Automotive,
+        "GPS",
+        false,
+    ));
+    let est = up.estimate.unwrap();
+    // 0.00052 degrees of latitude ~ 57.8 m.
+    assert!(
+        (est.odometer_m - 58.0).abs() < 1.5,
+        "odometer was {}",
+        est.odometer_m
+    );
+}
+
+#[test]
+fn trk_stop_001_dwell_emits_stop_started() {
+    // covers: FR-TRK-005, docs/22 §2.6
+    let mut m = TrackStateMachine::new(TrackConfig::defaults());
+    let _ = m.apply(&sample(
+        1,
+        0,
+        8.98240,
+        -79.51990,
+        8.0,
+        Motion::Stationary,
+        "GPS",
+        false,
+    ));
+    let _ = m.apply(&sample(
+        2,
+        60,
+        8.98244,
+        -79.51987,
+        8.0,
+        Motion::Stationary,
+        "GPS",
+        false,
+    ));
+    let up = m.apply(&sample(
+        3,
+        130,
+        8.98243,
+        -79.51991,
+        8.0,
+        Motion::Stationary,
+        "GPS",
+        false,
+    ));
+    assert!(
+        up.events.contains(&TrackEventKind::StopStarted),
+        "dwell >= track_stop_min_duration_s must emit STOP_STARTED, got {:?}",
+        up.events
+    );
+}
+
+#[test]
+fn trk_stop_002_exit_after_confirm_emits_stop_ended() {
+    // covers: FR-TRK-005, docs/22 §2.6
+    let mut m = TrackStateMachine::new(TrackConfig::defaults());
+    let _ = m.apply(&sample(
+        1,
+        0,
+        8.98240,
+        -79.51990,
+        8.0,
+        Motion::Stationary,
+        "GPS",
+        false,
+    ));
+    let _ = m.apply(&sample(
+        2,
+        130,
+        8.98243,
+        -79.51991,
+        8.0,
+        Motion::Stationary,
+        "GPS",
+        false,
+    ));
+    let _ = m.apply(&sample(
+        3,
+        180,
+        8.98440,
+        -79.51990,
+        8.0,
+        Motion::Automotive,
+        "GPS",
+        false,
+    ));
+    let up = m.apply(&sample(
+        4,
+        185,
+        8.98490,
+        -79.51990,
+        8.0,
+        Motion::Automotive,
+        "GPS",
+        false,
+    ));
+    assert!(
+        up.events.contains(&TrackEventKind::StopEnded),
+        "exit confirm must emit STOP_ENDED, got {:?}",
+        up.events
+    );
 }

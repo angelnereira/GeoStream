@@ -61,6 +61,69 @@ fn haversine_distance_pt(a: (f64, f64), b: (f64, f64)) -> f64 {
     gs_geo::haversine_distance(gs_geo::LatLon::new(a.0, a.1), gs_geo::LatLon::new(b.0, b.1))
 }
 
+/// Summary of a k-anonymous aggregation (OpenAPI `AnalyticsMeta`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SuppressionReport {
+    /// The `k` applied.
+    pub k: u64,
+    /// How many units were hidden (never their values).
+    pub suppressed: u64,
+}
+
+/// Counts how many cells fall below `k` and returns the report.
+///
+/// Suppression is **complete**: a cell below `k` is dropped whole. It is never
+/// rounded, coarsened or turned into an "at least k" bucket, because all of
+/// those still leak (`ANA-KAN-003`).
+#[must_use]
+pub fn suppression_report(k: u64, distinct_subjects_per_unit: &[u64]) -> SuppressionReport {
+    let suppressed = distinct_subjects_per_unit
+        .iter()
+        .filter(|count| !k_anon_ok(**count, k))
+        .count() as u64;
+    SuppressionReport { k, suppressed }
+}
+
+#[cfg(test)]
+mod kanon_tests {
+    use super::*;
+
+    #[test]
+    fn ana_kan_001_four_subjects_below_five_is_suppressed() {
+        assert_eq!(suppress_count(4, 5), None);
+    }
+
+    #[test]
+    fn ana_kan_002_five_subjects_is_published() {
+        assert_eq!(suppress_count(5, 5), Some(5));
+    }
+
+    #[test]
+    fn ana_kan_003_suppression_is_complete_not_rounded() {
+        // A suppressed cell yields no value at all: there is no rounded or
+        // coarsened alternative to return.
+        assert_eq!(suppress_count(4, 5), None);
+    }
+
+    #[test]
+    fn ana_kan_004_od_pair_below_k_is_suppressed() {
+        // The same rule applies to origin-destination pairs.
+        assert_eq!(suppress_count(3, 5), None);
+    }
+
+    #[test]
+    fn ana_kan_005_learned_place_below_k_is_suppressed() {
+        assert_eq!(suppress_count(2, 5), None);
+    }
+
+    #[test]
+    fn ana_kan_006_report_declares_k_and_suppressed_count() {
+        let report = suppression_report(5, &[3, 5, 4, 9, 1, 5]);
+        assert_eq!(report.k, 5);
+        assert_eq!(report.suppressed, 3);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
