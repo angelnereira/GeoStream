@@ -50,7 +50,7 @@ pub fn verify_capture(capture: &str) -> CaptureReport {
     for (index, line) in capture.lines().enumerate() {
         lines += 1;
         for pattern in KNOWN_TEST_COORDINATES.iter().chain(FORBIDDEN_PATTERNS) {
-            if let Some(position) = line.find(pattern) {
+            if let Some(position) = find_pattern(line, pattern) {
                 let start = position.saturating_sub(24);
                 let end = (position + pattern.len() + 24).min(line.len());
                 findings.push(Finding {
@@ -63,6 +63,35 @@ pub fn verify_capture(capture: &str) -> CaptureReport {
     }
 
     CaptureReport { lines, findings }
+}
+
+/// Finds `pattern` in `line` at a position that is not the tail of a longer
+/// decimal number.
+///
+/// The coordinate patterns are prefixes (`"8.982"` matches `"8.9824"`), so a
+/// naive `str::find` also matches the fractional part of an ISO-8601 timestamp:
+/// `2026-10-18T02:43:18.982593` contains `8.982` right after the `1` of `18`.
+/// That is a false positive that made the privacy check fail depending on the
+/// clock. A real coordinate is never preceded by a digit, so the match is
+/// rejected when the previous character is an ASCII digit.
+fn find_pattern(line: &str, pattern: &str) -> Option<usize> {
+    let mut from = 0usize;
+    while let Some(relative) = line[from..].find(pattern) {
+        let position = from + relative;
+        let preceded_by_digit = line[..position]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_digit());
+        if !preceded_by_digit {
+            return Some(position);
+        }
+        // Advance past the first byte of the rejected match.
+        from = position + 1;
+        if from >= line.len() {
+            break;
+        }
+    }
+    None
 }
 
 /// Asserts that a capture is clean, returning the report otherwise.
@@ -104,6 +133,34 @@ mod tests {
         assert!(!report.is_clean());
         assert!(report.findings.iter().any(|f| f.pattern == "8.9824"));
         assert!(report.findings.iter().any(|f| f.pattern == "-79.5199"));
+    }
+
+    #[test]
+    fn test_timestamp_fraction_is_not_a_coordinate_false_positive() {
+        // A timestamp like `...T02:43:18.982593+00:00` contains the substring
+        // `8.982`, which is a coordinate prefix. It must NOT be flagged: the
+        // match is preceded by the digit `1` of `18`.
+        let report = verify_capture(
+            "{\"created_at\":\"2026-10-18T02:43:18.982593+00:00\",\"updated_at\":\"2026-10-18T02:43:18.982593+00:00\"}",
+        );
+        assert!(
+            report.is_clean(),
+            "a timestamp must not be mistaken for a coordinate: {:?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn test_coordinate_not_preceded_by_a_digit_is_still_detected() {
+        // At the very start of the line (no preceding character) and after a
+        // separator, the coordinate is still caught.
+        let at_start = verify_capture("8.9824,-79.5199");
+        assert!(!at_start.is_clean());
+        assert!(at_start.findings.iter().any(|f| f.pattern == "8.9824"));
+
+        let after_colon = verify_capture("{\"latitude\":8.9824}");
+        assert!(!after_colon.is_clean());
+        assert!(after_colon.findings.iter().any(|f| f.pattern == "8.9824"));
     }
 
     #[test]

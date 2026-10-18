@@ -9,6 +9,7 @@
 pub mod invitations;
 pub mod members;
 pub mod pagination;
+pub mod pools;
 pub mod problem;
 pub mod rate_limit;
 pub mod router;
@@ -30,6 +31,7 @@ pub use gs_service::migrate;
 pub use invitations::invitations_routes;
 pub use members::members_router;
 pub use pagination::{PaginationQuery, PaginationQueryError, parse_pagination_query};
+pub use pools::{PoolsLimits, PoolsState, pools_router};
 pub use problem::{
     DETAIL_MAX_LEN, FieldError, PROBLEM_TYPE_PREFIX, Problem, ProblemResponse, TitleCatalog,
     problem_type_of, title_for,
