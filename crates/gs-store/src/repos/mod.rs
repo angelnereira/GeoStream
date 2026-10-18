@@ -5,6 +5,7 @@ pub mod api_key_repo;
 pub mod app_repo;
 pub mod audit_repo;
 pub mod device_repo;
+pub mod history_repo;
 pub mod idempotency_repo;
 pub mod invitation_repo;
 pub mod membership_repo;
@@ -16,6 +17,7 @@ pub use api_key_repo::ApiKeyRepository;
 pub use app_repo::ApplicationRepository;
 pub use audit_repo::AuditRepository;
 pub use device_repo::{DeviceRepository, UpsertDeviceParams};
+pub use history_repo::{CellRow, HistoryRepository, LocationPointRow};
 pub use idempotency_repo::{
     BeginOutcome, IdempotencyRecord, IdempotencyRepository, IdempotencyState,
 };
