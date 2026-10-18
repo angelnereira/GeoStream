@@ -87,6 +87,14 @@ pub fn pools_router(state: PoolsState) -> axum::Router {
             "/v1/pools/{session_id}/density",
             axum::routing::get(density_handler),
         )
+        .route(
+            "/v1/pools/{session_id}/members/{member_id}/availability",
+            axum::routing::put(set_availability_handler),
+        )
+        .route(
+            "/v1/pools/{session_id}/members/{member_id}/attributes",
+            axum::routing::put(set_attributes_handler),
+        )
         .with_state(state)
 }
 
@@ -246,13 +254,20 @@ async fn load_live_members(
             .and_then(|ts| u64::try_from(ts.seconds).ok())
             .map(|s| now_ms.saturating_sub(s * 1000))
             .unwrap_or(0);
+        let member_id = m.membership.id.to_string();
+        let member_state = load_member_state(state, session_id, &member_id).await;
+        let availability = match member_state.availability.as_deref() {
+            Some("BUSY") => gs_pools::Availability::Busy,
+            Some("PAUSED") => gs_pools::Availability::Paused,
+            _ => gs_pools::Availability::Available,
+        };
         members.push(gs_pools::PoolMember {
-            member_id: m.membership.id.to_string(),
+            member_id,
             lat: position.latitude,
             lon: position.longitude,
             accuracy_m: position.horizontal_accuracy_m,
-            availability: gs_pools::Availability::Available,
-            attributes: Vec::new(),
+            availability,
+            attributes: member_state.attributes.into_iter().collect(),
             connected: true,
             age_ms,
         });
@@ -371,7 +386,7 @@ fn nearby_dto(m: gs_pools::NearbyMember, members: &[gs_pools::PoolMember]) -> Ne
         member_id: m.member_id,
         distance_m: m.distance_m,
         age_ms: m.age_ms,
-        availability: "AVAILABLE".to_string(),
+        availability: availability_str(m.availability).to_string(),
         attributes: m.attributes.into_iter().collect(),
         position: PositionDto {
             latitude: m.lat,
@@ -640,12 +655,325 @@ async fn density_handler(
 ///
 /// These are the documented average edge lengths of the H3 grid; a density
 /// marker represents a cell, so the cell size is its honest uncertainty.
+fn availability_str(a: gs_pools::Availability) -> &'static str {
+    match a {
+        gs_pools::Availability::Available => "AVAILABLE",
+        gs_pools::Availability::Busy => "BUSY",
+        gs_pools::Availability::Paused => "PAUSED",
+        gs_pools::Availability::Unspecified => "AVAILABLE",
+    }
+}
+
 fn h3_cell_radius_m(resolution: u8) -> f64 {
     match resolution {
         7 => 1_220.0,
         8 => 461.0,
         9 => 174.0,
         _ => 66.0,
+    }
+}
+
+/// Per-member pool state (availability + attributes) stored in the ephemeral
+/// store at `{p}:poolm:{session}:{member}`. It is only ever projected to
+/// application principals (INV-PRS-2): a device never sees another driver's
+/// availability or attributes.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PoolMemberState {
+    /// `AVAILABLE`, `BUSY` or `PAUSED`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub availability: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub attributes: std::collections::BTreeMap<String, String>,
+}
+
+fn pool_member_key(prefix: &str, session_id: SessionId, member_id: &str) -> String {
+    format!("{prefix}:poolm:{session_id}:{member_id}")
+}
+
+async fn load_member_state(
+    state: &PoolsState,
+    session_id: SessionId,
+    member_id: &str,
+) -> PoolMemberState {
+    let key = pool_member_key(&state.sessions.redis_key_prefix, session_id, member_id);
+    match state.sessions.ephemeral.get_snapshot(&key).await {
+        Ok(Some(bytes)) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        _ => PoolMemberState::default(),
+    }
+}
+
+async fn store_member_state(
+    state: &PoolsState,
+    session_id: SessionId,
+    member_id: &str,
+    value: &PoolMemberState,
+) -> bool {
+    let key = pool_member_key(&state.sessions.redis_key_prefix, session_id, member_id);
+    let Ok(bytes) = serde_json::to_vec(value) else {
+        return false;
+    };
+    // TTL of the live index: pruned with the snapshot (docs/11 §3.1).
+    state
+        .sessions
+        .ephemeral
+        .set_snapshot(&key, &bytes, std::time::Duration::from_secs(86_400))
+        .await
+        .is_ok()
+}
+
+/// Response of the pool member endpoints: the full `Member` plus the two
+/// fields that only exist in a `POOL` session (OpenAPI `Member`).
+#[derive(Debug, Clone, Serialize)]
+pub struct PoolMemberResponse {
+    #[serde(flatten)]
+    pub member: gs_service::members::MemberResource,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub availability: Option<String>,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub attributes: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetAvailabilityRequest {
+    pub availability: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetAttributesRequest {
+    pub attributes: std::collections::BTreeMap<String, String>,
+}
+
+/// Resolves the member id a caller may act on: an application with
+/// `pools:manage` may act on any member; a device only on its own (`me`).
+async fn resolve_target_member(
+    state: &PoolsState,
+    caller: &CallerPrincipal,
+    session_id: SessionId,
+    member_id_raw: &str,
+    request_id: &str,
+) -> Result<gs_service::gs_domain::ids::MemberId, Response> {
+    match caller {
+        CallerPrincipal::Application(_) => {
+            gs_service::gs_domain::ids::MemberId::from_str(member_id_raw).map_err(|_| {
+                problem(
+                    ErrorCode::ValidationFailed,
+                    request_id,
+                    "malformed member id",
+                )
+            })
+        }
+        CallerPrincipal::Device(dev) => {
+            let own = gs_service::members::get_member_for_device_me(
+                &state.sessions.pool,
+                dev.tenant.id,
+                session_id,
+                dev.subject.id,
+            )
+            .await
+            .map_err(|_| problem(ErrorCode::NotFound, request_id, "member not found"))?;
+            if member_id_raw != "me" && member_id_raw != own.id {
+                return Err(problem(
+                    ErrorCode::PermissionDenied,
+                    request_id,
+                    "a device may only change its own availability",
+                ));
+            }
+            gs_service::gs_domain::ids::MemberId::from_str(&own.id)
+                .map_err(|_| problem(ErrorCode::Internal, request_id, "malformed own member id"))
+        }
+    }
+}
+
+async fn set_availability_handler(
+    State(state): State<PoolsState>,
+    Path((session_id_raw, member_id_raw)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Result<Json<SetAvailabilityRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authenticate_caller(&state.sessions, &headers, &request_id).await {
+        Ok(c) => c,
+        Err(resp) => return *resp,
+    };
+    let tenant_id = match authorize(
+        &state,
+        &caller,
+        &request_id,
+        "pools:manage",
+        Some("sharing:write"),
+    )
+    .await
+    {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    let session_id = match SessionId::from_str(&session_id_raw) {
+        Ok(id) => id,
+        Err(_) => {
+            return problem(
+                ErrorCode::ValidationFailed,
+                &request_id,
+                "malformed session id",
+            );
+        }
+    };
+    let body = match body {
+        Ok(Json(b)) => b,
+        Err(_) => {
+            return problem(
+                ErrorCode::ValidationFailed,
+                &request_id,
+                "body must be a SetAvailabilityRequest",
+            );
+        }
+    };
+    if !matches!(body.availability.as_str(), "AVAILABLE" | "BUSY" | "PAUSED") {
+        return problem(
+            ErrorCode::ValidationFailed,
+            &request_id,
+            "invalid availability",
+        );
+    }
+    if let Err(resp) = ensure_session(&state, tenant_id, session_id, &request_id).await {
+        return resp;
+    }
+    let member_id =
+        match resolve_target_member(&state, &caller, session_id, &member_id_raw, &request_id).await
+        {
+            Ok(id) => id,
+            Err(resp) => return resp,
+        };
+
+    let mut member_state = load_member_state(&state, session_id, &member_id.to_string()).await;
+    member_state.availability = Some(body.availability);
+    if !store_member_state(&state, session_id, &member_id.to_string(), &member_state).await {
+        return problem(
+            ErrorCode::TemporarilyUnavailable,
+            &request_id,
+            "failed to store availability",
+        );
+    }
+    respond_member(
+        &state,
+        tenant_id,
+        session_id,
+        member_id,
+        member_state,
+        &request_id,
+    )
+    .await
+}
+
+async fn set_attributes_handler(
+    State(state): State<PoolsState>,
+    Path((session_id_raw, member_id_raw)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Result<Json<SetAttributesRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authenticate_caller(&state.sessions, &headers, &request_id).await {
+        Ok(c) => c,
+        Err(resp) => return *resp,
+    };
+    // Attributes are application-only (`pools:manage`).
+    let tenant_id = match authorize(&state, &caller, &request_id, "pools:manage", None).await {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
+    let session_id = match SessionId::from_str(&session_id_raw) {
+        Ok(id) => id,
+        Err(_) => {
+            return problem(
+                ErrorCode::ValidationFailed,
+                &request_id,
+                "malformed session id",
+            );
+        }
+    };
+    let body = match body {
+        Ok(Json(b)) => b,
+        Err(_) => {
+            return problem(
+                ErrorCode::ValidationFailed,
+                &request_id,
+                "body must be a SetAttributesRequest",
+            );
+        }
+    };
+    if body.attributes.len() > 16 {
+        return problem(
+            ErrorCode::ValidationFailed,
+            &request_id,
+            "too many attributes",
+        );
+    }
+    for (k, v) in &body.attributes {
+        if !valid_attribute_key(k) || v.len() > 64 {
+            return problem(
+                ErrorCode::ValidationFailed,
+                &request_id,
+                "attribute key must match ^[a-z0-9_]{1,32}$ and value <= 64",
+            );
+        }
+    }
+    if let Err(resp) = ensure_session(&state, tenant_id, session_id, &request_id).await {
+        return resp;
+    }
+    let member_id =
+        match resolve_target_member(&state, &caller, session_id, &member_id_raw, &request_id).await
+        {
+            Ok(id) => id,
+            Err(resp) => return resp,
+        };
+
+    let mut member_state = load_member_state(&state, session_id, &member_id.to_string()).await;
+    member_state.attributes = body.attributes;
+    if !store_member_state(&state, session_id, &member_id.to_string(), &member_state).await {
+        return problem(
+            ErrorCode::TemporarilyUnavailable,
+            &request_id,
+            "failed to store attributes",
+        );
+    }
+    respond_member(
+        &state,
+        tenant_id,
+        session_id,
+        member_id,
+        member_state,
+        &request_id,
+    )
+    .await
+}
+
+fn valid_attribute_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 32
+        && key
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+async fn respond_member(
+    state: &PoolsState,
+    tenant_id: gs_service::gs_domain::ids::TenantId,
+    session_id: SessionId,
+    member_id: gs_service::gs_domain::ids::MemberId,
+    member_state: PoolMemberState,
+    request_id: &str,
+) -> Response {
+    match gs_service::members::get_member(&state.sessions.pool, tenant_id, session_id, member_id)
+        .await
+    {
+        Ok(member) => json_ok(
+            request_id,
+            PoolMemberResponse {
+                member,
+                availability: member_state.availability,
+                attributes: member_state.attributes,
+            },
+        ),
+        Err(_) => problem(ErrorCode::NotFound, request_id, "member not found"),
     }
 }
 
