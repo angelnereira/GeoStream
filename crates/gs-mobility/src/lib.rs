@@ -290,6 +290,152 @@ pub fn assign_min_cost_flow(costs: &[Vec<f64>], capacities: &[u32]) -> (f64, Vec
     (total_cost, mapping)
 }
 
+/// Minimum-cost assignment where each task may need **more than one** worker
+/// (`demand > 1`), e.g. a delivery that needs two couriers.
+///
+/// Model: `worker -> task` edges have capacity 1 (a worker either serves a task
+/// or not); `task -> sink` edges have capacity `demand`, so a task is satisfied
+/// by up to `demand` workers. Returns the total cost and, per task, the workers
+/// assigned to it.
+#[must_use]
+pub fn assign_min_cost_flow_demand(
+    costs: &[Vec<f64>],
+    capacities: &[u32],
+    demands: &[u32],
+) -> (f64, Vec<Vec<usize>>) {
+    let workers = costs.len();
+    if workers == 0 || costs[0].is_empty() {
+        return (0.0, vec![Vec::new(); demands.len()]);
+    }
+    let tasks = costs[0].len();
+
+    // Nodes: 0 source, 1..=workers, workers+1..=workers+tasks, sink.
+    let source = 0usize;
+    let sink = workers + tasks + 1;
+    let n = sink + 1;
+
+    #[derive(Clone, Copy)]
+    struct Edge {
+        to: usize,
+        cap: i64,
+        cost: f64,
+        rev: usize,
+    }
+    let mut graph: Vec<Vec<Edge>> = vec![Vec::new(); n];
+    fn add_edge(graph: &mut [Vec<Edge>], from: usize, to: usize, cap: i64, cost: f64) {
+        let a = graph[from].len();
+        let b = graph[to].len();
+        graph[from].push(Edge {
+            to,
+            cap,
+            cost,
+            rev: b,
+        });
+        graph[to].push(Edge {
+            to: from,
+            cap: 0,
+            cost: -cost,
+            rev: a,
+        });
+    }
+
+    for (w, cap) in capacities.iter().enumerate() {
+        if *cap > 0 {
+            add_edge(&mut graph, source, 1 + w, i64::from(*cap), 0.0);
+        }
+    }
+    for (w, row) in costs.iter().enumerate() {
+        for (t, cost) in row.iter().enumerate() {
+            if cost.is_finite() {
+                add_edge(&mut graph, 1 + w, 1 + workers + t, 1, *cost);
+            }
+        }
+    }
+    for t in 0..tasks {
+        let demand = demands.get(t).copied().unwrap_or(1).max(1);
+        add_edge(&mut graph, 1 + workers + t, sink, i64::from(demand), 0.0);
+    }
+
+    let mut total_cost = 0.0;
+    loop {
+        let mut dist = vec![f64::INFINITY; n];
+        let mut in_queue = vec![false; n];
+        let mut prev_node = vec![usize::MAX; n];
+        let mut prev_edge = vec![usize::MAX; n];
+        dist[source] = 0.0;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(source);
+        in_queue[source] = true;
+        while let Some(u) = queue.pop_front() {
+            in_queue[u] = false;
+            for (ei, e) in graph[u].iter().enumerate() {
+                if e.cap > 0 && dist[u] + e.cost < dist[e.to] - 1e-12 {
+                    dist[e.to] = dist[u] + e.cost;
+                    prev_node[e.to] = u;
+                    prev_edge[e.to] = ei;
+                    if !in_queue[e.to] {
+                        in_queue[e.to] = true;
+                        queue.push_back(e.to);
+                    }
+                }
+            }
+        }
+        if !dist[sink].is_finite() {
+            break;
+        }
+        // Bottleneck along the path (>= 1 here; task edges cap 1 keeps it 1).
+        let mut bottleneck = i64::MAX;
+        let mut node = sink;
+        while node != source {
+            let u = prev_node[node];
+            let e = &graph[u][prev_edge[node]];
+            bottleneck = bottleneck.min(e.cap);
+            node = u;
+        }
+        node = sink;
+        while node != source {
+            let u = prev_node[node];
+            let ei = prev_edge[node];
+            let v = graph[u][ei].to;
+            graph[u][ei].cap -= bottleneck;
+            let rev = graph[u][ei].rev;
+            graph[v][rev].cap += bottleneck;
+            node = u;
+        }
+        total_cost += dist[sink] * bottleneck as f64;
+    }
+
+    let mut mapping: Vec<Vec<usize>> = vec![Vec::new(); tasks];
+    for w in 0..workers {
+        for e in &graph[1 + w] {
+            if (workers + 1..=workers + tasks).contains(&e.to) && e.cap == 0 {
+                mapping[e.to - workers - 1].push(w);
+            }
+        }
+    }
+    (total_cost, mapping)
+}
+
+/// Own ETA estimate that prefers a **learned** circuity when one exists.
+///
+/// `learned_circuity` comes from the learned layer (`24` §3.1, per origin cell):
+/// when present it replaces the default `1.35`, because it is a measured value
+/// for that area rather than a global constant.
+#[must_use]
+pub fn estimate_eta_with_learned(
+    origin: (f64, f64),
+    dest: (f64, f64),
+    mode: EtaMode,
+    source_known: bool,
+    learned_circuity: Option<f64>,
+) -> Option<f64> {
+    let circuity = match learned_circuity {
+        Some(c) if c.is_finite() && c > 0.0 => c,
+        _ => ETA_DEFAULT_CIRCUITY,
+    };
+    estimate_eta(origin, dest, mode, circuity, source_known)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,6 +559,39 @@ mod tests {
         // Greedy: t0 -> w0 (1.0), t1 -> w1 (100.0) = 101.0
         // Optimal: t0 -> w1 (2.0), t1 -> w0 (1.0) = 3.0
         assert!((mcf - 3.0).abs() < 1e-9, "mcf was {mcf}");
+    }
+
+    #[test]
+    fn demand_two_needs_two_workers() {
+        // One task with demand 2 and two workers: both are used.
+        let costs = vec![vec![10.0], vec![20.0]];
+        let (total, mapping) = assign_min_cost_flow_demand(&costs, &[1, 1], &[2]);
+        assert_eq!(mapping[0].len(), 2, "demand 2 must pull two workers");
+        assert!((total - 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn demand_above_total_capacity_leaves_the_task_short() {
+        // Demand 3 but only two units of capacity: two workers assigned.
+        let costs = vec![vec![10.0], vec![20.0]];
+        let (_total, mapping) = assign_min_cost_flow_demand(&costs, &[1, 1], &[3]);
+        assert_eq!(mapping[0].len(), 2);
+    }
+
+    #[test]
+    fn learned_circuity_overrides_the_default() {
+        let def =
+            estimate_eta_with_learned((8.98, -79.52), (8.99, -79.52), EtaMode::Driving, true, None)
+                .unwrap();
+        let learned = estimate_eta_with_learned(
+            (8.98, -79.52),
+            (8.99, -79.52),
+            EtaMode::Driving,
+            true,
+            Some(1.0),
+        )
+        .unwrap();
+        assert!(learned < def, "a circuity of 1.0 must shorten the ETA");
     }
 
     #[test]

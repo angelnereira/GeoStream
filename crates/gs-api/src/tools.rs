@@ -332,11 +332,13 @@ async fn assignments_handler(
         let (_, mapping) = gs_mobility::assign(&costs, 1);
         build_result(&request, &mapping, &costs, request.max_cost)
     } else {
-        // `min_cost_flow`: worker capacities are the point of the model, so the
-        // solver is a real min-cost flow, not a per-task nearest pick.
+        // `min_cost_flow`: worker capacities **and task demands** are the point
+        // of the model, so the solver is a real min-cost flow. A task with
+        // `demand > 1` is satisfied by up to that many workers.
         let capacities: Vec<u32> = request.workers.iter().map(|w| w.capacity).collect();
-        let (_, mapping) = gs_mobility::assign_min_cost_flow(&costs, &capacities);
-        build_result(&request, &mapping, &costs, request.max_cost)
+        let demands: Vec<u32> = request.tasks.iter().map(|t| t.demand).collect();
+        let (_, mapping) = gs_mobility::assign_min_cost_flow_demand(&costs, &capacities, &demands);
+        build_multi_result(&request, &mapping, &costs, request.max_cost)
     };
 
     json_ok(
@@ -346,6 +348,39 @@ async fn assignments_handler(
             unassigned,
         },
     )
+}
+
+/// Builds the flat assignment list for the demand-aware solver: one entry per
+/// (task, worker) pair, so a task with `demand = 2` produces two entries.
+fn build_multi_result(
+    request: &AssignmentRequest,
+    workers_of_task: &[Vec<usize>],
+    costs: &[Vec<f64>],
+    max_cost: Option<f64>,
+) -> (Vec<Assignment>, Vec<String>) {
+    let mut assignments = Vec::new();
+    let mut unassigned = Vec::new();
+    for (task_idx, workers) in workers_of_task.iter().enumerate() {
+        let mut any = false;
+        for w in workers {
+            let cost = costs[*w][task_idx];
+            if let Some(limit) = max_cost
+                && cost > limit
+            {
+                continue;
+            }
+            assignments.push(Assignment {
+                task_id: request.tasks[task_idx].id.clone(),
+                worker_id: request.workers[*w].id.clone(),
+                cost,
+            });
+            any = true;
+        }
+        if !any {
+            unassigned.push(request.tasks[task_idx].id.clone());
+        }
+    }
+    (assignments, unassigned)
 }
 
 fn build_result(

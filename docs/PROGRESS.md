@@ -30,9 +30,18 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 
 ## Bloqueos y solicitudes de decisión abiertas
 
-| ID | Tarea | Estado | Qué bloquea |
+Cinco decisiones abiertas. Todas son contradicciones o información faltante reales
+entre documentos normativos; `AGENTS.md` prohíbe que un agente las resuelva por su
+cuenta. Los **kernels puros** de todas ellas están implementados y probados; lo
+que falta es el esquema o la decisión de contrato.
+
+| ID | Tarea | Qué bloquea | Qué **no** está bloqueado |
 |---|---|---|---|
-| DR-20261017-01 | T-E3-02 | **pendiente** | Contradicción `docs/22` §3.3 ↔ `contracts/test-vectors/sampling_policy.json`: el vector `SMP-PUB-002` publica por debajo del umbral que fija el documento y `SMP-PUB-003` usa una razón `accuracy` que el documento no define. La selección de intervalo (`SMP-INT`) sí está implementada. |
+| DR-20261017-01 | T-E3-02 | Publicación por cambio significativo: `22` §3.3 (cinco condiciones, umbral `max(min_distance, factor·accuracy)`) contradice `sampling_policy.json` (`SMP-PUB-002` publica por debajo del umbral; `SMP-PUB-003` usa una razón `accuracy` inexistente). | Selección de intervalo (`SMP-INT-001..005`) y cola offline (`SMP-OFF`) implementadas y con vectores. |
+| DR-20261018-01 | T-E6-06 | Formato `gsp1` sin especificar en ningún documento, y ruta de traza divergente: OpenAPI `/sessions/{id}/trace` vs `24` §4/`03` `/sessions/{id}/members/{member_id}/trace`. | `GET /sessions/{id}/trace` implementado en la ruta del OpenAPI con `json`/`polyline` y `gsp1` según la propuesta del DR. |
+| DR-20261018-02 | T-E8-04/05 | `edge_reports.finder_device_id NOT NULL` (`11` §2.0) contradice T-28 y `25` §2.4 («no guardar el dispositivo del buscador junto al blob»). | Almacén de tags (`/v1/tags`) y kernels de E8 (HMAC, EID, DULT) listos. |
+| DR-20261018-03 | T-E7-01..04 | `11` §2.0 **no define ninguna migración** para la capa aprendida (perfiles de velocidad, ETA, sinuosidad, lugares, demanda/oferta, matrices OD), que `24` §3.1 y `07` §9.11 sí requieren. | Kernels de E7 (DBSCAN, eventos de conducción, cubetas de velocidad, sinuosidad, k-anonimato) implementados. |
+| DR-20261018-04 | T-E8-08 | `edge_lpwan_integrations.secret_hash` (`11` §2.0) no puede verificar un HMAC, que necesita la clave; `07` §10.3 guarda el secreto cifrado. Ruta del webhook divergente (OpenAPI vs `25` §4). | Trait `LpwanDecoder` con registro y decodificador de referencia listos. |
 
 Las cuatro decisiones que bloqueaban F4 están resueltas.
 
