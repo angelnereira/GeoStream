@@ -26,12 +26,14 @@ use crate::ports::*;
 mod clock;
 mod connection;
 mod heading;
+mod offline;
 mod ports;
 mod prediction;
 mod sampler;
 mod sampling_policy;
 mod sequence;
 
+pub use crate::offline::*;
 pub use crate::prediction::*;
 pub use crate::sampling_policy::*;
 
