@@ -103,6 +103,14 @@ Formato de cada entrada (más reciente arriba):
 - `tools/src/crate_deps`: se declara que `gs-ffi` depende directamente de `gs-client-core` además del runtime, porque la FFI llama al núcleo sin pasar por I/O.
 - Siguiente: T-E1-05 ya cubierto en el workflow de CI (musl + wasm32), T-E1-06 cubierto por `crates/gs-client-core/tests/properties.rs`.
 
+### 2026-10-17 — Pools rings/density REST y checkpoint del filtro
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Evidencia:
+  - `GET /v1/pools/{id}/rings` (paso o `k`, exactamente uno) y `/density` (accesible a dispositivo con `pools:density`) montados y verificados en vivo (`401` sin credencial).
+  - T-E2-06: `TrackStateMachine::encode_checkpoint`/`decode_checkpoint` con ida y vuelta exacta (misma estimación tras restaurar) y rechazo de blob malformado; guardado en `{p}:trk:{device}` tras cada publicación aceptada y restaurado en el hello.
+- Pendiente: `availability`/`attributes` reales (T-E4-05); TTL del checkpoint desde `GS_TRACK_STATE_TTL_S` (hoy constante documentada); prueba de integración 200 con política habilitada.
+
 ### 2026-10-17 — E2 en la ingesta y REST de pools
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada (E2 en ingesta + `nearby`).
