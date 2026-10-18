@@ -103,6 +103,13 @@ Formato de cada entrada (más reciente arriba):
 - `tools/src/crate_deps`: se declara que `gs-ffi` depende directamente de `gs-client-core` además del runtime, porque la FFI llama al núcleo sin pasar por I/O.
 - Siguiente: T-E1-05 ya cubierto en el workflow de CI (musl + wasm32), T-E1-06 cubierto por `crates/gs-client-core/tests/properties.rs`.
 
+### 2026-10-17 — Migraciones de la pista E (E2/E6/E8)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada (esquema).
+- Evidencia: `0003_engine_state.sql`, `0004_history.sql`, `0005_edge.sql` aplicadas contra PostgreSQL 16 real; `location_points` es particionada (`relkind='p'`); `history_mode` por defecto `OFF`; `consent_purposes` por defecto `{}`; `tags` sin columna `EIK`. Pruebas de invariantes de esquema en `gs-store` (contra base) y guardas puras de migraciones incrustadas.
+- Hallazgo: `sqlx::migrate!` no recompila al añadir un fichero nuevo; documentado en `docs/11` §2.0. La imagen Docker compila desde cero y no se ve afectada.
+- Siguiente: handlers REST/WS reales en `gs-api`/`gs-stream` (hoy solo `/health/*`).
+
 ### 2026-10-15 — T-E1-02 — `gs-client-core`: núcleo sans-IO
 
 - Autor/agente: Angel Nereira (con agente de código).

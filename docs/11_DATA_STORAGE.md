@@ -265,6 +265,14 @@ CREATE INDEX geofences_session_idx ON geofences (session_id) WHERE session_id IS
 
 ### 2.0 Migraciones de la pista E
 
+> **Nota de build.** Las migraciones se incrustan en el binario en tiempo de
+> compilación (`sqlx::migrate!`). Añadir un fichero nuevo **no** recompila por sí
+> solo el crate que contiene el macro, así que un binario incremental puede
+> resolver un conjunto de migraciones desactualizado y fallar con «migration N
+> was previously applied but is missing in the resolved migrations». En local:
+> `cargo clean -p gs-store` antes de volver a compilar. La imagen Docker siempre
+> compila desde cero, así que el despliegue no se ve afectado.
+
 Cada fase de la pista E añade **su propia** migración, de forma que el producto de la línea base no se modifica por la adopción:
 
 | Migración | Fase | Contenido |

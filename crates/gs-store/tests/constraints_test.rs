@@ -36,7 +36,10 @@ async fn test_schema_version_and_migration_idempotency() {
     // Plan migrations reports 0 pending
     let plan = plan_migrations(&pool).await.expect("plan migrations");
     assert_eq!(plan.expected_version, expected_schema_version());
-    assert_eq!(plan.current_version, Some(1));
+    // After `run_migrations` the database is at the latest embedded version,
+    // whatever that is (0005 today). Asserting against the constant keeps this
+    // from going stale every time the E track adds a migration.
+    assert_eq!(plan.current_version, Some(expected_schema_version()));
     assert_eq!(plan.pending_count, 0);
 }
 
@@ -702,5 +705,69 @@ async fn test_webhook_endpoints_and_deliveries_constraints() {
     assert!(
         res_dup_deliv.is_err(),
         "duplicate (event_id, endpoint_id) delivery must fail"
+    );
+}
+
+// --- E-track schema invariants (docs/11 §2.0) -----------------------------
+// These are checked by *inspecting the schema*, not by trusting the migration
+// text: T-E8-06 requires "the server never stores the EIK, verified by schema
+// inspection".
+
+#[tokio::test]
+async fn location_points_is_partitioned() {
+    let pool = setup_db().await;
+    let relkind: String =
+        sqlx::query_scalar("SELECT relkind::text FROM pg_class WHERE relname = 'location_points';")
+            .fetch_one(&pool)
+            .await
+            .expect("location_points exists");
+    assert_eq!(relkind, "p", "location_points must be a partitioned table");
+}
+
+#[tokio::test]
+async fn sessions_history_mode_defaults_off() {
+    let pool = setup_db().await;
+    let default: String = sqlx::query_scalar(
+        "SELECT column_default FROM information_schema.columns \
+         WHERE table_name = 'sessions' AND column_name = 'history_mode';",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("history_mode exists");
+    assert!(
+        default.contains("OFF"),
+        "history_mode must default to OFF, got {default}"
+    );
+}
+
+#[tokio::test]
+async fn memberships_consent_defaults_empty() {
+    let pool = setup_db().await;
+    let default: String = sqlx::query_scalar(
+        "SELECT column_default FROM information_schema.columns \
+         WHERE table_name = 'memberships' AND column_name = 'consent_purposes';",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("consent_purposes exists");
+    assert!(
+        default.contains("{}"),
+        "consent_purposes must default empty, got {default}"
+    );
+}
+
+#[tokio::test]
+async fn tags_has_no_encrypted_identity_key_column() {
+    let pool = setup_db().await;
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.columns \
+         WHERE table_name = 'tags' AND column_name ~* 'eik|encrypted_identity';",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("query columns");
+    assert_eq!(
+        count, 0,
+        "the tags table must not have an EIK column (INV-EDGE-1)"
     );
 }
