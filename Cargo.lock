@@ -1625,6 +1625,7 @@ dependencies = [
  "gs-pools",
  "gs-protocol",
  "gs-service",
+ "gs-track",
  "http",
  "jsonschema",
  "metrics",

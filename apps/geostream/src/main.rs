@@ -360,8 +360,11 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                     limits: gs_api::ToolsLimits::default(),
                 }))
                 .merge(gs_api::pools_router(gs_api::PoolsState {
-                    sessions: session_state,
+                    sessions: session_state.clone(),
                     limits: gs_api::PoolsLimits::default(),
+                }))
+                .merge(gs_api::ingest_router(gs_api::IngestState {
+                    sessions: session_state,
                 }));
         }
 

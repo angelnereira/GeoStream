@@ -71,6 +71,7 @@ pub fn check_crate_deps(repo_root: &Path) -> Result<(), Vec<String>> {
             "gs-mobility",
             "gs-pools",
             "gs-protocol",
+            "gs-track",
         ])),
     );
     allowed_internal.insert(
