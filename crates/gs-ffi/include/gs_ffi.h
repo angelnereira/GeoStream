@@ -54,6 +54,18 @@ GsResult gs_client_destroy(GsHandle *handle);
 /* Set the integrator intent (0 off, 1 trip, 2 idle, 3 background, 4 history). */
 GsResult gs_client_set_intent(GsHandle *handle, int32_t intent);
 
+/* Lifecycle command codes for `gs_client_command`. */
+#define GS_CMD_START 1
+#define GS_CMD_STOP 2
+#define GS_CMD_FORCE_RECONNECT 3
+
+/* Send a lifecycle command. */
+GsResult gs_client_command(GsHandle *handle, int32_t command);
+
+/* Subscribe (watch != 0) or unsubscribe to a session id. */
+GsResult gs_client_watch(GsHandle *handle, const uint8_t *session_id,
+                         size_t len, uint8_t watch);
+
 /* Feed a platform fix. Returns the number of outputs produced, or a negative
  * GsResult code. */
 int32_t gs_client_location_fix(GsHandle *handle, const GsPlatformFix *fix);

@@ -35,6 +35,17 @@ int main(void) {
         return 1;
     }
 
+    if (gs_client_command(handle, GS_CMD_START) != GS_OK) {
+        fprintf(stderr, "start command failed\n");
+        return 1;
+    }
+
+    const char *session = "ses_00000000000000000000000000000000";
+    if (gs_client_watch(handle, (const uint8_t *)session, strlen(session), 1) != GS_OK) {
+        fprintf(stderr, "watch failed\n");
+        return 1;
+    }
+
     GsPlatformFix fix = {0};
     fix.lat = 8.9824;
     fix.lon = -79.5199;

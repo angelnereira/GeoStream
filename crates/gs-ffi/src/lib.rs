@@ -282,6 +282,85 @@ fn output_kind(output: &gs_client_core::Output) -> &'static str {
     }
 }
 
+/// Command codes for `gs_client_command`.
+pub const GS_CMD_START: i32 = 1;
+pub const GS_CMD_STOP: i32 = 2;
+pub const GS_CMD_FORCE_RECONNECT: i32 = 3;
+
+/// Sends a lifecycle command to the core.
+///
+/// # Safety
+///
+/// `handle` must be a valid pointer from `gs_client_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gs_client_command(handle: *mut GsHandle, command: i32) -> GsResult {
+    if handle.is_null() {
+        return GsResult::NullPointer;
+    }
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| -> Result<i32, GsResult> {
+        // SAFETY: checked non-null; the caller upholds the handle contract.
+        let h = unsafe { handle.as_mut() }.ok_or(GsResult::InvalidHandle)?;
+        let command = match command {
+            GS_CMD_START => gs_client_core::Command::Start,
+            GS_CMD_STOP => gs_client_core::Command::Stop,
+            GS_CMD_FORCE_RECONNECT => gs_client_core::Command::ForceReconnect,
+            _ => return Err(GsResult::InvalidHandle),
+        };
+        let outputs = h.core.handle(gs_client_core::Input::Command(command), 0);
+        for output in &outputs {
+            h.events.push_back(output_kind(output));
+        }
+        Ok(outputs.len() as i32)
+    }));
+    match result {
+        Ok(Ok(_)) => GsResult::Ok,
+        Ok(Err(code)) => code,
+        Err(_) => GsResult::Panic,
+    }
+}
+
+/// Subscribes (`watch != 0`) or unsubscribes to a session.
+///
+/// # Safety
+///
+/// `handle` must be valid; `session_id` must point to `len` readable bytes of
+/// UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gs_client_watch(
+    handle: *mut GsHandle,
+    session_id: *const u8,
+    len: usize,
+    watch: u8,
+) -> GsResult {
+    if handle.is_null() || session_id.is_null() || len == 0 {
+        return GsResult::NullPointer;
+    }
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| -> Result<(), GsResult> {
+        // SAFETY: checked non-null; the caller promises `len` readable bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(session_id, len) };
+        let session_id = std::str::from_utf8(bytes)
+            .map_err(|_| GsResult::NullPointer)?
+            .to_string();
+        // SAFETY: checked non-null; the caller upholds the handle contract.
+        let h = unsafe { handle.as_mut() }.ok_or(GsResult::InvalidHandle)?;
+        let command = if watch != 0 {
+            gs_client_core::Command::Watch { session_id }
+        } else {
+            gs_client_core::Command::Unwatch { session_id }
+        };
+        let outputs = h.core.handle(gs_client_core::Input::Command(command), 0);
+        for output in &outputs {
+            h.events.push_back(output_kind(output));
+        }
+        Ok(())
+    }));
+    match result {
+        Ok(Ok(())) => GsResult::Ok,
+        Ok(Err(code)) => code,
+        Err(_) => GsResult::Panic,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +445,32 @@ mod tests {
         // SAFETY: h valid; buf writable.
         let drained = unsafe { gs_client_poll_event(h, buf.as_mut_ptr(), buf.len()) };
         assert_eq!(drained, 0, "the queue must drain");
+        // SAFETY: h valid.
+        assert_eq!(unsafe { gs_client_destroy(h) }, GsResult::Ok);
+    }
+
+    #[test]
+    fn command_and_watch_are_accepted() {
+        let h = gs_client_create();
+        // SAFETY: h valid.
+        assert_eq!(unsafe { gs_client_command(h, GS_CMD_START) }, GsResult::Ok);
+        let session = b"ses_00000000000000000000000000000000";
+        // SAFETY: h valid; session is a valid readable slice.
+        assert_eq!(
+            unsafe { gs_client_watch(h, session.as_ptr(), session.len(), 1) },
+            GsResult::Ok
+        );
+        // SAFETY: h valid; session readable.
+        assert_eq!(
+            unsafe { gs_client_watch(h, session.as_ptr(), session.len(), 0) },
+            GsResult::Ok
+        );
+        // An unknown command code is rejected.
+        // SAFETY: h valid.
+        assert_eq!(
+            unsafe { gs_client_command(h, 999) },
+            GsResult::InvalidHandle
+        );
         // SAFETY: h valid.
         assert_eq!(unsafe { gs_client_destroy(h) }, GsResult::Ok);
     }
