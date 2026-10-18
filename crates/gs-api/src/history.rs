@@ -55,6 +55,7 @@ pub fn history_router(state: HistoryState) -> axum::Router {
             "/v1/sessions/{session_id}/trace",
             axum::routing::get(trace_handler),
         )
+        .route("/v1/trips/{trip_id}", axum::routing::get(get_trip))
         .with_state(state)
 }
 
@@ -553,6 +554,133 @@ fn base64url(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+#[derive(Debug, Serialize)]
+pub struct TripStopDto {
+    pub started_at: String,
+    pub ended_at: String,
+    pub duration_s: i32,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub radius_m: f64,
+    pub point_count: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TripDto {
+    pub id: String,
+    pub session_id: String,
+    pub member_id: String,
+    pub started_at: String,
+    pub ended_at: String,
+    pub duration_s: i32,
+    pub distance_m: f64,
+    pub point_count: i32,
+    pub mode: Option<String>,
+    pub stops: Vec<TripStopDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_gsp1: Option<String>,
+}
+
+async fn get_trip(
+    State(state): State<HistoryState>,
+    Path(trip_id_raw): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authenticate_caller(&state.sessions, &headers, &request_id).await {
+        Ok(c) => c,
+        Err(resp) => return *resp,
+    };
+    let tenant_id = match &caller {
+        CallerPrincipal::Application(app) => {
+            if !app.api_key.scopes.iter().any(|s| s == "history:read") {
+                return problem(
+                    ErrorCode::InsufficientScope,
+                    &request_id,
+                    "application requires history:read scope",
+                );
+            }
+            app.tenant.id
+        }
+        CallerPrincipal::Device(_) => {
+            return problem(
+                ErrorCode::PermissionDenied,
+                &request_id,
+                "devices cannot read a trip",
+            );
+        }
+    };
+    let trip_id = match gs_service::gs_domain::ids::TripId::from_str(&trip_id_raw) {
+        Ok(id) => id,
+        Err(_) => {
+            return problem(
+                ErrorCode::ValidationFailed,
+                &request_id,
+                "malformed trip id",
+            );
+        }
+    };
+
+    let tenant = match TenantRepository::get_by_id(&state.sessions.pool, tenant_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return problem(ErrorCode::NotFound, &request_id, "tenant not found"),
+        Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to load tenant"),
+    };
+    let policy = gs_service::gs_auth::TenantPolicy::from_json_value(tenant.policy.clone())
+        .unwrap_or_default();
+    if !policy.history_allowed {
+        return problem(
+            ErrorCode::FeatureDisabled,
+            &request_id,
+            "history is disabled for this tenant",
+        );
+    }
+
+    let loaded =
+        match HistoryRepository::get_trip(&state.sessions.pool, tenant_id, trip_id.into_uuid())
+            .await
+        {
+            Ok(Some(v)) => v,
+            Ok(None) => return problem(ErrorCode::NotFound, &request_id, "trip not found"),
+            Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to load trip"),
+        };
+    let (trip, stops, track) = loaded;
+
+    let fmt = |i: OffsetDateTime| i.format(&Rfc3339).unwrap_or_default();
+    let track_points: Vec<gs_geo::LatLon> = track
+        .iter()
+        .map(|(lat, lon)| gs_geo::LatLon::new(*lat, *lon))
+        .collect();
+
+    json_ok(
+        &request_id,
+        TripDto {
+            id: gs_service::gs_domain::ids::TripId::from_uuid(trip.id).to_string(),
+            session_id: SessionId::from_uuid(trip.session_id).to_string(),
+            member_id: gs_service::gs_domain::ids::MemberId::from_uuid(trip.member_id).to_string(),
+            started_at: fmt(trip.started_at),
+            ended_at: fmt(trip.ended_at),
+            duration_s: trip.duration_s,
+            distance_m: trip.distance_m,
+            point_count: trip.point_count,
+            mode: trip.mode,
+            stops: stops
+                .into_iter()
+                .map(|s| TripStopDto {
+                    started_at: fmt(s.started_at),
+                    ended_at: fmt(s.ended_at),
+                    duration_s: s.duration_s,
+                    latitude: s.latitude,
+                    longitude: s.longitude,
+                    radius_m: s.radius_m,
+                    point_count: s.point_count,
+                })
+                .collect(),
+            track_gsp1: (!track_points.is_empty()).then(|| encode_gsp1(&track_points)),
+        },
+    )
 }
 
 fn json_ok<T: Serialize>(request_id: &str, body: T) -> Response {

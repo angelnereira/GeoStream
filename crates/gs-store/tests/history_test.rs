@@ -200,3 +200,62 @@ async fn subject_purge_removes_every_history_row() {
             .expect("count");
     assert_eq!(remaining, 0);
 }
+
+#[tokio::test]
+async fn trip_round_trip_with_stops_and_track() {
+    // covers: FR-HIS-003, docs/24 §3
+    let pool = setup_db().await;
+    let tenant = create_tenant(&pool).await;
+    let tenant_id = gs_domain::ids::TenantId::from_uuid(tenant);
+    let trip_id = Uuid::now_v7();
+    let started = OffsetDateTime::from_unix_timestamp(1_768_435_200).unwrap();
+    let ended = started + Duration::minutes(10);
+
+    sqlx::query(
+        "INSERT INTO trips (id, tenant_id, session_id, member_id, subject_id, started_at, ended_at, \
+         duration_s, distance_m, point_count, stop_count, mode) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,600,1200.0,120,1,'DRIVING');",
+    )
+    .bind(trip_id)
+    .bind(tenant)
+    .bind(Uuid::now_v7())
+    .bind(Uuid::now_v7())
+    .bind(Uuid::now_v7())
+    .bind(started)
+    .bind(ended)
+    .execute(&pool)
+    .await
+    .expect("insert trip");
+
+    sqlx::query(
+        "INSERT INTO trip_tracks (trip_id, seq, lat_e7, lon_e7) VALUES ($1, 0, 89824000, -795199000), ($1, 1, 89830000, -795199000);",
+    )
+    .bind(trip_id)
+    .execute(&pool)
+    .await
+    .expect("insert track");
+
+    sqlx::query(
+        "INSERT INTO stops (id, tenant_id, trip_id, member_id, started_at, ended_at, duration_s, \
+         latitude, longitude, radius_m, point_count) \
+         VALUES ($1,$2,$3,$4,$5,$6,300,8.9824,-79.5199,25.0,30);",
+    )
+    .bind(Uuid::now_v7())
+    .bind(tenant)
+    .bind(trip_id)
+    .bind(Uuid::now_v7())
+    .bind(started)
+    .bind(started + Duration::minutes(5))
+    .execute(&pool)
+    .await
+    .expect("insert stop");
+
+    let (trip, stops, track) = HistoryRepository::get_trip(&pool, tenant_id, trip_id)
+        .await
+        .expect("get trip")
+        .expect("present");
+    assert_eq!(trip.point_count, 120);
+    assert_eq!(stops.len(), 1);
+    assert_eq!(track.len(), 2);
+    assert!((track[0].0 - 8.9824).abs() < 1e-6);
+}

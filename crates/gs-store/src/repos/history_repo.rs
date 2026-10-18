@@ -346,3 +346,102 @@ impl HistoryRepository {
             .collect())
     }
 }
+
+/// A stored trip with its stops and simplified track.
+#[derive(Debug, Clone)]
+pub struct TripRow {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub member_id: Uuid,
+    pub started_at: OffsetDateTime,
+    pub ended_at: OffsetDateTime,
+    pub duration_s: i32,
+    pub distance_m: f64,
+    pub point_count: i32,
+    pub mode: Option<String>,
+}
+
+/// A stored stop of a trip.
+#[derive(Debug, Clone)]
+pub struct StopRow {
+    pub started_at: OffsetDateTime,
+    pub ended_at: OffsetDateTime,
+    pub duration_s: i32,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub radius_m: f64,
+    pub point_count: i32,
+}
+
+impl HistoryRepository {
+    /// Reads a trip, its stops and its simplified track, scoped to its tenant.
+    pub async fn get_trip(
+        pool: &PgPool,
+        tenant_id: TenantId,
+        trip_id: Uuid,
+    ) -> Result<Option<(TripRow, Vec<StopRow>, Vec<(f64, f64)>)>, StoreError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, session_id, member_id, started_at, ended_at, duration_s,
+                   distance_m, point_count, mode
+            FROM trips WHERE id = $1 AND tenant_id = $2;
+            "#,
+        )
+        .bind(trip_id)
+        .bind(tenant_id.into_uuid())
+        .fetch_optional(pool)
+        .await
+        .map_err(StoreError::Database)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let trip = TripRow {
+            id: row.get("id"),
+            session_id: row.get("session_id"),
+            member_id: row.get("member_id"),
+            started_at: row.get("started_at"),
+            ended_at: row.get("ended_at"),
+            duration_s: row.get("duration_s"),
+            distance_m: row.get("distance_m"),
+            point_count: row.get("point_count"),
+            mode: row.get("mode"),
+        };
+
+        let stops = sqlx::query(
+            "SELECT started_at, ended_at, duration_s, latitude, longitude, radius_m, point_count \
+             FROM stops WHERE trip_id = $1 ORDER BY started_at ASC;",
+        )
+        .bind(trip_id)
+        .fetch_all(pool)
+        .await
+        .map_err(StoreError::Database)?
+        .into_iter()
+        .map(|r| StopRow {
+            started_at: r.get("started_at"),
+            ended_at: r.get("ended_at"),
+            duration_s: r.get("duration_s"),
+            latitude: r.get("latitude"),
+            longitude: r.get("longitude"),
+            radius_m: r.get("radius_m"),
+            point_count: r.get("point_count"),
+        })
+        .collect();
+
+        let track = sqlx::query(
+            "SELECT lat_e7, lon_e7 FROM trip_tracks WHERE trip_id = $1 ORDER BY seq ASC;",
+        )
+        .bind(trip_id)
+        .fetch_all(pool)
+        .await
+        .map_err(StoreError::Database)?
+        .into_iter()
+        .map(|r| {
+            let lat: i32 = r.get("lat_e7");
+            let lon: i32 = r.get("lon_e7");
+            (f64::from(lat) / 1e7, f64::from(lon) / 1e7)
+        })
+        .collect();
+
+        Ok(Some((trip, stops, track)))
+    }
+}
