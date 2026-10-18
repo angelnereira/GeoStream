@@ -296,3 +296,53 @@ fn parse_partition_suffix(name: &str) -> Option<(i32, u8)> {
     }
     Some((year, month))
 }
+
+/// One point of a trace query.
+#[derive(Debug, Clone)]
+pub struct TracePoint {
+    pub latitude: f64,
+    pub longitude: f64,
+    pub captured_at: OffsetDateTime,
+}
+
+impl HistoryRepository {
+    /// Reads the ordered points of a session inside a window.
+    ///
+    /// Ordering is by `captured_at` then `sequence`: a trace is a path, and the
+    /// path is the order the points were captured, not the order they arrived.
+    pub async fn read_points(
+        pool: &PgPool,
+        tenant_id: TenantId,
+        session_id: Uuid,
+        from: OffsetDateTime,
+        to: OffsetDateTime,
+        limit: i64,
+    ) -> Result<Vec<TracePoint>, StoreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT latitude, longitude, captured_at
+            FROM location_points
+            WHERE tenant_id = $1 AND session_id = $2
+              AND captured_at >= $3 AND captured_at < $4
+            ORDER BY captured_at ASC, sequence ASC
+            LIMIT $5;
+            "#,
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(session_id)
+        .bind(from)
+        .bind(to)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(StoreError::Database)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| TracePoint {
+                latitude: r.get("latitude"),
+                longitude: r.get("longitude"),
+                captured_at: r.get("captured_at"),
+            })
+            .collect())
+    }
+}

@@ -18,7 +18,7 @@ pub use api_key_repo::ApiKeyRepository;
 pub use app_repo::ApplicationRepository;
 pub use audit_repo::AuditRepository;
 pub use device_repo::{DeviceRepository, UpsertDeviceParams};
-pub use history_repo::{CellRow, HistoryRepository, LocationPointRow};
+pub use history_repo::{CellRow, HistoryRepository, LocationPointRow, TracePoint};
 pub use idempotency_repo::{
     BeginOutcome, IdempotencyRecord, IdempotencyRepository, IdempotencyState,
 };

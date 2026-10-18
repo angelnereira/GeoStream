@@ -12,7 +12,7 @@
 #![allow(clippy::result_large_err)]
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use gs_service::gs_domain::error::ErrorCode;
@@ -26,6 +26,7 @@ use gs_service::gs_store::repos::{
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::sessions::{CallerPrincipal, SessionApiState, authenticate_caller};
 use crate::{Problem, ProblemResponse, request_id_from};
@@ -49,6 +50,10 @@ pub fn history_router(state: HistoryState) -> axum::Router {
         .route(
             "/v1/sessions/{session_id}/history",
             axum::routing::post(ingest_history_handler),
+        )
+        .route(
+            "/v1/sessions/{session_id}/trace",
+            axum::routing::get(trace_handler),
         )
         .with_state(state)
 }
@@ -310,7 +315,296 @@ async fn ingest_history_handler(
     response
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TraceQuery {
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub simplify_m: Option<f64>,
+    #[serde(default)]
+    pub format: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TracePointDto {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TraceResponse {
+    pub session_id: String,
+    pub from: String,
+    pub to: String,
+    pub points: Vec<TracePointDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoded: Option<String>,
+}
+
+async fn trace_handler(
+    State(state): State<HistoryState>,
+    Path(session_id_raw): Path<String>,
+    Query(query): Query<TraceQuery>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = match authenticate_caller(&state.sessions, &headers, &request_id).await {
+        Ok(c) => c,
+        Err(resp) => return *resp,
+    };
+    // Application `history:read` only (OpenAPI `device: none`).
+    let tenant_id = match &caller {
+        CallerPrincipal::Application(app) => {
+            if !app.api_key.scopes.iter().any(|s| s == "history:read") {
+                return problem(
+                    ErrorCode::InsufficientScope,
+                    &request_id,
+                    "application requires history:read scope",
+                );
+            }
+            app.tenant.id
+        }
+        CallerPrincipal::Device(_) => {
+            return problem(
+                ErrorCode::PermissionDenied,
+                &request_id,
+                "devices cannot read a session trace",
+            );
+        }
+    };
+    let session_id = match SessionId::from_str(&session_id_raw) {
+        Ok(id) => id,
+        Err(_) => {
+            return problem(
+                ErrorCode::ValidationFailed,
+                &request_id,
+                "malformed session id",
+            );
+        }
+    };
+    let from = match OffsetDateTime::parse(&query.from, &Rfc3339) {
+        Ok(t) => t,
+        Err(_) => return problem(ErrorCode::ValidationFailed, &request_id, "invalid from"),
+    };
+    let to = match OffsetDateTime::parse(&query.to, &Rfc3339) {
+        Ok(t) => t,
+        Err(_) => return problem(ErrorCode::ValidationFailed, &request_id, "invalid to"),
+    };
+    if to <= from {
+        return problem(
+            ErrorCode::ValidationFailed,
+            &request_id,
+            "to must be after from",
+        );
+    }
+    let simplify_m = query.simplify_m.unwrap_or(0.0);
+    if !(0.0..=1000.0).contains(&simplify_m) {
+        return problem(
+            ErrorCode::ValidationFailed,
+            &request_id,
+            "simplify_m out of range",
+        );
+    }
+    let format = query.format.as_deref().unwrap_or("json");
+    if !matches!(format, "json" | "polyline" | "gsp1") {
+        return problem(ErrorCode::ValidationFailed, &request_id, "invalid format");
+    }
+
+    // Tenant policy: the trace is history, so `history_allowed` must hold.
+    let tenant = match TenantRepository::get_by_id(&state.sessions.pool, tenant_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return problem(ErrorCode::NotFound, &request_id, "tenant not found"),
+        Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to load tenant"),
+    };
+    let policy = gs_service::gs_auth::TenantPolicy::from_json_value(tenant.policy.clone())
+        .unwrap_or_default();
+    if !policy.history_allowed {
+        return problem(
+            ErrorCode::FeatureDisabled,
+            &request_id,
+            "history is disabled for this tenant",
+        );
+    }
+
+    let raw = match HistoryRepository::read_points(
+        &state.sessions.pool,
+        tenant_id,
+        session_id.into_uuid(),
+        from,
+        to,
+        100_000,
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(_) => return problem(ErrorCode::Internal, &request_id, "failed to read trace"),
+    };
+
+    let mut points: Vec<gs_geo::LatLon> = raw
+        .iter()
+        .map(|p| gs_geo::LatLon::new(p.latitude, p.longitude))
+        .collect();
+    if simplify_m > 0.0 {
+        points = gs_geo::simplify_rdp(&points, simplify_m);
+    }
+
+    let encoded = match format {
+        "polyline" => Some(encode_polyline(&points)),
+        "gsp1" => Some(encode_gsp1(&points)),
+        _ => None,
+    };
+
+    json_ok(
+        &request_id,
+        TraceResponse {
+            session_id: session_id_raw,
+            from: query.from,
+            to: query.to,
+            points: points
+                .iter()
+                .map(|p| TracePointDto {
+                    lat: p.lat,
+                    lon: p.lon,
+                })
+                .collect(),
+            encoded,
+        },
+    )
+}
+
+/// Google encoded polyline (precision 5). A widely supported, well-specified
+/// format, which is why `polyline` is the interoperable choice.
+fn encode_polyline(points: &[gs_geo::LatLon]) -> String {
+    let mut out = String::new();
+    let mut prev_lat = 0i64;
+    let mut prev_lon = 0i64;
+    for p in points {
+        let lat = (p.lat * 1e5).round() as i64;
+        let lon = (p.lon * 1e5).round() as i64;
+        encode_value(lat - prev_lat, &mut out);
+        encode_value(lon - prev_lon, &mut out);
+        prev_lat = lat;
+        prev_lon = lon;
+    }
+    out
+}
+
+fn encode_value(value: i64, out: &mut String) {
+    let mut v = if value < 0 { !(value << 1) } else { value << 1 };
+    while v >= 0x20 {
+        out.push(char::from_u32(((0x20 | (v & 0x1f)) + 63) as u32).unwrap_or('?'));
+        v >>= 5;
+    }
+    out.push(char::from_u32((v + 63) as u32).unwrap_or('?'));
+}
+
+/// `gsp1`: GeoStream's compact polyline.
+///
+/// The format is **not specified in the normative documents** (see
+/// `DR-20261018-01`); this implementation is the proposal in that request:
+/// a `gsp1` tag followed by base64url of varint delta-encoded `lat_e7`/`lon_e7`
+/// pairs (degrees × 1e7), matching the `lat_e7`/`lon_e7` columns of
+/// `trip_tracks`. It is deterministic and lossless at 1e-7 degrees.
+fn encode_gsp1(points: &[gs_geo::LatLon]) -> String {
+    let mut bytes = Vec::with_capacity(points.len() * 8);
+    bytes.extend_from_slice(b"gsp1");
+    let mut prev_lat = 0i64;
+    let mut prev_lon = 0i64;
+    for p in points {
+        let lat = (p.lat * 1e7).round() as i64;
+        let lon = (p.lon * 1e7).round() as i64;
+        encode_varint(zigzag(lat - prev_lat), &mut bytes);
+        encode_varint(zigzag(lon - prev_lon), &mut bytes);
+        prev_lat = lat;
+        prev_lon = lon;
+    }
+    base64url(&bytes)
+}
+
+fn zigzag(v: i64) -> u64 {
+    ((v << 1) ^ (v >> 63)) as u64
+}
+
+fn encode_varint(mut v: u64, out: &mut Vec<u8>) {
+    while v >= 0x80 {
+        out.push((v as u8) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+fn base64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        out.push(ALPHABET[((n >> 18) & 0x3f) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3f) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(ALPHABET[((n >> 6) & 0x3f) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(ALPHABET[(n & 0x3f) as usize] as char);
+        }
+    }
+    out
+}
+
+fn json_ok<T: Serialize>(request_id: &str, body: T) -> Response {
+    let mut response = (StatusCode::OK, Json(body)).into_response();
+    if let Ok(value) = axum::http::HeaderValue::from_str(request_id) {
+        response
+            .headers_mut()
+            .insert(crate::REQUEST_ID_HEADER, value);
+    }
+    response
+}
+
 fn problem(code: ErrorCode, request_id: &str, detail: &str) -> Response {
     let problem = Problem::new(code, request_id).with_detail(detail);
     ProblemResponse::new(problem).into_response()
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+
+    #[test]
+    fn polyline_matches_the_reference_example() {
+        // The canonical Google example: three points encode to this string.
+        let points = [
+            gs_geo::LatLon::new(38.5, -120.2),
+            gs_geo::LatLon::new(40.7, -120.95),
+            gs_geo::LatLon::new(43.252, -126.453),
+        ];
+        assert_eq!(encode_polyline(&points), "_p~iF~ps|U_ulLnnqC_mqNvxq`@");
+    }
+
+    #[test]
+    fn polyline_of_no_points_is_empty() {
+        assert_eq!(encode_polyline(&[]), "");
+    }
+
+    #[test]
+    fn gsp1_has_the_tag_and_is_deterministic() {
+        let points = [
+            gs_geo::LatLon::new(8.9824, -79.5199),
+            gs_geo::LatLon::new(8.9830, -79.5199),
+        ];
+        let a = encode_gsp1(&points);
+        let b = encode_gsp1(&points);
+        assert_eq!(a, b);
+        // The first four characters are the base64url of "gsp" (the tag spans a
+        // chunk boundary with the first coordinate, so only these are fixed).
+        assert!(a.starts_with("Z3Nw"), "gsp1 was {a}");
+        assert!(
+            a.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
+    }
 }
