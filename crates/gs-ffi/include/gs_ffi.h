@@ -79,6 +79,32 @@ int64_t gs_client_next_timer_ms(GsHandle *handle);
  * carry coordinates and this buffer crosses into the host language. */
 int32_t gs_client_poll_event(GsHandle *handle, uint8_t *buffer, size_t capacity);
 
+/* Last measured state for a render decision. */
+typedef struct {
+    double lat;
+    double lon;
+    uint64_t ts_ms;
+    double speed_mps;
+    double heading_deg;
+    double accuracy_m;
+    double plausibility;
+    uint8_t stationary;
+    uint8_t stale;
+} GsLastMeasured;
+
+/* The position to paint. kind: 0 measured, 1 filtered, 2 predicted. */
+typedef struct {
+    double lat;
+    double lon;
+    int32_t kind;
+    double confidence_radius_m;
+} GsRenderPosition;
+
+/* Decide the position to paint. A PREDICTED position never leaves the client:
+ * it is only written into `out` for the renderer. */
+GsResult gs_client_render_position(const GsLastMeasured *last, uint64_t now_ms,
+                                   GsRenderPosition *out);
+
 /* 1 when the handle is NULL, 0 otherwise. */
 int32_t gs_handle_is_null(const GsHandle *handle);
 

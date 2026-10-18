@@ -12,6 +12,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 - `gs-ffi`: superficie C mínima (T-E1-04) con handles opacos, `catch_unwind` alrededor de cada llamada y `// SAFETY:` en cada bloque inseguro (único crate con `unsafe`). 4 pruebas.
 - Consistencia: `cargo run -p geostream-tools -- all` sigue en 10/10 con el verificador de dependencias de crate actualizado para el enlace documentado entre `gs-ffi` y los núcleos.
 ### Added
+- `gs-ffi` (E9): `gs_client_render_position` — la predicción visual (ADR-0030) cruzando el ABI, con `GsLastMeasured`/`GsRenderPosition` `repr(C)`. Una posición `PREDICTED` **nunca sale del cliente**: la función solo la escribe para el renderer. Pruebas de extrapolación al moverse y de no-predicción en reposo, más su uso desde el consumidor C.
+- `gs-analytics` (E7): `DemandSupply` con `net()` y `demand_supply_releasable` (una celda con un solo solicitante es la rutina de una persona, no demanda).
 - `GET /v1/trips/{trip_id}` (OpenAPI `getTrip`, T-E6-06): solo aplicación con `history:read` y política `history_allowed`. Devuelve el resumen del viaje, sus paradas y la polilínea `gsp1` desde `trip_tracks`. Verificado en vivo (`401` sin credencial) y con prueba contra PostgreSQL real (viaje + parada + traza).
 - `gs-analytics` (E7): `eta_correction_residual` (residuo `real/estimado` por celda de origen) y `LearnedPlace` con `learned_place_releasable` (un lugar con menos de `k` subjects es la rutina de alguien, no un lugar).
 - Consumidor C: el ejemplo recorre el **bucle de eventos** completo (tres fixes, drenar la cola hasta vaciarla) y falla si el bucle no termina. Compila, enlaza y se ejecuta.

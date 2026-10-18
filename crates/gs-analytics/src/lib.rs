@@ -176,6 +176,31 @@ pub fn learned_place_releasable(place: &LearnedPlace, k: u64) -> bool {
     k_anon_ok(place.distinct_subjects, k)
 }
 
+/// Demand and supply of one cell and hour (`24` §3.1).
+///
+/// Counts only: no identifiers. The net is what a dispatcher reads to decide
+/// where to reposition, and the decision is the integrator's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DemandSupply {
+    pub demand: u32,
+    pub supply: u32,
+}
+
+impl DemandSupply {
+    /// Positive means more demand than supply.
+    #[must_use]
+    pub const fn net(self) -> i64 {
+        self.demand as i64 - self.supply as i64
+    }
+}
+
+/// Whether a demand/supply cell may be published: both counts must reach `k`
+/// (or be zero), because a cell with one requester is a person's routine.
+#[must_use]
+pub fn demand_supply_releasable(cell: DemandSupply, k: u32) -> bool {
+    (cell.demand == 0 || cell.demand >= k) && (cell.supply == 0 || cell.supply >= k)
+}
+
 #[cfg(test)]
 mod kanon_tests {
     use super::*;
@@ -206,6 +231,40 @@ mod kanon_tests {
     #[test]
     fn ana_kan_005_learned_place_below_k_is_suppressed() {
         assert_eq!(suppress_count(2, 5), None);
+    }
+
+    #[test]
+    fn demand_supply_net_and_k_anon() {
+        let cell = DemandSupply {
+            demand: 10,
+            supply: 5,
+        };
+        assert_eq!(cell.net(), 5);
+        assert!(demand_supply_releasable(cell, 5));
+        // A supply below k is suppressed too: four drivers is a small group.
+        assert!(!demand_supply_releasable(
+            DemandSupply {
+                demand: 10,
+                supply: 4
+            },
+            5
+        ));
+        // One requester is a person's routine, not a demand cell.
+        assert!(!demand_supply_releasable(
+            DemandSupply {
+                demand: 1,
+                supply: 0
+            },
+            5
+        ));
+        // Zero on one side is fine: there simply was no supply.
+        assert!(demand_supply_releasable(
+            DemandSupply {
+                demand: 6,
+                supply: 0
+            },
+            5
+        ));
     }
 
     #[test]

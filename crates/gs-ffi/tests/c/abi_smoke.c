@@ -117,6 +117,25 @@ int main(void) {
         return 1;
     }
 
+    /* Visual prediction is a pure function of the last measurement. */
+    GsLastMeasured last = {0};
+    last.lat = 8.9824;
+    last.lon = -79.5199;
+    last.ts_ms = 0;
+    last.speed_mps = 12.0;
+    last.heading_deg = 0.0;
+    last.accuracy_m = 10.0;
+    last.plausibility = 1.0;
+    GsRenderPosition rendered = {0};
+    if (gs_client_render_position(&last, 1000, &rendered) != GS_OK) {
+        fprintf(stderr, "render_position failed\n");
+        return 1;
+    }
+    if (rendered.kind != 2) {
+        fprintf(stderr, "a moving entity must be PREDICTED, got %d\n", rendered.kind);
+        return 1;
+    }
+
     if (gs_client_destroy(handle) != GS_OK) {
         fprintf(stderr, "destroy failed\n");
         return 1;

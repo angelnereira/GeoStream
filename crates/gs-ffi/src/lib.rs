@@ -361,6 +361,91 @@ pub unsafe extern "C" fn gs_client_watch(
     }
 }
 
+/// The last measured state, as the host passes it for a render decision.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct GsLastMeasured {
+    pub lat: f64,
+    pub lon: f64,
+    pub ts_ms: u64,
+    pub speed_mps: f64,
+    pub heading_deg: f64,
+    pub accuracy_m: f64,
+    pub plausibility: f64,
+    pub stationary: u8,
+    pub stale: u8,
+}
+
+/// The position to paint. `kind`: 0 measured, 1 filtered, 2 predicted.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct GsRenderPosition {
+    pub lat: f64,
+    pub lon: f64,
+    pub kind: i32,
+    pub confidence_radius_m: f64,
+}
+
+/// Decides the position to paint (`docs/22` §3.6, ADR-0030).
+///
+/// A `PREDICTED` position **never leaves the client**: this function only writes
+/// it into `out` for the renderer. It is never published, stored or logged.
+///
+/// # Safety
+///
+/// `last` must be readable; `out` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gs_client_render_position(
+    last: *const GsLastMeasured,
+    now_ms: u64,
+    out: *mut GsRenderPosition,
+) -> GsResult {
+    if last.is_null() || out.is_null() {
+        return GsResult::NullPointer;
+    }
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| -> Result<(), GsResult> {
+        // SAFETY: both pointers were checked non-null; the caller upholds the
+        // contract that they are valid for the duration of the call.
+        let l = unsafe { last.as_ref() }.ok_or(GsResult::NullPointer)?;
+        let measured = gs_client_core::LastMeasured {
+            lat: l.lat,
+            lon: l.lon,
+            ts_ms: l.ts_ms,
+            speed_mps: l.speed_mps,
+            heading_deg: l.heading_deg,
+            accuracy_m: l.accuracy_m,
+            plausibility: l.plausibility,
+            stationary: l.stationary != 0,
+            stale: l.stale != 0,
+        };
+        let rendered = gs_client_core::render_position(
+            now_ms,
+            measured,
+            gs_client_core::PredictionPolicy::defaults(),
+        );
+        let kind = match rendered.kind {
+            gs_client_core::RenderKind::Measured => 0,
+            gs_client_core::RenderKind::Filtered => 1,
+            gs_client_core::RenderKind::Predicted => 2,
+        };
+        // SAFETY: `out` is writable per the contract.
+        unsafe {
+            out.write(GsRenderPosition {
+                lat: rendered.lat,
+                lon: rendered.lon,
+                kind,
+                confidence_radius_m: rendered.confidence_radius_m,
+            });
+        }
+        Ok(())
+    }));
+    match result {
+        Ok(Ok(())) => GsResult::Ok,
+        Ok(Err(code)) => code,
+        Err(_) => GsResult::Panic,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +532,61 @@ mod tests {
         assert_eq!(drained, 0, "the queue must drain");
         // SAFETY: h valid.
         assert_eq!(unsafe { gs_client_destroy(h) }, GsResult::Ok);
+    }
+
+    #[test]
+    fn render_position_extrapolates_when_moving() {
+        let last = GsLastMeasured {
+            lat: 8.9824,
+            lon: -79.5199,
+            ts_ms: 0,
+            speed_mps: 12.0,
+            heading_deg: 0.0,
+            accuracy_m: 10.0,
+            plausibility: 1.0,
+            stationary: 0,
+            stale: 0,
+        };
+        let mut out = GsRenderPosition {
+            lat: 0.0,
+            lon: 0.0,
+            kind: -1,
+            confidence_radius_m: 0.0,
+        };
+        // SAFETY: &last and &mut out are valid for the call.
+        assert_eq!(
+            unsafe { gs_client_render_position(&last, 1000, &mut out) },
+            GsResult::Ok
+        );
+        assert_eq!(out.kind, 2, "a moving entity must be PREDICTED");
+        assert!(out.lat > last.lat, "the prediction must advance northward");
+    }
+
+    #[test]
+    fn render_position_is_measured_when_stationary() {
+        let last = GsLastMeasured {
+            lat: 8.9824,
+            lon: -79.5199,
+            ts_ms: 0,
+            speed_mps: 12.0,
+            heading_deg: 0.0,
+            accuracy_m: 10.0,
+            plausibility: 1.0,
+            stationary: 1,
+            stale: 0,
+        };
+        let mut out = GsRenderPosition {
+            lat: 0.0,
+            lon: 0.0,
+            kind: -1,
+            confidence_radius_m: 0.0,
+        };
+        // SAFETY: valid pointers for the call.
+        assert_eq!(
+            unsafe { gs_client_render_position(&last, 1000, &mut out) },
+            GsResult::Ok
+        );
+        assert_ne!(out.kind, 2, "a stationary entity must not be predicted");
     }
 
     #[test]
