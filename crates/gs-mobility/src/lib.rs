@@ -2,26 +2,58 @@
 
 use gs_geo::{LatLon, geodesic_distance};
 
-#[derive(Debug, Clone, Copy)]
-pub struct EtaInput {
-    pub origin_lat: f64,
-    pub origin_lon: f64,
-    pub dest_lat: f64,
-    pub dest_lon: f64,
-    pub mode_speed_mps: f64,
+/// Travel mode with the documented default speed (`docs/17` §2.11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EtaMode {
+    Driving,
+    Motorcycle,
+    Cycling,
+    Walking,
 }
 
-pub fn estimate_eta(i: EtaInput) -> f64 {
-    // seconds = distance / speed. Uses ellipsoidal distance.
-    let d = geodesic_distance(
-        LatLon::new(i.origin_lat, i.origin_lon),
-        LatLon::new(i.dest_lat, i.dest_lon),
-    )
-    .meters;
-    if i.mode_speed_mps <= 0.0 {
-        return f64::INFINITY;
+impl EtaMode {
+    #[must_use]
+    pub const fn speed_mps(self) -> f64 {
+        match self {
+            Self::Driving => 6.9,
+            Self::Motorcycle => 8.3,
+            Self::Cycling => 4.2,
+            Self::Walking => 1.3,
+        }
     }
-    d / i.mode_speed_mps
+}
+
+/// Default circuity factor (`eta_default_circuity`): road distance is ~35 %
+/// longer than the straight line.
+pub const ETA_DEFAULT_CIRCUITY: f64 = 1.35;
+
+/// Own ETA estimate: `straight_line * circuity / mode_speed`.
+///
+/// Returns `None` when the source is not known (`LEARNED` without a learned
+/// route): `null` means "I don't know" and must never render as `0`.
+#[must_use]
+pub fn estimate_eta(
+    origin: (f64, f64),
+    dest: (f64, f64),
+    mode: EtaMode,
+    circuity: f64,
+    source_known: bool,
+) -> Option<f64> {
+    if !source_known {
+        return None;
+    }
+    let d = geodesic_distance(LatLon::new(origin.0, origin.1), LatLon::new(dest.0, dest.1)).meters;
+    let speed = mode.speed_mps();
+    if speed <= 0.0 {
+        return None;
+    }
+    Some(d * circuity / speed)
+}
+
+/// Whether a `rows x cols` matrix fits within `eta_max_matrix_cells`.
+#[must_use]
+pub fn matrix_within_limit(rows: u64, cols: u64, max_cells: u64) -> bool {
+    rows.saturating_mul(cols) <= max_cells
 }
 
 /// Hungarian-style optimal assignment (min-cost) for small n. O(n^3).
@@ -134,15 +166,50 @@ pub fn assign(costs: &[Vec<f64>], capacity: usize) -> (f64, Vec<Option<usize>>) 
 mod tests {
     use super::*;
     #[test]
-    fn eta_basic() {
-        let e = estimate_eta(EtaInput {
-            origin_lat: 8.98,
-            origin_lon: -79.52,
-            dest_lat: 8.99,
-            dest_lon: -79.52,
-            mode_speed_mps: 10.0,
-        });
-        assert!(e.is_finite() && e > 0.0);
+    fn eta_est_001_driving_matches_vector() {
+        // 844,9 m x 1,35 / 6,9 m/s ≈ 165 s.
+        let e = estimate_eta(
+            (8.9824, -79.5199),
+            (8.9900, -79.5199),
+            EtaMode::Driving,
+            ETA_DEFAULT_CIRCUITY,
+            true,
+        )
+        .unwrap();
+        assert!((164.0..=166.0).contains(&e), "eta was {e}");
+    }
+
+    #[test]
+    fn eta_est_002_walking_is_much_longer() {
+        let e = estimate_eta(
+            (8.9824, -79.5199),
+            (8.9900, -79.5199),
+            EtaMode::Walking,
+            ETA_DEFAULT_CIRCUITY,
+            true,
+        )
+        .unwrap();
+        assert!((870.0..=880.0).contains(&e), "eta was {e}");
+    }
+
+    #[test]
+    fn eta_est_005_unknown_source_is_none_not_zero() {
+        assert_eq!(
+            estimate_eta(
+                (8.9824, -79.5199),
+                (-33.4489, -70.6693),
+                EtaMode::Driving,
+                ETA_DEFAULT_CIRCUITY,
+                false
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn eta_est_003_004_matrix_limit() {
+        assert!(matrix_within_limit(25, 25, 625));
+        assert!(!matrix_within_limit(30, 30, 625));
     }
     #[test]
     fn assign_simple() {
@@ -150,5 +217,58 @@ mod tests {
         let (t, m) = assign(&costs, 1);
         assert_eq!(t, 2.0);
         assert_eq!(m, vec![Some(0), Some(1)]);
+    }
+
+    /// Exhaustive minimum over all permutations (the oracle the vectors demand).
+    fn exhaustive_min(costs: &[Vec<f64>]) -> f64 {
+        let n = costs.len();
+        let mut idx: Vec<usize> = (0..costs[0].len()).collect();
+        let mut best = f64::INFINITY;
+        // Heap's algorithm over column permutations of size n.
+        fn permute(k: usize, idx: &mut Vec<usize>, costs: &[Vec<f64>], best: &mut f64) {
+            if k == costs.len() {
+                let sum: f64 = (0..costs.len()).map(|i| costs[i][idx[i]]).sum();
+                if sum < *best {
+                    *best = sum;
+                }
+                return;
+            }
+            for i in k..idx.len() {
+                idx.swap(k, i);
+                permute(k + 1, idx, costs, best);
+                idx.swap(k, i);
+            }
+        }
+        if idx.len() >= n {
+            permute(0, &mut idx, costs, &mut best);
+        }
+        best
+    }
+
+    #[test]
+    fn asg_hun_is_globally_optimal_not_greedy() {
+        let costs = vec![
+            vec![1.0, 4.0, 3.0],
+            vec![2.0, 1.0, 5.0],
+            vec![3.0, 2.0, 2.0],
+        ];
+        let (total, _m) = assign(&costs, 1);
+        let oracle = exhaustive_min(&costs);
+        assert!(
+            (total - oracle).abs() < 1e-9,
+            "hungarian {total} != exhaustive {oracle}"
+        );
+    }
+
+    #[test]
+    fn asg_hun_distance_matrix_matches_oracle() {
+        // The ASG-HUN-002 arrangement, compared against exhaustive search.
+        let lat = |d: f64| d * 111_195.0;
+        let costs = vec![
+            vec![lat(0.0001), lat(0.0076)],
+            vec![lat(0.0005), lat(0.0070)],
+        ];
+        let (total, _m) = assign(&costs, 1);
+        assert!((total - exhaustive_min(&costs)).abs() < 1e-9);
     }
 }
