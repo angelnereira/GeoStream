@@ -23,6 +23,18 @@ pub enum SequenceCas {
     Stale { current: u64 },
 }
 
+/// Result of an atomic checkpoint compare-and-set (`docs/22` §2.1, T-E2-06).
+///
+/// The tracker checkpoint is read-modify-written; without a version check two
+/// instances of the HTTP ingest could lose an update silently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckpointCas {
+    /// The write was applied; the new version is `expected + 1`.
+    Applied { version: u64 },
+    /// The stored version changed since the read: the caller must retry.
+    Conflict { current_version: u64 },
+}
+
 /// Errors returned by the ephemeral store.
 #[derive(Debug, Error)]
 pub enum EphemeralError {
@@ -111,6 +123,27 @@ pub trait EphemeralStore: Send + Sync {
     /// Increments a rate limit counter, resetting it when the window expires.
     async fn increment_counter(&self, key: &str, window: Duration) -> Result<u64, EphemeralError>;
 
+    /// Writes a tracker checkpoint, bumping its version. Returns the new version.
+    async fn set_checkpoint(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<u64, EphemeralError>;
+
+    /// Reads a tracker checkpoint and its version.
+    async fn get_checkpoint(&self, key: &str) -> Result<Option<(Vec<u8>, u64)>, EphemeralError>;
+
+    /// Atomically writes the checkpoint only if its version is still
+    /// `expected_version` (`track_cas.lua`, `docs/22` §2.1).
+    async fn compare_and_set_checkpoint(
+        &self,
+        key: &str,
+        expected_version: u64,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<CheckpointCas, EphemeralError>;
+
     /// Reports whether the backend is usable (docs/04 §7.6).
     fn is_ready(&self) -> bool {
         true
@@ -126,6 +159,8 @@ struct Entry {
     fields: Option<Vec<(String, String)>>,
     /// Expiry instant, `None` for keys without TTL.
     expires_at: Option<OffsetDateTime>,
+    /// Version of a tracker checkpoint, `None` for every other entry.
+    version: Option<u64>,
 }
 
 impl Entry {
@@ -196,6 +231,7 @@ impl EphemeralStore for InMemoryEphemeralStore {
                 bytes: value.to_vec(),
                 fields: None,
                 expires_at: Some(now + ttl),
+                version: None,
             },
         );
         Ok(())
@@ -237,6 +273,7 @@ impl EphemeralStore for InMemoryEphemeralStore {
                 bytes: current.to_string().into_bytes(),
                 fields: None,
                 expires_at: None,
+                version: None,
             });
         if slot.fields.is_some() {
             return Err(EphemeralError::InvalidValue {
@@ -267,6 +304,7 @@ impl EphemeralStore for InMemoryEphemeralStore {
                 bytes: 0u64.to_string().into_bytes(),
                 fields: None,
                 expires_at: None,
+                version: None,
             });
         if slot.fields.is_some() {
             return Err(EphemeralError::InvalidValue {
@@ -302,6 +340,7 @@ impl EphemeralStore for InMemoryEphemeralStore {
                 bytes: Vec::new(),
                 fields: Some(owned),
                 expires_at: Some(now + ttl),
+                version: None,
             },
         );
         Ok(())
@@ -369,6 +408,7 @@ impl EphemeralStore for InMemoryEphemeralStore {
                 bytes: 0u64.to_string().into_bytes(),
                 fields: None,
                 expires_at: None,
+                version: None,
             });
         if slot.fields.is_some() {
             return Err(EphemeralError::InvalidValue {
@@ -395,6 +435,7 @@ impl EphemeralStore for InMemoryEphemeralStore {
                 bytes: grant.to_vec(),
                 fields: None,
                 expires_at: Some(now + ttl),
+                version: None,
             },
         );
         Ok(())
@@ -419,6 +460,7 @@ impl EphemeralStore for InMemoryEphemeralStore {
                 bytes: 0u64.to_string().into_bytes(),
                 fields: None,
                 expires_at: Some(now + window),
+                version: None,
             });
         if slot.fields.is_some() {
             return Err(EphemeralError::InvalidValue {
@@ -433,6 +475,69 @@ impl EphemeralStore for InMemoryEphemeralStore {
         let next = parse_counter(slot.bytes.as_slice())? + 1;
         slot.bytes = next.to_string().into_bytes();
         Ok(next)
+    }
+
+    async fn set_checkpoint(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<u64, EphemeralError> {
+        let now = OffsetDateTime::now_utc();
+        let mut slot = self
+            .entries
+            .entry(key.to_string())
+            .or_insert_with(|| Entry {
+                bytes: Vec::new(),
+                fields: None,
+                expires_at: Some(now + ttl),
+                version: Some(0),
+            });
+        let next = slot.version.unwrap_or(0).saturating_add(1);
+        slot.bytes = value.to_vec();
+        slot.expires_at = Some(now + ttl);
+        slot.version = Some(next);
+        Ok(next)
+    }
+
+    async fn get_checkpoint(&self, key: &str) -> Result<Option<(Vec<u8>, u64)>, EphemeralError> {
+        let now = OffsetDateTime::now_utc();
+        self.remove_if_expired(key, now);
+        Ok(self
+            .entries
+            .get(key)
+            .and_then(|e| e.version.map(|v| (e.bytes.clone(), v))))
+    }
+
+    async fn compare_and_set_checkpoint(
+        &self,
+        key: &str,
+        expected_version: u64,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<CheckpointCas, EphemeralError> {
+        let now = OffsetDateTime::now_utc();
+        self.remove_if_expired(key, now);
+        let mut slot = self
+            .entries
+            .entry(key.to_string())
+            .or_insert_with(|| Entry {
+                bytes: Vec::new(),
+                fields: None,
+                expires_at: Some(now + ttl),
+                version: Some(0),
+            });
+        let current = slot.version.unwrap_or(0);
+        if current != expected_version {
+            return Ok(CheckpointCas::Conflict {
+                current_version: current,
+            });
+        }
+        let next = current.saturating_add(1);
+        slot.bytes = value.to_vec();
+        slot.expires_at = Some(now + ttl);
+        slot.version = Some(next);
+        Ok(CheckpointCas::Applied { version: next })
     }
 
     fn is_ready(&self) -> bool {
@@ -537,7 +642,87 @@ impl<T: EphemeralStore + ?Sized> EphemeralStore for Arc<T> {
         (**self).increment_counter(key, window).await
     }
 
+    async fn set_checkpoint(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<u64, EphemeralError> {
+        (**self).set_checkpoint(key, value, ttl).await
+    }
+
+    async fn get_checkpoint(&self, key: &str) -> Result<Option<(Vec<u8>, u64)>, EphemeralError> {
+        (**self).get_checkpoint(key).await
+    }
+
+    async fn compare_and_set_checkpoint(
+        &self,
+        key: &str,
+        expected_version: u64,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<CheckpointCas, EphemeralError> {
+        (**self)
+            .compare_and_set_checkpoint(key, expected_version, value, ttl)
+            .await
+    }
+
     fn is_ready(&self) -> bool {
         (**self).is_ready()
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn checkpoint_cas_applies_then_conflicts() {
+        let store = InMemoryEphemeralStore::new();
+        let key = "gs:trk:dev_1";
+        let v1 = store
+            .set_checkpoint(key, b"one", Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(v1, 1);
+        assert_eq!(
+            store.get_checkpoint(key).await.unwrap(),
+            Some((b"one".to_vec(), 1))
+        );
+
+        // Correct version: applied.
+        assert_eq!(
+            store
+                .compare_and_set_checkpoint(key, 1, b"two", Duration::from_secs(60))
+                .await
+                .unwrap(),
+            CheckpointCas::Applied { version: 2 }
+        );
+
+        // Stale version: conflict, and the stored value is untouched.
+        assert_eq!(
+            store
+                .compare_and_set_checkpoint(key, 1, b"three", Duration::from_secs(60))
+                .await
+                .unwrap(),
+            CheckpointCas::Conflict { current_version: 2 }
+        );
+        assert_eq!(
+            store.get_checkpoint(key).await.unwrap(),
+            Some((b"two".to_vec(), 2))
+        );
+    }
+
+    #[tokio::test]
+    async fn checkpoint_of_an_absent_key_starts_at_version_zero() {
+        let store = InMemoryEphemeralStore::new();
+        // expected_version 0 matches "no checkpoint yet".
+        assert_eq!(
+            store
+                .compare_and_set_checkpoint("gs:trk:dev_2", 0, b"first", Duration::from_secs(60))
+                .await
+                .unwrap(),
+            CheckpointCas::Applied { version: 1 }
+        );
     }
 }

@@ -727,7 +727,7 @@ impl Connection {
             // instance continues its filter instead of starting cold. A
             // checkpoint that cannot be read is discarded, never half-applied.
             let trk_key = format!("{}:trk:{}", state.redis_key_prefix, device_id);
-            if let Ok(Some(bytes)) = state.ephemeral.get_snapshot(&trk_key).await
+            if let Ok(Some((bytes, _version))) = state.ephemeral.get_checkpoint(&trk_key).await
                 && let Some(restored) = gs_track::TrackStateMachine::decode_checkpoint(&bytes)
             {
                 self.tracker = restored;
@@ -1314,7 +1314,7 @@ impl Connection {
                     let blob = self.tracker.encode_checkpoint();
                     let _ = state
                         .ephemeral
-                        .set_snapshot(&trk_key, &blob, TRACK_STATE_TTL)
+                        .set_checkpoint(&trk_key, &blob, TRACK_STATE_TTL)
                         .await;
                 }
                 self.publish_to_bus(state, session_id, &outcome.accepted)

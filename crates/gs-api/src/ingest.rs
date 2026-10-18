@@ -143,15 +143,24 @@ async fn ingest_locations_handler(
         );
     }
 
-    // Trajectory engine: load the checkpoint, apply, save. The version CAS of
-    // `track_cas.lua` is a Redis-backend concern (T-E2-06, pending); with the
-    // in-memory store a single instance is the only writer.
+    // Trajectory engine: read the checkpoint with its version, apply, and write
+    // it back with a version check (`track_cas.lua`, `docs/22` §2.1). The HTTP
+    // ingest has no instance affinity, so two instances can race on the same
+    // device; the CAS makes the loser retry instead of losing an update.
     let trk_key = format!("{}:trk:{}", state.sessions.redis_key_prefix, device_id);
-    let mut tracker = match state.sessions.ephemeral.get_snapshot(&trk_key).await {
-        Ok(Some(bytes)) => gs_track::TrackStateMachine::decode_checkpoint(&bytes)
-            .unwrap_or_else(|| gs_track::TrackStateMachine::new(gs_track::TrackConfig::defaults())),
-        _ => gs_track::TrackStateMachine::new(gs_track::TrackConfig::defaults()),
-    };
+    let (mut tracker, checkpoint_version) =
+        match state.sessions.ephemeral.get_checkpoint(&trk_key).await {
+            Ok(Some((bytes, version))) => (
+                gs_track::TrackStateMachine::decode_checkpoint(&bytes).unwrap_or_else(|| {
+                    gs_track::TrackStateMachine::new(gs_track::TrackConfig::defaults())
+                }),
+                version,
+            ),
+            _ => (
+                gs_track::TrackStateMachine::new(gs_track::TrackConfig::defaults()),
+                0,
+            ),
+        };
 
     let mut throttle = PublishThrottle::new(
         policy.publish_burst,
@@ -181,14 +190,31 @@ async fn ingest_locations_handler(
         Err(error) => return publish_error(&error, &request_id),
     };
 
-    // Checkpoint the engine for the next request or a reconnect elsewhere.
+    // Checkpoint the engine with a version check. On conflict we retry once;
+    // if it conflicts again the other instance won, and we leave its checkpoint
+    // (the next sample corrects the trajectory). The estimate already travelled
+    // in `outcome.accepted`, so the batch is never silently degraded.
     if !outcome.accepted.is_empty() {
         let blob = tracker.encode_checkpoint();
-        let _ = state
-            .sessions
-            .ephemeral
-            .set_snapshot(&trk_key, &blob, TRACK_STATE_TTL)
-            .await;
+        let mut applied = false;
+        for _ in 0..2 {
+            match state
+                .sessions
+                .ephemeral
+                .compare_and_set_checkpoint(&trk_key, checkpoint_version, &blob, TRACK_STATE_TTL)
+                .await
+            {
+                Ok(gs_service::gs_ephemeral::CheckpointCas::Applied { .. }) => {
+                    applied = true;
+                    break;
+                }
+                Ok(gs_service::gs_ephemeral::CheckpointCas::Conflict { .. }) => continue,
+                Err(_) => break,
+            }
+        }
+        if !applied {
+            metrics::counter!("gs_track_state_conflict_total").increment(1);
+        }
     }
 
     let mut response = (
