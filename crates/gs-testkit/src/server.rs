@@ -7,9 +7,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gs_api::{
-    AcceptedWebSocket, ConnectionCounter, RateLimitConfig, SessionApiState, SessionRunner,
-    SigningKeyRef, StreamApiState, StreamTicketConfig, TokenState, sessions_router, stream_route,
-    v1_router,
+    AcceptedWebSocket, AnalyticsState, ConnectionCounter, EdgeState, HistoryState, IngestState,
+    PoolsLimits, PoolsState, RateLimitConfig, SessionApiState, SessionRunner, SigningKeyRef,
+    StreamApiState, StreamTicketConfig, TokenState, ToolsLimits, ToolsState, analytics_router,
+    edge_router, history_router, ingest_router, pools_router, sessions_router, stream_route,
+    tools_router, v1_router,
 };
 use gs_auth::{SigningKey, generate_signing_key, parse_private_pem};
 use gs_bus::InMemoryBus;
@@ -186,9 +188,32 @@ impl TestServer {
             .await
             .map_err(|e| format!("tokio TcpListener bind failed: {e}"))?;
 
-        let router = sessions_router(session_state)
+        // The E-track routers share the sessions state; mounting them here is
+        // what lets an integration test exercise a real 200 path with the
+        // tenant policy enabled, instead of only the 401 of an anonymous call.
+        let router = sessions_router(session_state.clone())
             .merge(v1_router(token_state))
-            .merge(stream_route(stream_api_state));
+            .merge(stream_route(stream_api_state))
+            .merge(tools_router(ToolsState {
+                sessions: session_state.clone(),
+                limits: ToolsLimits::default(),
+            }))
+            .merge(pools_router(PoolsState {
+                sessions: session_state.clone(),
+                limits: PoolsLimits::default(),
+            }))
+            .merge(analytics_router(AnalyticsState {
+                sessions: session_state.clone(),
+            }))
+            .merge(history_router(HistoryState {
+                sessions: session_state.clone(),
+            }))
+            .merge(edge_router(EdgeState {
+                sessions: session_state.clone(),
+            }))
+            .merge(ingest_router(IngestState {
+                sessions: session_state,
+            }));
 
         let server_handle = tokio::spawn(async move {
             let _ = axum::serve(tokio_listener, router).await;

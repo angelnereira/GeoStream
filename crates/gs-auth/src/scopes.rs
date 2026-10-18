@@ -15,6 +15,17 @@ pub const APPLICATION_SCOPES: &[&str] = &[
     "subjects:manage",
     "webhooks:manage",
     "geofences:manage",
+    // E-track (docs/06 §3.4). None of these is granted by default: each is
+    // conceded one by one, explicitly.
+    "pools:manage",
+    "pools:query",
+    "pools:density",
+    "tools:use",
+    "providers:manage",
+    "history:read",
+    "analytics:read",
+    "tags:manage",
+    "lpwan:manage",
 ];
 
 /// Every device scope defined in docs/06 §6.
@@ -24,6 +35,12 @@ pub const DEVICE_SCOPES: &[&str] = &[
     "stream:connect",
     "sharing:write",
     "ingest:write",
+    // E-track (docs/06 §6).
+    "pools:density",
+    "tools:use",
+    "tags:manage",
+    "edge:report",
+    "edge:lookup",
 ];
 
 /// Device scopes an application may request by default (docs/06 §4.1).

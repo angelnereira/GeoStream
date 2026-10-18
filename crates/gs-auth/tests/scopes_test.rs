@@ -10,7 +10,8 @@ use gs_auth::scopes::{
 #[test]
 fn test_every_default_api_key_scope_belongs_to_the_catalog() {
     // covers: FR-AUTH-001, docs/06 §3.4
-    assert_eq!(APPLICATION_SCOPES.len(), 10);
+    // 10 of the baseline plus the 9 E-track scopes (docs/06 §3.4).
+    assert_eq!(APPLICATION_SCOPES.len(), 19);
     for scope in DEFAULT_API_KEY_SCOPES {
         assert!(
             is_application_scope(scope),
@@ -22,13 +23,35 @@ fn test_every_default_api_key_scope_belongs_to_the_catalog() {
         !DEFAULT_API_KEY_SCOPES.contains(&LOCATIONS_READ_SCOPE),
         "locations:read must not be granted by default"
     );
-    // The default is the catalog minus `locations:read`.
+    // Nothing of the E-track is granted by default: each is conceded one by one.
+    for scope in [
+        "pools:manage",
+        "pools:query",
+        "pools:density",
+        "tools:use",
+        "providers:manage",
+        "history:read",
+        "analytics:read",
+        "tags:manage",
+        "lpwan:manage",
+    ] {
+        assert!(
+            !DEFAULT_API_KEY_SCOPES.contains(&scope),
+            "{scope} must not be granted by default"
+        );
+    }
+    // The default is the baseline catalog minus `locations:read`.
     let missing: Vec<&str> = APPLICATION_SCOPES
         .iter()
         .copied()
         .filter(|scope| !DEFAULT_API_KEY_SCOPES.contains(scope))
         .collect();
-    assert_eq!(missing, vec![LOCATIONS_READ_SCOPE]);
+    assert!(missing.contains(&LOCATIONS_READ_SCOPE));
+    assert_eq!(
+        missing.len(),
+        1 + 9,
+        "locations:read plus the nine E-track scopes: {missing:?}"
+    );
 }
 
 #[test]
@@ -71,7 +94,8 @@ fn test_validate_scopes_rejects_empty_and_duplicate_scopes() {
 #[test]
 fn test_device_scope_catalog_matches_docs_06_6() {
     // covers: FR-AUTH-002, docs/06 §6
-    assert_eq!(DEVICE_SCOPES.len(), 5);
+    // 5 of the baseline plus the 5 E-track device scopes (docs/06 §6).
+    assert_eq!(DEVICE_SCOPES.len(), 10);
     for scope in DEVICE_SCOPES {
         assert!(is_device_scope(scope), "device scope {scope} missing");
     }
