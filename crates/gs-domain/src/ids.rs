@@ -205,6 +205,11 @@ define_prefixed_id!(GeofenceId, "geo", "Geofence");
 define_prefixed_id!(ConnectionId, "con", "Stream Connection");
 define_prefixed_id!(RequestId, "req", "Request Correlation");
 define_prefixed_id!(AuditId, "aud", "Audit Log Record");
+define_prefixed_id!(TagId, "tag", "Tag");
+define_prefixed_id!(TripId, "trp", "Trip");
+define_prefixed_id!(PlaceId, "plc", "Place");
+define_prefixed_id!(ExportId, "exp", "Export");
+define_prefixed_id!(LpwanIntegrationId, "lpw", "LPWAN Integration");
 
 /// Integrator-defined external subject identifier (`external_subject_id`).
 /// Regex: `^[A-Za-z0-9._:\-]{1,128}$`.

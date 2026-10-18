@@ -370,6 +370,9 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                     sessions: session_state.clone(),
                 }))
                 .merge(gs_api::history_router(gs_api::HistoryState {
+                    sessions: session_state.clone(),
+                }))
+                .merge(gs_api::edge_router(gs_api::EdgeState {
                     sessions: session_state,
                 }));
         }

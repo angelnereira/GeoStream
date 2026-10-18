@@ -11,6 +11,7 @@ pub mod invitation_repo;
 pub mod membership_repo;
 pub mod session_repo;
 pub mod subject_repo;
+pub mod tag_repo;
 pub mod tenant_repo;
 
 pub use api_key_repo::ApiKeyRepository;
@@ -32,4 +33,5 @@ pub use membership_repo::{
 };
 pub use session_repo::{SessionFilters, SessionPage, SessionRepository, SessionUpdate};
 pub use subject_repo::SubjectRepository;
+pub use tag_repo::{Tag, TagRepository};
 pub use tenant_repo::TenantRepository;

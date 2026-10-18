@@ -68,8 +68,6 @@ const PENDING_ID_TYPES: &[(&str, &str)] = &[
     ("TripId", "T-E6-06"),
     ("PlaceId", "T-E7-02"),
     ("ExportId", "T-E6-09"),
-    ("TagId", "T-E8-02"),
-    ("LpwanIntegrationId", "T-E8-08"),
 ];
 
 fn pending_type(type_name: &str) -> bool {
@@ -107,6 +105,15 @@ fn test_valid_prefixed_ids_vectors() {
                 let id = TenantId::from_str(&v.value).expect("valid TenantId failed to parse");
                 assert_eq!(id.to_string(), v.value);
             }
+            "TagId" => {
+                let id = TagId::from_str(&v.value).expect("valid TagId failed to parse");
+                assert_eq!(id.to_string(), v.value);
+            }
+            "LpwanIntegrationId" => {
+                let id = LpwanIntegrationId::from_str(&v.value)
+                    .expect("valid LpwanIntegrationId failed to parse");
+                assert_eq!(id.to_string(), v.value);
+            }
             other => panic!("unknown type {other} in valid vectors"),
         }
     }
@@ -127,6 +134,15 @@ fn test_invalid_prefixed_ids_vectors() {
                     "expected invalid SessionId for '{}' (reason: {})",
                     v.value,
                     v.reason
+                );
+            }
+            "TagId" => {
+                assert!(TagId::from_str(&v.value).is_err(), "expected invalid TagId");
+            }
+            "LpwanIntegrationId" => {
+                assert!(
+                    LpwanIntegrationId::from_str(&v.value).is_err(),
+                    "expected invalid LpwanIntegrationId"
                 );
             }
             other => panic!("unknown type {other} in invalid vectors"),
@@ -172,7 +188,7 @@ fn test_installation_id_vectors() {
 }
 
 #[test]
-fn test_all_14_entity_id_prefixes() {
+fn test_all_entity_id_prefixes() {
     let ten = TenantId::new();
     assert!(ten.to_string().starts_with("ten_"));
     let app = ApplicationId::new();
@@ -201,6 +217,10 @@ fn test_all_14_entity_id_prefixes() {
     assert!(req.to_string().starts_with("req_"));
     let aud = AuditId::new();
     assert!(aud.to_string().starts_with("aud_"));
+    let tag = TagId::new();
+    assert!(tag.to_string().starts_with("tag_"));
+    let lpw = LpwanIntegrationId::new();
+    assert!(lpw.to_string().starts_with("lpw_"));
 
     // Verify roundtrip for each
     assert_eq!(TenantId::from_str(&ten.to_string()).unwrap(), ten);
@@ -217,6 +237,8 @@ fn test_all_14_entity_id_prefixes() {
     assert_eq!(ConnectionId::from_str(&con.to_string()).unwrap(), con);
     assert_eq!(RequestId::from_str(&req.to_string()).unwrap(), req);
     assert_eq!(AuditId::from_str(&aud.to_string()).unwrap(), aud);
+    assert_eq!(TagId::from_str(&tag.to_string()).unwrap(), tag);
+    assert_eq!(LpwanIntegrationId::from_str(&lpw.to_string()).unwrap(), lpw);
 
     // Cross-prefix rejection
     assert!(SessionId::from_str(&ten.to_string()).is_err());
