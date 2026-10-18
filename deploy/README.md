@@ -1,4 +1,69 @@
-# GeoStream — Proxy TLS de referencia (NFR-SEC-001, docs/16 §2.3)
+# GeoStream — despliegue
+
+## Imagen única `all-in-one` (despliegue, portabilidad y servicio)
+
+`deploy/Dockerfile` construye **una sola imagen** que contiene PostgreSQL, Redis y el
+binario `geostream`. Es la forma de desplegar, portar y servir GeoStream en cualquier
+host con Docker, sin orquestador ni servicios externos:
+
+```bash
+# Construir (desde la raíz del repo).
+docker build -f deploy/Dockerfile -t geostream:all-in-one .
+
+# Ejecutar. Un solo contenedor expone la API/stream en 8080.
+docker run -d --name geostream -p 8080:8080 geostream:all-in-one serve
+```
+
+En el arranque el entrypoint:
+
+1. inicializa el clúster PostgreSQL en `/data/pgdata` (volumen persistente),
+2. crea el usuario y la base `geostream_dev`,
+3. arranca Redis en `127.0.0.1:6379`,
+4. genera el par de firma Ed25519 dev en `/data/jwt-keys` (montar un volumen en producción),
+5. ejecuta migraciones (`GS_AUTO_MIGRATE=true`) y arranca `geostream serve`.
+
+### Configuración por entorno
+
+Todo se configura con variables `GS_*` (ver `docs/17_CONFIGURATION.md`). Las más útiles:
+
+| Variable | Por defecto en la imagen | Qué hace |
+|---|---|---|
+| `GS_HTTP_ADDR` | `0.0.0.0:8080` | Listener HTTP (API + stream) |
+| `GS_DATABASE_URL` | `postgres://geostream:…@127.0.0.1:5432/geostream_dev` | PostgreSQL |
+| `GS_REDIS_URL` | `redis://127.0.0.1:6379` | Almacén efímero / bus |
+| `GS_JWT_KEYS_DIR` | `/data/jwt-keys` | Directorio de pares `<kid>.key.pem` / `<kid>.pub.pem` |
+| `GS_JWT_ACTIVE_KID` | `dev-key-1` | `kid` de firma activo |
+| `GS_AUTO_MIGRATE` | `true` | Migrar al arrancar (dev) |
+
+En producción: monta un volumen persistente en `/data` (`-v geostream-data:/data`),
+sustituye las claves dev por las reales y **no** expongas la imagen directamente a
+Internet: termínala con el proxy TLS de abajo.
+
+### Persistencia
+
+```bash
+docker run -d --name geostream -p 8080:8080 \
+  -v geostream-data:/data \
+  geostream:all-in-one serve
+```
+
+### Verificación automática
+
+```bash
+deploy/smoke.sh            # construye, levanta y comprueba /health/ready
+```
+
+### Multi-arquitectura
+
+El `Dockerfile` es multi-stage y no depende de la arquitectura del host en su lógica;
+para publicar amd64+arm64:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f deploy/Dockerfile -t <registry>/geostream:latest --push .
+```
+
+## Proxy TLS de referencia (NFR-SEC-001, docs/16 §2.3)
 
 Esta configuración es la terminación TLS de referencia para GeoStream. El servidor escucha en
 HTTP sin TLS (`GS_HTTP_ADDR`, por defecto `0.0.0.0:8080`) y en el listener de administración

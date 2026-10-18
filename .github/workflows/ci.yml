@@ -86,6 +86,16 @@ jobs:
         if: matrix.target != 'wasm32-unknown-unknown'
         run: cargo build --workspace --target ${{ matrix.target }} --all-features --exclude gs-client-runtime --exclude gs-ffi
 
+  stage5-docker:
+    name: "Etapa 5b: Imagen Docker all-in-one"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build de la imagen
+        run: docker build -f deploy/Dockerfile -t geostream:ci .
+      - name: Smoke test (servicio real con postgres + redis embebidos)
+        run: deploy/smoke.sh 8090 geostream:ci
+
   stage5-security:
     name: "Etapa 5: Seguridad (cargo deny, cargo audit)"
     runs-on: ubuntu-latest
