@@ -139,3 +139,64 @@ async fn a_cell_below_k_is_suppressed_and_never_stored() {
     );
     assert_eq!(cells[0].distinct_subjects, 5);
 }
+
+#[tokio::test]
+async fn retention_drops_only_partitions_older_than_the_cutoff() {
+    // covers: FR-HIS-005, docs/24 §5
+    let pool = setup_db().await;
+    let old = OffsetDateTime::from_unix_timestamp(1_765_843_200).unwrap(); // 2025-12-15
+    let recent = OffsetDateTime::from_unix_timestamp(1_768_435_200).unwrap(); // 2026-01-15
+    HistoryRepository::ensure_month_partition(&pool, old)
+        .await
+        .expect("old partition");
+    HistoryRepository::ensure_month_partition(&pool, recent)
+        .await
+        .expect("recent partition");
+
+    let dropped = HistoryRepository::drop_partitions_before(&pool, 2026, 1)
+        .await
+        .expect("drop");
+    assert!(
+        dropped.iter().any(|n| n == "location_points_2025_12"),
+        "the December partition must be dropped, got {dropped:?}"
+    );
+    assert!(
+        !dropped.iter().any(|n| n == "location_points_2026_01"),
+        "the January partition must survive"
+    );
+}
+
+#[tokio::test]
+async fn subject_purge_removes_every_history_row() {
+    // covers: FR-HIS-005, NFR-PRIV-002
+    let pool = setup_db().await;
+    let tenant = create_tenant(&pool).await;
+    let captured = OffsetDateTime::from_unix_timestamp(1_768_435_200).unwrap();
+    HistoryRepository::ensure_month_partition(&pool, captured)
+        .await
+        .expect("partition");
+
+    let subject = Uuid::now_v7();
+    let mut row = point(tenant, captured, 8.9824, -79.5199);
+    row.subject_id = subject;
+    HistoryRepository::insert_points(&pool, &[row])
+        .await
+        .expect("insert");
+
+    let removed = HistoryRepository::purge_subject(
+        &pool,
+        gs_domain::ids::TenantId::from_uuid(tenant),
+        subject,
+    )
+    .await
+    .expect("purge");
+    assert_eq!(removed, 1);
+
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM location_points WHERE subject_id = $1")
+            .bind(subject)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(remaining, 0);
+}

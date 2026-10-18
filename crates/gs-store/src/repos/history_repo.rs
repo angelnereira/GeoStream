@@ -195,3 +195,104 @@ impl HistoryRepository {
             .collect())
     }
 }
+
+impl HistoryRepository {
+    /// Drops every monthly partition of `location_points` strictly older than
+    /// `(year, month)`. Retention by partition drop is O(1) per partition and
+    /// leaves no row behind (`docs/24` §5, `docs/11` §6).
+    ///
+    /// Returns the names dropped.
+    pub async fn drop_partitions_before(
+        pool: &PgPool,
+        year: i32,
+        month: u8,
+    ) -> Result<Vec<String>, StoreError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT c.relname AS name
+            FROM pg_inherits i
+            JOIN pg_class c ON c.oid = i.inhrelid
+            JOIN pg_class p ON p.oid = i.inhparent
+            WHERE p.relname = 'location_points';
+            "#,
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        let mut dropped = Vec::new();
+        for row in rows {
+            let name: String = row.get("name");
+            let Some((py, pm)) = parse_partition_suffix(&name) else {
+                continue;
+            };
+            if (py, pm) < (year, month) {
+                // The name comes from `pg_class` and matches the strict
+                // `location_points_YYYY_MM` shape, so it is a known identifier,
+                // not user input; `AssertSqlSafe` records that audit.
+                let sql = format!("DROP TABLE IF EXISTS {name};");
+                sqlx::query(sqlx::AssertSqlSafe(sql))
+                    .execute(pool)
+                    .await
+                    .map_err(StoreError::Database)?;
+                dropped.push(name);
+            }
+        }
+        Ok(dropped)
+    }
+
+    /// Erases every history row of one subject (`FR-HIS-005`, `NFR-PRIV-002`).
+    ///
+    /// Returns the number of `location_points` rows removed. The caller runs it
+    /// inside the subject-erasure flow; it never touches live snapshots (there
+    /// are none in PostgreSQL).
+    pub async fn purge_subject(
+        pool: &PgPool,
+        tenant_id: TenantId,
+        subject_id: Uuid,
+    ) -> Result<u64, StoreError> {
+        let mut tx = pool.begin().await.map_err(StoreError::Database)?;
+        // `trip_tracks`/`stops` go first: they cascade from `trips`, but being
+        // explicit keeps the order readable.
+        sqlx::query("DELETE FROM stops WHERE tenant_id = $1 AND member_id IN (SELECT id FROM memberships WHERE tenant_id = $1 AND subject_id = $2);")
+            .bind(tenant_id.into_uuid())
+            .bind(subject_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(StoreError::Database)?;
+        sqlx::query("DELETE FROM trip_tracks WHERE trip_id IN (SELECT id FROM trips WHERE tenant_id = $1 AND subject_id = $2);")
+            .bind(tenant_id.into_uuid())
+            .bind(subject_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(StoreError::Database)?;
+        sqlx::query("DELETE FROM trips WHERE tenant_id = $1 AND subject_id = $2;")
+            .bind(tenant_id.into_uuid())
+            .bind(subject_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(StoreError::Database)?;
+        let removed =
+            sqlx::query("DELETE FROM location_points WHERE tenant_id = $1 AND subject_id = $2;")
+                .bind(tenant_id.into_uuid())
+                .bind(subject_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(StoreError::Database)?
+                .rows_affected();
+        tx.commit().await.map_err(StoreError::Database)?;
+        Ok(removed)
+    }
+}
+
+/// Parses `location_points_YYYY_MM` into `(year, month)`.
+fn parse_partition_suffix(name: &str) -> Option<(i32, u8)> {
+    let suffix = name.strip_prefix("location_points_")?;
+    let (year, month) = suffix.split_once('_')?;
+    let year: i32 = year.parse().ok()?;
+    let month: u8 = month.parse().ok()?;
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+    Some((year, month))
+}
