@@ -267,6 +267,7 @@ async fn publish(
         samples: request.samples,
         policy: request.policy,
         throttle: &mut throttle,
+        tracker: None,
         now: OffsetDateTime::now_utc(),
     })
     .await
@@ -579,6 +580,7 @@ async fn test_fr_loc_007_the_token_bucket_rate_limits_publication() {
             samples: &[sample(expected * 10, 0)],
             policy: LocationPolicy::default(),
             throttle: &mut throttle,
+            tracker: None,
             now: OffsetDateTime::now_utc(),
         })
         .await
@@ -599,6 +601,7 @@ async fn test_fr_loc_007_the_token_bucket_rate_limits_publication() {
         samples: &[sample(99, 0)],
         policy: LocationPolicy::default(),
         throttle: &mut throttle,
+        tracker: None,
         now: OffsetDateTime::now_utc(),
     })
     .await
@@ -636,4 +639,72 @@ async fn test_a_closed_session_refuses_publication() {
     .await
     .expect_err("a closed session refuses publications");
     assert!(matches!(error, PublishError::SessionClosed));
+}
+
+/// A sample at a given latitude, for the tracking-engine tests.
+fn sample_at(sequence: u64, latitude: f64) -> LocationSample {
+    let mut s = sample(sequence, 0);
+    if let Some(position) = s.position.as_mut() {
+        position.latitude = latitude;
+    }
+    s
+}
+
+#[tokio::test]
+async fn test_fr_trk_001_estimate_is_attached_beside_the_sample() {
+    // covers: FR-TRK-001, FR-LOC-006 (P-E3), docs/22 §2.7
+    let world = setup("track").await;
+    let ephemeral = InMemoryEphemeralStore::new();
+    let prefix = "gs:pub:track";
+
+    let samples = vec![sample_at(1, 8.9824), sample_at(2, 8.9830)];
+    let mut throttle =
+        PublishThrottle::new(5, Duration::from_millis(1_000), OffsetDateTime::now_utc());
+    let mut engine = gs_track::TrackStateMachine::new(gs_track::TrackConfig::defaults());
+
+    let outcome = gs_service::publishing::publish_batch(PublishParams {
+        pool: &world.pool,
+        ephemeral: &ephemeral,
+        key_prefix: prefix,
+        tenant_id: world.tenant_id,
+        session_id: world.session_id,
+        caller: PublishCaller {
+            subject_id: world.owner_subject,
+            device_id: world.owner_device,
+        },
+        samples: &samples,
+        policy: LocationPolicy::default(),
+        throttle: &mut throttle,
+        tracker: Some(&mut engine),
+        now: OffsetDateTime::now_utc(),
+    })
+    .await
+    .expect("publish");
+
+    assert_eq!(outcome.accepted.len(), 2);
+    for update in &outcome.accepted {
+        // The raw sample travels intact: the estimate never replaces it.
+        assert!(
+            update.sample.is_some(),
+            "the MEASURED sample must be present"
+        );
+        assert!(
+            update
+                .sample
+                .as_ref()
+                .unwrap()
+                .quality
+                .as_ref()
+                .unwrap()
+                .kind
+                == LocationKind::Measured as i32
+        );
+        // The estimate is attached beside it, kind FILTERED.
+        let estimate = update.estimate.as_ref().expect("estimate must be attached");
+        assert_eq!(
+            estimate.kind,
+            gs_service::gs_protocol::EstimateKind::Filtered as i32
+        );
+        assert!(estimate.position.is_some());
+    }
 }

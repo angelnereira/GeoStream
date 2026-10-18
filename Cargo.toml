@@ -18,6 +18,7 @@ gs-ephemeral = { path = "crates/gs-ephemeral" }
 gs-geo = { path = "crates/gs-geo" }
 gs-client-core = { path = "crates/gs-client-core" }
 gs-mobility = { path = "crates/gs-mobility" }
+gs-track = { path = "crates/gs-track" }
 gs-client-runtime = { path = "crates/gs-client-runtime" }
 gs-observability = { path = "crates/gs-observability" }
 gs-protocol = { path = "crates/gs-protocol" }

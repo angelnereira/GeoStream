@@ -107,7 +107,7 @@ Formato de cada entrada (más reciente arriba):
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: parcial (núcleo de consultas).
 - Evidencia: `gs-pools` implementa `nearby`, `rings` y `density` con sus vectores (`POOL-NEAR-001..005`, `POOL-RING-001/002`, `POOL-DENS-*`): exclusión de `PAUSED` y desconectados, filtro por atributos, orden por distancia o ETA, anillos con `truncated`, centroide desplazado y rumbo cuantizado, tope de marcadores. 10 pruebas.
-- Bloqueo para el REST: el índice vivo se llena desde los snapshots del stream (`{p}:snap:{session}:{member}`), y hoy no existe el camino de ingesta de ubicación en `gs-stream`. Sin él, `/v1/pools/*` devolvería siempre vacío; por eso no se monta todavía.
+- Nota corregida: la ingesta de ubicación **sí** existe (`publish_batch` escribe snapshots). Lo que faltaba era el motor E2, ya cableado; y el índice de pool (leer snapshots y proyectar disponibilidad/atributos) para los endpoints REST.
 - Siguiente: ingesta de ubicación en `gs-stream` (motor E2 + índice E4) → luego los endpoints REST de pools.
 
 ### 2026-10-17 — REST de la pista E: herramientas de movilidad (E5)

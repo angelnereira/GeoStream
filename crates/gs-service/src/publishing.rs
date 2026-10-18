@@ -116,6 +116,10 @@ pub struct PublishParams<'a, E: ?Sized> {
     pub policy: LocationPolicy,
     /// Token bucket of (connection, session).
     pub throttle: &'a mut PublishThrottle,
+    /// Tracking engine (E2) of the publishing device. When present, every
+    /// accepted sample gets a `LocationEstimate` attached; the sample itself is
+    /// never modified (P-E3, FR-LOC-006).
+    pub tracker: Option<&'a mut gs_track::TrackStateMachine>,
     /// Current instant, the server clock.
     pub now: OffsetDateTime,
 }
@@ -228,8 +232,10 @@ pub async fn publish_batch<E: EphemeralStore + ?Sized>(
         samples,
         policy,
         throttle,
+        tracker,
         now,
     } = params;
+    let mut tracker = tracker;
 
     // 1. Batch preconditions (docs/08 §6.4), in the documented order.
     if samples.is_empty() {
@@ -339,16 +345,24 @@ pub async fn publish_batch<E: EphemeralStore + ?Sized>(
             }
         }
 
+        // E2: the tracking engine derives an estimate and attaches it *beside*
+        // the sample, never in its place (P-E3, FR-TRK-001/002). The estimate is
+        // absent only when no tracker is wired for this principal.
+        let estimate = tracker.as_mut().and_then(|engine| {
+            let track_sample = track_sample_of(&validated);
+            engine
+                .apply(&track_sample)
+                .estimate
+                .map(|e| to_proto_estimate(&e))
+        });
+
         let update = LocationUpdate {
             session_id: session_id.to_string(),
             member_id: membership.id.to_string(),
             sample: Some(proto_sample(sample)),
             received_at: Some(to_proto_timestamp(now)),
             delivery: DeliveryKind::Live as i32,
-            // The tracking engine (E2) is not implemented yet: `estimate` stays
-            // absent, which the contract allows without affecting acceptance
-            // (docs/09 §4, P-E3).
-            estimate: None,
+            estimate,
         };
         results.push(SampleResult::accepted(validated.sequence));
         accepted.push(update);
@@ -526,5 +540,85 @@ fn to_proto_timestamp(instant: OffsetDateTime) -> Timestamp {
     Timestamp {
         seconds: instant.unix_timestamp(),
         nanos: instant.nanosecond() as i32,
+    }
+}
+
+/// Builds the tracking engine's input from a validated sample.
+fn track_sample_of(sample: &gs_domain::location::LocationSample) -> gs_track::Sample {
+    use gs_domain::location::{LocationSource, MotionActivity};
+    let position = &sample.position;
+    let motion = match sample.quality.motion {
+        MotionActivity::Stationary => gs_track::Motion::Stationary,
+        MotionActivity::Walking => gs_track::Motion::Walking,
+        MotionActivity::Running => gs_track::Motion::Running,
+        MotionActivity::Cycling => gs_track::Motion::Cycling,
+        MotionActivity::Automotive => gs_track::Motion::Automotive,
+        MotionActivity::Unspecified => gs_track::Motion::Unknown,
+    };
+    let source = match sample.quality.source {
+        LocationSource::Network => "NETWORK",
+        _ => "GPS",
+    };
+    gs_track::Sample {
+        sequence: sample.sequence,
+        sample_at_ms: (sample.captured_at.unix_timestamp_nanos() / 1_000_000) as u64,
+        lat: position.latitude(),
+        lon: position.longitude(),
+        horizontal_accuracy_m: position.horizontal_accuracy_m(),
+        speed_mps: position.speed_mps(),
+        speed_accuracy_mps: None,
+        heading_deg: position.heading_deg(),
+        is_mock: sample.quality.is_mock.unwrap_or(false),
+        source,
+        motion,
+    }
+}
+
+/// Maps the engine's estimate to the wire `LocationEstimate` (docs/22 §2.7).
+fn to_proto_estimate(estimate: &gs_track::TrackEstimate) -> gs_protocol::LocationEstimate {
+    use gs_protocol::{EstimateKind, PlausibilityFlag, Position as ProtoPosition};
+    let mut flags = Vec::new();
+    if estimate.flags.excessive_speed {
+        flags.push(PlausibilityFlag::ExcessiveSpeed as i32);
+    }
+    if estimate.flags.outlier_jump {
+        flags.push(PlausibilityFlag::OutlierJump as i32);
+    }
+    if estimate.flags.low_accuracy {
+        flags.push(PlausibilityFlag::LowAccuracy as i32);
+    }
+    if estimate.flags.mock_flagged {
+        flags.push(PlausibilityFlag::MockFlagged as i32);
+    }
+    if estimate.flags.frozen_fix {
+        flags.push(PlausibilityFlag::FrozenFix as i32);
+    }
+    if estimate.flags.implausible_accel {
+        flags.push(PlausibilityFlag::ImplausibleAccel as i32);
+    }
+    if estimate.flags.network_only {
+        flags.push(PlausibilityFlag::NetworkOnly as i32);
+    }
+    gs_protocol::LocationEstimate {
+        kind: EstimateKind::Filtered as i32,
+        position: Some(ProtoPosition {
+            latitude: estimate.position_lat,
+            longitude: estimate.position_lon,
+            horizontal_accuracy_m: estimate.position_std_m,
+            altitude_m: None,
+            vertical_accuracy_m: None,
+            speed_mps: estimate.speed_mps,
+            speed_accuracy_mps: None,
+            heading_deg: estimate.heading_deg,
+            heading_accuracy_deg: None,
+        }),
+        speed_mps: estimate.speed_mps,
+        heading_deg: estimate.heading_deg,
+        horizontal_accuracy_m: estimate.position_std_m,
+        confidence: estimate.plausibility,
+        odometer_m: estimate.odometer_m,
+        flags,
+        road_id: String::new(),
+        road_distance_m: None,
     }
 }

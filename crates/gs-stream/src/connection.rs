@@ -191,6 +191,9 @@ pub struct Connection {
     last_presence_renew: Instant,
     /// Whether `AuthExpiring` has already been sent for the current auth expiration window.
     auth_expiring_sent: bool,
+    /// Tracking engine (E2) of the publishing device. One connection per device
+    /// (FR-STR-007), so one engine per connection is the correct unit.
+    tracker: gs_track::TrackStateMachine,
 }
 
 impl Connection {
@@ -241,6 +244,7 @@ impl Connection {
             session_end_rx,
             last_presence_renew: Instant::now(),
             auth_expiring_sent: false,
+            tracker: gs_track::TrackStateMachine::new(gs_track::TrackConfig::defaults()),
         })
     }
 
@@ -1268,6 +1272,7 @@ impl Connection {
             samples: &publish.samples,
             policy,
             throttle,
+            tracker: Some(&mut self.tracker),
             now: OffsetDateTime::now_utc(),
         })
         .await

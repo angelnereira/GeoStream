@@ -10,6 +10,7 @@ publish.workspace = true
 dashmap.workspace = true
 gs-service.workspace = true
 gs-geo.workspace = true
+gs-track.workspace = true
 axum.workspace = true
 futures.workspace = true
 pbjson-types.workspace = true
