@@ -235,14 +235,20 @@ async fn load_live_members(
     let prefix = &state.sessions.redis_key_prefix;
     let mut members = Vec::new();
     for m in &page.members {
+        eprintln!(
+            ">> member={} sharing={}",
+            m.membership.id, m.membership.sharing
+        );
         if !m.membership.sharing {
             continue;
         }
         let key = gs_service::publishing::snapshot_key(prefix, session_id, m.membership.id);
-        let Ok(Some(bytes)) = state.sessions.ephemeral.get_snapshot(&key).await else {
+        let snap = state.sessions.ephemeral.get_snapshot(&key).await;
+        let Ok(Some(bytes)) = snap else {
             continue;
         };
-        let Ok(update) = gs_protocol::LocationUpdate::decode(bytes.as_slice()) else {
+        let update = gs_protocol::LocationUpdate::decode(bytes.as_slice());
+        let Ok(update) = update else {
             continue;
         };
         let Some(position) = update.sample.as_ref().and_then(|s| s.position.as_ref()) else {
