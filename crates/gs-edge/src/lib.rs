@@ -149,10 +149,118 @@ mod edge_tests {
     }
 
     #[test]
+    fn edge_lpw_004_unknown_model_is_rejected_never_best_effort() {
+        assert_eq!(
+            decode_position("desconocido-9999", 1, &[0u8; 8]),
+            Err(DecodeError::UnknownModel)
+        );
+    }
+
+    #[test]
+    fn reference_decoder_round_trips_a_position() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&89_824_000i32.to_be_bytes()); // 8.9824
+        payload.extend_from_slice(&(-795_199_000i32).to_be_bytes()); // -79.5199
+        let fixes = decode_position("lora-sensor-a", 1, &payload).expect("decode");
+        assert_eq!(fixes.len(), 1);
+        assert!((fixes[0].lat - 8.9824).abs() < 1e-6);
+        assert!((fixes[0].lon - (-79.5199)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn malformed_payload_is_rejected() {
+        assert_eq!(
+            decode_position("lora-sensor-a", 1, &[1, 2, 3]),
+            Err(DecodeError::Malformed)
+        );
+        assert_eq!(
+            decode_position("lora-sensor-a", 1, &[]),
+            Err(DecodeError::Malformed)
+        );
+    }
+
+    #[test]
     fn edge_lpw_003_timestamp_outside_the_window_is_rejected() {
         assert!(!timestamp_within_window(3600, 300));
         assert!(timestamp_within_window(60, 300));
         assert!(timestamp_within_window(-60, 300));
+    }
+}
+
+/// One position decoded from an LPWAN payload.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RawFix {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+/// Why a payload could not be decoded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeError {
+    /// No decoder is registered for the model. **Never** a best-effort guess
+    /// (`EDGE-LPW-004`): a wrong decode produces invented coordinates that look
+    /// like data, which is worse than no data.
+    UnknownModel,
+    /// The decoder is registered but the payload does not match its format.
+    Malformed,
+    /// The decoded position is outside the WGS 84 domain.
+    OutOfRange,
+}
+
+/// A per-model LPWAN decoder (`docs/25` §4).
+pub trait LpwanDecoder {
+    /// The model name this decoder answers to.
+    fn model(&self) -> &'static str;
+    /// Decodes a frame. `fport` is the LoRaWAN application port.
+    fn decode(&self, fport: u8, payload: &[u8]) -> Result<Vec<RawFix>, DecodeError>;
+}
+
+/// Reference decoder for `lora-sensor-a`: one big-endian frame of
+/// `int32 lat_e7` + `int32 lon_e7`, optionally repeated for a batch.
+///
+/// It exists to have a decoder to test the registry against, not to claim a
+/// real device's format: `20` §9 requires verifying each network server's format
+/// before implementing it.
+pub struct LoraSensorA;
+
+impl LpwanDecoder for LoraSensorA {
+    fn model(&self) -> &'static str {
+        "lora-sensor-a"
+    }
+
+    fn decode(&self, _fport: u8, payload: &[u8]) -> Result<Vec<RawFix>, DecodeError> {
+        if payload.is_empty() || !payload.len().is_multiple_of(8) {
+            return Err(DecodeError::Malformed);
+        }
+        let mut out = Vec::with_capacity(payload.len() / 8);
+        for chunk in payload.chunks(8) {
+            let lat = i32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as f64 / 1e7;
+            let lon = i32::from_be_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]) as f64 / 1e7;
+            if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+                return Err(DecodeError::OutOfRange);
+            }
+            out.push(RawFix { lat, lon });
+        }
+        Ok(out)
+    }
+}
+
+/// The registered decoders. Deliberately a short, explicit list: a model without
+/// a decoder is `422`, never a best-effort decode.
+#[must_use]
+pub fn decoder_for(model: &str) -> Option<&'static dyn LpwanDecoder> {
+    static LORA_SENSOR_A: LoraSensorA = LoraSensorA;
+    match model {
+        "lora-sensor-a" => Some(&LORA_SENSOR_A),
+        _ => None,
+    }
+}
+
+/// Decodes a frame for a model, or reports why not.
+pub fn decode_position(model: &str, fport: u8, payload: &[u8]) -> Result<Vec<RawFix>, DecodeError> {
+    match decoder_for(model) {
+        Some(decoder) => decoder.decode(fport, payload),
+        None => Err(DecodeError::UnknownModel),
     }
 }
 
