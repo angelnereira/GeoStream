@@ -103,6 +103,13 @@ Formato de cada entrada (más reciente arriba):
 - `tools/src/crate_deps`: se declara que `gs-ffi` depende directamente de `gs-client-core` además del runtime, porque la FFI llama al núcleo sin pasar por I/O.
 - Siguiente: T-E1-05 ya cubierto en el workflow de CI (musl + wasm32), T-E1-06 cubierto por `crates/gs-client-core/tests/properties.rs`.
 
+### 2026-10-17 — E4: consultas de pool (núcleo)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: parcial (núcleo de consultas).
+- Evidencia: `gs-pools` implementa `nearby`, `rings` y `density` con sus vectores (`POOL-NEAR-001..005`, `POOL-RING-001/002`, `POOL-DENS-*`): exclusión de `PAUSED` y desconectados, filtro por atributos, orden por distancia o ETA, anillos con `truncated`, centroide desplazado y rumbo cuantizado, tope de marcadores. 10 pruebas.
+- Bloqueo para el REST: el índice vivo se llena desde los snapshots del stream (`{p}:snap:{session}:{member}`), y hoy no existe el camino de ingesta de ubicación en `gs-stream`. Sin él, `/v1/pools/*` devolvería siempre vacío; por eso no se monta todavía.
+- Siguiente: ingesta de ubicación en `gs-stream` (motor E2 + índice E4) → luego los endpoints REST de pools.
+
 ### 2026-10-17 — REST de la pista E: herramientas de movilidad (E5)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: parcial (endpoints de herramientas).
