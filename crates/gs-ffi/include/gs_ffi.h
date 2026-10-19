@@ -66,6 +66,12 @@ GsResult gs_client_command(GsHandle *handle, int32_t command);
 GsResult gs_client_watch(GsHandle *handle, const uint8_t *session_id,
                          size_t len, uint8_t watch);
 
+/* Start sharing on a session id (UTF-8 bytes + length). */
+GsResult gs_client_start_sharing(GsHandle *handle, const uint8_t *session_id, size_t len);
+
+/* Stop sharing. The buffered queue is purged synchronously. */
+GsResult gs_client_stop_sharing(GsHandle *handle);
+
 /* Feed a platform fix. Returns the number of outputs produced, or a negative
  * GsResult code. */
 int32_t gs_client_location_fix(GsHandle *handle, const GsPlatformFix *fix);

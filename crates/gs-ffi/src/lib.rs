@@ -446,6 +446,85 @@ pub unsafe extern "C" fn gs_client_render_position(
     }
 }
 
+/// Starts sharing on a session.
+///
+/// # Safety
+///
+/// `handle` must be valid; `session_id` must point to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gs_client_start_sharing(
+    handle: *mut GsHandle,
+    session_id: *const u8,
+    len: usize,
+) -> GsResult {
+    if handle.is_null() || session_id.is_null() || len == 0 {
+        return GsResult::NullPointer;
+    }
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| -> Result<(), GsResult> {
+        // SAFETY: checked non-null; the caller promises `len` readable bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(session_id, len) };
+        let sid = std::str::from_utf8(bytes)
+            .map_err(|_| GsResult::NullPointer)?
+            .to_string();
+        // SAFETY: checked non-null; the caller upholds the handle contract.
+        let h = unsafe { handle.as_mut() }.ok_or(GsResult::InvalidHandle)?;
+        let outputs = h.core.handle(
+            gs_client_core::Input::Command(gs_client_core::Command::SetIntent(
+                gs_client_core::Intent::RealtimeTrip,
+            )),
+            0,
+        );
+        let outputs2 = h.core.handle(
+            gs_client_core::Input::Command(gs_client_core::Command::Watch { session_id: sid }),
+            0,
+        );
+        for output in outputs.iter().chain(outputs2.iter()) {
+            h.events.push_back(output_kind(output));
+        }
+        Ok(())
+    }));
+    match result {
+        Ok(Ok(())) => GsResult::Ok,
+        Ok(Err(code)) => code,
+        Err(_) => GsResult::Panic,
+    }
+}
+
+/// Stops sharing. The `buffered` queue is purged synchronously (NFR-PRIV-002).
+///
+/// # Safety
+///
+/// `handle` must be valid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gs_client_stop_sharing(handle: *mut GsHandle) -> GsResult {
+    if handle.is_null() {
+        return GsResult::NullPointer;
+    }
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| -> Result<(), GsResult> {
+        // SAFETY: checked non-null; the caller upholds the handle contract.
+        let h = unsafe { handle.as_mut() }.ok_or(GsResult::InvalidHandle)?;
+        let outputs = h.core.handle(
+            gs_client_core::Input::Command(gs_client_core::Command::SetIntent(
+                gs_client_core::Intent::Off,
+            )),
+            0,
+        );
+        let outputs2 = h.core.handle(
+            gs_client_core::Input::Command(gs_client_core::Command::Stop),
+            0,
+        );
+        for output in outputs.iter().chain(outputs2.iter()) {
+            h.events.push_back(output_kind(output));
+        }
+        Ok(())
+    }));
+    match result {
+        Ok(Ok(())) => GsResult::Ok,
+        Ok(Err(code)) => code,
+        Err(_) => GsResult::Panic,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,6 +690,21 @@ mod tests {
             unsafe { gs_client_command(h, 999) },
             GsResult::InvalidHandle
         );
+        // SAFETY: h valid.
+        assert_eq!(unsafe { gs_client_destroy(h) }, GsResult::Ok);
+    }
+
+    #[test]
+    fn sharing_start_and_stop_are_accepted() {
+        let h = gs_client_create();
+        let session = b"ses_00000000000000000000000000000000";
+        // SAFETY: h valid; session readable.
+        assert_eq!(
+            unsafe { gs_client_start_sharing(h, session.as_ptr(), session.len()) },
+            GsResult::Ok
+        );
+        // SAFETY: h valid.
+        assert_eq!(unsafe { gs_client_stop_sharing(h) }, GsResult::Ok);
         // SAFETY: h valid.
         assert_eq!(unsafe { gs_client_destroy(h) }, GsResult::Ok);
     }
