@@ -5,6 +5,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 ## [Unreleased]
 
 ### Added
+- Despliegue: servicio `osrm` en Railway (`deploy/osrm/Dockerfile`), OSRM 5.27 con el extracto de Panamá de Geofabrik preprocesado al construir (perfil `car`, MLD), para dibujar rutas sobre OpenStreetMap sin Google. Datos ODbL con atribución obligatoria.
+
+### Changed
+- Railway: la configuración de cada servicio (Dockerfile, healthcheck, rutas vigiladas) pasa a los ajustes del servicio y se elimina el `railway.toml` de la raíz, que Railway aplicaría a todos los servicios del repositorio. Verificado que el servicio `geostream` conserva `deploy/Dockerfile.railway` y el healthcheck `/health/ready`.
+
 - Antisuplantación y precisión (DR-20261031-02/03, aceptadas): claves de política `reject_mock_samples` y `reject_network_only` (apagadas por defecto), reglas 17–18 de `09` §3.1 que rechazan con `INVALID_LOCATION` y `field = quality.is_mock` / `quality.source`, y `max_horizontal_accuracy_m` exigible desde **5 m** (antes 100). Aplica igual al stream, a la ingesta HTTP y al relleno de historial. Pruebas en `gs-domain` y `gs-config`.
 - `gs-mobility` (T-E5-07/T-E7-05, núcleo): grafo vial propio desde datos OSM (CSR dirigido, sentidos únicos y rotondas, índice espacial en rejilla, Dijkstra acotado uno-a-muchos) y map-matching HMM/Viterbi por lotes según `24` §3.3, con corte de la traza cuando no hay candidatos o la transición es imposible. Sin dependencias nuevas. 9 pruebas sobre una red sintética.
 - `docs/decisions/pending/DR-20261031-04.md`: falta aprobar cómo leer `.osm.pbf` (zlib) y definir en `17` los parámetros `mm_*` que usa `24` §3.3.

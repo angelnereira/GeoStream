@@ -126,7 +126,7 @@ Proyecto propio en Railway con tres servicios:
 |---|---|---|
 | `Postgres` | plantilla gestionada de Railway | `GS_DATABASE_URL=${{Postgres.DATABASE_URL}}` |
 | `Redis` | plantilla gestionada de Railway | `GS_REDIS_URL=${{Redis.REDIS_URL}}`, `GS_STATE_BACKEND=redis` |
-| `geostream` | este repositorio, `railway.toml` → `deploy/Dockerfile.railway` | volumen en `/data`; healthcheck `/health/ready` |
+| `geostream` | este repositorio, `deploy/Dockerfile.railway` (ajuste del servicio) | volumen en `/data`; healthcheck `/health/ready`; redespliega solo si cambian `apps/`, `crates/`, `contracts/`, `migrations/` o sus archivos de despliegue |
 
 `deploy/railway-entrypoint.sh` genera en el volumen, la primera vez, el par Ed25519 (`/data/jwt-keys`) y la clave
 `GS_DATA_ENCRYPTION_KEY` (`/data/secrets`), sin imprimirlos, y corre `geostream migrate` antes de `serve`
@@ -150,3 +150,11 @@ nunca en chats, tickets ni en el repositorio.
 Para consumir el servicio, cada integrador recibe su propia aplicación y API key; sus apps móviles reciben **tokens
 de dispositivo** que emite su backend con `POST /v1/tokens` (`docs/15_INTEGRATION_GUIDE.md`). La app de pruebas
 `apps/flutter_app` documenta el flujo completo con un token emitido a mano.
+
+### Motor de rutas `osrm`
+Servicio aparte en el mismo proyecto (`deploy/osrm/Dockerfile`, ajustado en el servicio; redespliega solo si cambia `deploy/osrm/`): OSRM 5.27
+con el extracto de Panamá de Geofabrik, preprocesado al construir (perfil `car`, algoritmo MLD). Lo usa GravitalPay
+para dibujar la ruta del repartidor al cliente (`GET /route/v1/driving/{lon},{lat};{lon},{lat}?overview=full&geometries=polyline6`).
+Datos ODbL: la app muestra «© OpenStreetMap contributors». Para refrescar el mapa, redesplegar (vuelve a descargar el extracto).
+
+La configuración de cada servicio (Dockerfile, healthcheck, reinicio, rutas vigiladas) vive en los ajustes del servicio en Railway, no en un `railway.toml`: Railway aplicaría un `railway.toml` de la raíz a todos los servicios del repositorio.
