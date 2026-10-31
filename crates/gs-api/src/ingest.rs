@@ -130,6 +130,8 @@ async fn ingest_locations_handler(
     let location_policy = LocationPolicy {
         max_horizontal_accuracy_m: policy.max_horizontal_accuracy_m,
         reject_null_island: policy.reject_null_island,
+        reject_mock_samples: policy.reject_mock_samples,
+        reject_network_only: policy.reject_network_only,
         max_future_skew_ms: 0,
         max_event_age_ms: 0,
         // The HTTP path accepts the batch limit of `max_samples_per_publish_http`.

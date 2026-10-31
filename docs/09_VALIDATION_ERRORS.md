@@ -58,6 +58,8 @@ Las reglas se evalúan **en este orden**; el primer fallo produce `SAMPLE_STATUS
 | 14 | `quality` | obligatorio | presente |
 | 15 | `quality.kind` | obligatorio | valor conocido ≠ `UNSPECIFIED` |
 | 16 | `captured_at` | — | `captured_at ≤ now + GS_LOCATION_MAX_FUTURE_SKEW_MS` |
+| 17 | `quality.is_mock` | — | si `reject_mock_samples` (política, apagada por defecto): rechazar si `is_mock == true` (DR-20261031-02) |
+| 18 | `quality.source` | — | si `reject_network_only` (política, apagada por defecto): rechazar si `source == NETWORK` (DR-20261031-02) |
 
 Normalizaciones (sin error):
 - `quality.source` o `quality.motion` con un valor numérico desconocido se tratan como `UNSPECIFIED`.

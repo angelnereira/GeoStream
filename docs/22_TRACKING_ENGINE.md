@@ -28,7 +28,7 @@ Este documento define el comportamiento del motor de trayectoria: la puerta de p
 
 ### 2.2 Puerta de plausibilidad
 
-Se evalúa **antes** del filtro sobre cada muestra aceptada. No rechaza ni modifica la muestra: produce banderas `PlausibilityFlag` y una puntuación `plausibility ∈ [0, 1]`.
+Se evalúa **antes** del filtro sobre cada muestra aceptada. No rechaza ni modifica la muestra (el rechazo opcional de `is_mock` y de `source = NETWORK` por política del tenant ocurre antes, en la validación de `09` §3.1, reglas 17–18): produce banderas `PlausibilityFlag` y una puntuación `plausibility ∈ [0, 1]`.
 
 Los nombres de esta tabla son **exactamente** los valores de `PlausibilityFlag` en `contracts/proto/geostream/v1/location.proto`, en su forma REST sin el prefijo `PLAUSIBILITY_FLAG_`. `geostream-tools phases` lo verifica: cambiar un nombre aquí sin cambiarlo en el contrato rompe la compilación.
 

@@ -45,7 +45,7 @@ final class GeoStreamApiException implements Exception {
 /// Resultado por muestra de `POST /v1/ingest/locations`.
 final class SampleResult {
   /// Crea un resultado.
-  const SampleResult(this.sequence, this.status, this.errorCode);
+  const SampleResult(this.sequence, this.status, this.errorCode, [this.field]);
 
   /// Secuencia de la muestra.
   final int sequence;
@@ -55,6 +55,9 @@ final class SampleResult {
 
   /// `ErrorCode` si fue rechazada.
   final String? errorCode;
+
+  /// Campo que falló (`09` §3.1), p. ej. `quality.is_mock`.
+  final String? field;
 }
 
 /// Posición de un miembro en el snapshot de la sesión.
@@ -205,6 +208,7 @@ final class GeoStreamApi {
           (r['sequence'] as num).toInt(),
           r['status'] as String,
           r['error_code'] as String?,
+          r['field'] as String?,
         ),
     ];
   }

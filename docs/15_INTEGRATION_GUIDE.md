@@ -252,7 +252,7 @@ sequenceDiagram
 - **No** compartas con GeoStream el secreto con que tu identidad firma sus propios tokens, ni reutilices esos
   tokens como credencial de GeoStream: quien tuviera ese secreto podría acuñar sesiones de tu producto.
 - La federación directa (GeoStream verifica tokens firmados por tu identidad con JWKS, FR-AUTH-009) exige firma
-  asimétrica en el emisor y está pendiente de decisión: `docs/decisions/pending/DR-20261031-01.md`.
+  asimétrica en el emisor; aprobada como siguiente paso en `docs/decisions/accepted/DR-20261031-01.md`.
 
 ### 10.4 Dispositivos: móvil, microcontrolador o gateway
 
@@ -276,12 +276,14 @@ precisiones.
 
 | Mecanismo | Estado | Dónde |
 |---|---|---|
-| Rechazar muestras con precisión peor que un umbral por tenant | Implementado. `max_horizontal_accuracy_m`, rango `100..=100000` m | `geostream admin policy set --tenant ten_… max_horizontal_accuracy_m=100` |
+| Rechazar muestras con precisión peor que un umbral por tenant | Implementado. `max_horizontal_accuracy_m`, rango `5..=100000` m | `geostream admin policy set --tenant ten_… max_horizontal_accuracy_m=25` |
 | Rechazar `0,0` (Null Island), coordenadas no finitas, secuencias repetidas, muestras del futuro | Implementado | `09` §3 |
 | Señales de plausibilidad por muestra (`MOCK_FLAGGED`, velocidad o aceleración imposibles, fix congelado, solo red, baja precisión) y puntuación `plausibility` | Implementado: viajan en `estimate` de cada `LocationUpdate` del stream | `22` §2.2, `22` §2.7 |
-| Rechazar en la aceptación según esas señales, exigir menos de 100 m o atestación del dispositivo | **No**: GeoStream entrega las señales y el integrador decide (decisión D-10, `10` T-07) | `docs/decisions/pending/DR-20261031-02.md`, `DR-20261031-03.md` |
+| Rechazar ubicaciones simuladas (`is_mock = true`) | Implementado, opcional por tenant | `geostream admin policy set --tenant ten_… reject_mock_samples=true` (`09` §3.1 regla 17) |
+| Rechazar muestras solo de red (sin GNSS) | Implementado, opcional por tenant | `reject_network_only=true` (regla 18) |
+| Atestación del dispositivo (Play Integrity, App Attest, elemento seguro) | Pendiente de ADR | `docs/decisions/accepted/DR-20261031-02.md` fase 2 |
 
 Ninguna técnica del lado servidor impide del todo que un dispositivo rooteado o un firmware modificado invente
 coordenadas: lo que se puede hacer es **encarecer** el engaño (atestación de la app, coherencia física de la
-trayectoria) y dejar la sanción al negocio del integrador.
+trayectoria) y dejar la sanción al negocio del integrador. Una muestra rechazada vuelve con `status = REJECTED`, `error_code = INVALID_LOCATION` y `field` (`quality.is_mock`, `quality.source` o `position.horizontal_accuracy_m`).
 

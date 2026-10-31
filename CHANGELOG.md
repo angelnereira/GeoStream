@@ -5,6 +5,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 ## [Unreleased]
 
 ### Added
+- Antisuplantación y precisión (DR-20261031-02/03, aceptadas): claves de política `reject_mock_samples` y `reject_network_only` (apagadas por defecto), reglas 17–18 de `09` §3.1 que rechazan con `INVALID_LOCATION` y `field = quality.is_mock` / `quality.source`, y `max_horizontal_accuracy_m` exigible desde **5 m** (antes 100). Aplica igual al stream, a la ingesta HTTP y al relleno de historial. Pruebas en `gs-domain` y `gs-config`.
+- `gs-mobility` (T-E5-07/T-E7-05, núcleo): grafo vial propio desde datos OSM (CSR dirigido, sentidos únicos y rotondas, índice espacial en rejilla, Dijkstra acotado uno-a-muchos) y map-matching HMM/Viterbi por lotes según `24` §3.3, con corte de la traza cuando no hay candidatos o la transición es imposible. Sin dependencias nuevas. 9 pruebas sobre una red sintética.
+- `docs/decisions/pending/DR-20261031-04.md`: falta aprobar cómo leer `.osm.pbf` (zlib) y definir en `17` los parámetros `mm_*` que usa `24` §3.3.
+- `apps/flutter_app`: el registro muestra el campo que hizo rechazar una muestra (p. ej. `quality.is_mock`).
+
+### Changed
+- DR-20261031-01/02/03 pasan a `docs/decisions/accepted/`. D-10 y `10` T-07 quedan enmendados: el rechazo de ubicaciones simuladas es opcional por tenant.
 - `docs/15_INTEGRATION_GUIDE.md` §10: cómo consumir el despliegue `geostream.gravitalcloud.com` (alta de proyectos, intercambio de token con la identidad de cada proyecto, dispositivos móviles, microcontroladores y gateways, precisión y señales de plausibilidad).
 - `docs/decisions/pending/DR-20261031-01.md` (cuentas y federación JWKS), `DR-20261031-02.md` (rechazo de ubicaciones simuladas y atestación, choca con D-10) y `DR-20261031-03.md` (precisión exigible por debajo de 100 m).
 - `apps/flutter_app` (GeoStream Tester): app Flutter Android/iOS de pruebas para validar en un teléfono real que la ubicación precisa llega al servidor de Railway. Crea o usa una sesión, activa la compartición propia (apagada por defecto), publica por `POST /v1/ingest/locations` y lee `GET /v1/sessions/{id}/snapshot`. Mapa OpenStreetMap sobre `maplibre_gl` con atribución ODbL siempre visible y URL de teselas configurable (`GS_TILE_URL`). Editor de geocercas (círculo y polígono) validado con las reglas de `14` §3, que exporta el `CreateGeofenceRequest` del contrato y las evalúa **localmente** con la histéresis de `14` §4 como vista previa (el servidor aún no implementa F11). Solo dependencias aprobadas (`19` §6.3). 37 pruebas.

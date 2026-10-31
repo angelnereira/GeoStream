@@ -131,3 +131,27 @@ fn test_policy_cross_validation_rules() {
         other => panic!("expected OutOfRange/CrossValidation, got {other:?}"),
     }
 }
+
+#[test]
+fn test_dr_20261031_strict_accuracy_and_anti_spoof_keys() {
+    // DR-20261031-03: el rango de max_horizontal_accuracy_m empieza en 5 m.
+    let p = TenantPolicy::from_json_str(r#"{"max_horizontal_accuracy_m": 5}"#).unwrap();
+    assert!((p.max_horizontal_accuracy_m - 5.0).abs() < f64::EPSILON);
+    let err = TenantPolicy::from_json_str(r#"{"max_horizontal_accuracy_m": 4.9}"#).unwrap_err();
+    match err {
+        PolicyError::OutOfRange { key, .. } => assert_eq!(key, "max_horizontal_accuracy_m"),
+        other => panic!("expected OutOfRange, got {other:?}"),
+    }
+
+    // DR-20261031-02: claves nuevas, apagadas por defecto.
+    let d = TenantPolicy::default();
+    assert!(!d.reject_mock_samples);
+    assert!(!d.reject_network_only);
+    let p = TenantPolicy::from_json_str(
+        r#"{"reject_mock_samples": true, "reject_network_only": true}"#,
+    )
+    .unwrap();
+    assert!(p.reject_mock_samples && p.reject_network_only);
+    let err = TenantPolicy::from_json_str(r#"{"reject_mock_samples": "yes"}"#).unwrap_err();
+    assert!(matches!(err, PolicyError::InvalidType { .. }));
+}

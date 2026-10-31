@@ -209,6 +209,12 @@ pub struct LocationPolicy {
     pub max_future_skew_ms: i64,
     pub max_event_age_ms: i64,
     pub max_samples_per_publish: u32,
+    /// Regla 17 (DR-20261031-02): rechazar `quality.is_mock = true`.
+    #[serde(default)]
+    pub reject_mock_samples: bool,
+    /// Regla 18 (DR-20261031-02): rechazar `quality.source = NETWORK`.
+    #[serde(default)]
+    pub reject_network_only: bool,
 }
 
 impl Default for LocationPolicy {
@@ -219,6 +225,8 @@ impl Default for LocationPolicy {
             max_future_skew_ms: 5_000,
             max_event_age_ms: 120_000,
             max_samples_per_publish: 50,
+            reject_mock_samples: false,
+            reject_network_only: false,
         }
     }
 }
@@ -840,8 +848,19 @@ pub fn validate_sample(
         heading_accuracy_deg: raw_pos.heading_accuracy_deg,
     };
 
+    // 17. quality.is_mock (política opcional del tenant, DR-20261031-02)
+    if policy.reject_mock_samples && raw_quality.is_mock == Some(true) {
+        return Err(LocationValidationError::new("quality.is_mock"));
+    }
+
+    // 18. quality.source = NETWORK (política opcional del tenant, DR-20261031-02)
+    let source = raw_quality.source.unwrap_or(LocationSource::Unspecified);
+    if policy.reject_network_only && source == LocationSource::Network {
+        return Err(LocationValidationError::new("quality.source"));
+    }
+
     let quality = LocationQuality {
-        source: raw_quality.source.unwrap_or(LocationSource::Unspecified),
+        source,
         kind,
         is_mock: raw_quality.is_mock,
         motion: raw_quality.motion.unwrap_or(MotionActivity::Unspecified),

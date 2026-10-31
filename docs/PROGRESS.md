@@ -30,7 +30,7 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 
 ## Bloqueos y solicitudes de decisión abiertas
 
-Ocho decisiones abiertas. Todas son contradicciones o información faltante reales
+Seis decisiones abiertas (DR-20261031-01/02/03 aceptadas el 2026-10-31). Todas son contradicciones o información faltante reales
 entre documentos normativos; `AGENTS.md` prohíbe que un agente las resuelva por su
 cuenta. Los **kernels puros** de todas ellas están implementados y probados; lo
 que falta es el esquema o la decisión de contrato.
@@ -42,9 +42,7 @@ que falta es el esquema o la decisión de contrato.
 | DR-20261018-02 | T-E8-04/05 | `edge_reports.finder_device_id NOT NULL` (`11` §2.0) contradice T-28 y `25` §2.4 («no guardar el dispositivo del buscador junto al blob»). | Almacén de tags (`/v1/tags`) y kernels de E8 (HMAC, EID, DULT) listos. |
 | DR-20261018-03 | T-E7-01..04 | `11` §2.0 **no define ninguna migración** para la capa aprendida (perfiles de velocidad, ETA, sinuosidad, lugares, demanda/oferta, matrices OD), que `24` §3.1 y `07` §9.11 sí requieren. | Kernels de E7 (DBSCAN, eventos de conducción, cubetas de velocidad, sinuosidad, k-anonimato) implementados. |
 | DR-20261018-04 | T-E8-08 | `edge_lpwan_integrations.secret_hash` (`11` §2.0) no puede verificar un HMAC, que necesita la clave; `07` §10.3 guarda el secreto cifrado. Ruta del webhook divergente (OpenAPI vs `25` §4). | Trait `LpwanDecoder` con registro y decodificador de referencia listos. |
-| DR-20261031-01 | FR-AUTH-009, FR-ADM-004 | Registro de cuentas y federación con la identidad de los demás proyectos (JWKS). La identidad de Plenty-Pay firma con secreto simétrico, no federable. | El intercambio de token por el backend de cada proyecto funciona hoy (`15` §10.3). |
-| DR-20261031-02 | FR-TRK-002, `10` T-07 | Rechazar ubicaciones simuladas o implausibles revierte D-10; la atestación del dispositivo añade dependencias. | Las banderas de plausibilidad y `is_mock` ya viajan en `estimate`. |
-| DR-20261031-03 | `17` §4 | Exigir precisión mejor que 100 m: el rango de `max_horizontal_accuracy_m` empieza en 100. | Un tenant ya puede exigir ≤ 100 m. |
+| DR-20261031-04 | T-E5-07, T-E7-05/06 | Leer `.osm.pbf` necesita descomprimir zlib (sin dependencia aprobada) y `17` no define los parámetros `mm_*` de `24` §3.3. | Grafo vial y map-matching HMM implementados y probados con red sintética. |
 
 Las cuatro decisiones que bloqueaban F4 están resueltas.
 
@@ -87,6 +85,13 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-31 — Precisión estricta, rechazo opcional de ubicaciones simuladas y núcleo de map-matching sobre OSM
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada la parte no bloqueada; el lector `.osm.pbf` y los parámetros `mm_*` quedan en DR-20261031-04.
+- Requisitos: FR-LRN-003 y FR-HIS-004 pasan a `en curso`. Decisiones DR-20261031-01/02/03 aceptadas por el propietario («Dale procede con todo»).
+- Qué: reglas 17–18 de `09` §3.1 y claves `reject_mock_samples`/`reject_network_only`; `max_horizontal_accuracy_m` desde 5 m; `gs-mobility::road_graph` y `gs-mobility::map_matching`.
+- Verificación: `cargo clippy --workspace --all-targets -D warnings` y `cargo fmt --check` en verde; `cargo test --workspace` con PostgreSQL y Redis locales: 516 pruebas en verde y 2 fallos de `gs-store/tests/history_test.rs` que solo aparecen con toda la suite en paralelo sobre la misma base (pasan 3/3 en aislamiento, con y sin este cambio; no tocan el código modificado); `gs-mobility` 9/9; `geostream-tools all` en verde; `flutter analyze` y `flutter test` 37/37.
 
 ### 2026-10-31 — Guía de consumo del despliegue y tres solicitudes de decisión
 - Autor/agente: Angel Nereira (con agente de código).
