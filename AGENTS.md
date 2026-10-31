@@ -17,6 +17,7 @@ Este repositorio está **gobernado por la documentación**. `docs/` y `contracts
 - No inventes APIs de crates o paquetes: verifica en la versión fijada.
 - Solo dependencias de la lista aprobada (`docs/19_ENGINEERING_STANDARDS.md` §6).
 - No desactives pruebas ni checks, no bajes umbrales, no uses `--no-verify`.
+- **Sin atribución a Claude** (decisión del dueño, 2026-10-31): commits, pull requests, releases, issues y comentarios van solo a nombre de Angel Nereira. Nada de `Co-Authored-By: Claude`, «Generated with Claude Code» ni autor `Claude`.
 - No declares una tarea terminada sin cumplir la Definition of Done y sin el informe con comandos y resultados **reales** (`docs/templates/TASK_REPORT.md`).
 
 ## Al terminar cada tarea
