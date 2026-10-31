@@ -48,7 +48,7 @@ use gs_service::publishing::{
 };
 use gs_service::subscriptions::{SubscribeError, SubscribeParams, SubscribePrincipal};
 use gs_service::tickets::{TicketGrant, TicketPrincipalKind};
-use gs_service::{Bus, InMemoryBus, InMemoryEphemeralStore};
+use gs_service::{Bus, BusBackend, EphemeralBackend};
 use pbjson_types::Timestamp;
 use prost::Message as _;
 use std::str::FromStr;
@@ -104,9 +104,9 @@ pub struct StreamState {
     /// PostgreSQL pool, used to read the tenant policy that shapes `limits` (docs/08 §6.1).
     pub pool: PgPool,
     /// Ephemeral store: `sequence_floor` of docs/08 §6.2.
-    pub ephemeral: Arc<InMemoryEphemeralStore>,
+    pub ephemeral: Arc<EphemeralBackend>,
     /// Bus for control events (docs/04 §6.1).
-    pub bus: Arc<InMemoryBus>,
+    pub bus: Arc<BusBackend>,
     /// Local fan-out of the instance (docs/04 §8).
     pub fanout: Arc<Fanout>,
     /// Per instance authorization cache (ADR-0009, docs/04 §6.2).

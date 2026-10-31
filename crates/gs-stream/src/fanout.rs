@@ -30,7 +30,7 @@ use gs_service::gs_protocol::{
     SessionInfo, SessionStatus, SubscribeAck, SubscriptionEndReason, SubscriptionEnded,
     UnsubscribeAck,
 };
-use gs_service::{Bus, InMemoryBus};
+use gs_service::{Bus, BusBackend};
 use prost::Message as _;
 use tokio::sync::{Notify, mpsc};
 use tokio::time::Duration;
@@ -160,7 +160,7 @@ pub struct Fanout {
     pub(crate) active_connections: DashMap<ConnectionId, ActiveConn>,
     device_listeners: DashMap<DeviceId, CancellationToken>,
     /// Bus the instance publishes and receives from (docs/04 §6.1).
-    bus: Arc<InMemoryBus>,
+    bus: Arc<BusBackend>,
     /// Authorization cache for invalidation on bus events (docs/04 §6.2, ADR-0009).
     authz: std::sync::RwLock<Option<Arc<AuthzCache>>>,
     /// Ephemeral key prefix (`GS_REDIS_KEY_PREFIX`, default `gs`).
@@ -171,13 +171,13 @@ pub struct Fanout {
 
 impl Fanout {
     /// Builds the fan-out of an instance over its bus.
-    pub fn new(bus: Arc<InMemoryBus>, key_prefix: impl Into<String>) -> Self {
+    pub fn new(bus: Arc<BusBackend>, key_prefix: impl Into<String>) -> Self {
         Self::with_authz(bus, key_prefix, None)
     }
 
     /// Builds the fan-out with an optional authorization cache reference.
     pub fn with_authz(
-        bus: Arc<InMemoryBus>,
+        bus: Arc<BusBackend>,
         key_prefix: impl Into<String>,
         authz: Option<Arc<AuthzCache>>,
     ) -> Self {
@@ -1096,7 +1096,7 @@ mod tests {
     #[tokio::test]
     async fn test_the_fanout_deposits_in_every_local_subscriber() {
         // covers: FR-STR-003, docs/04 §8
-        let fanout = Arc::new(Fanout::new(InMemoryBus::new(), "gs:test"));
+        let fanout = Arc::new(Fanout::new(BusBackend::memory(), "gs:test"));
         let session_id = SessionId::new();
         let member_id = MemberId::new();
         let (first_outbound, _first_control, _first_latest, _first_notify) = Outbound::new(4);
@@ -1135,7 +1135,7 @@ mod tests {
     #[tokio::test]
     async fn test_unsubscribing_releases_the_last_slot() {
         // covers: docs/04 §6.1 (refcount de temas)
-        let fanout = Fanout::new(InMemoryBus::new(), "gs:test");
+        let fanout = Fanout::new(BusBackend::memory(), "gs:test");
         let session_id = SessionId::new();
         let connection_id = gs_service::gs_domain::ids::ConnectionId::new();
         let (outbound, _control, _latest, _notify) = Outbound::new(4);

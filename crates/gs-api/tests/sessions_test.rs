@@ -50,7 +50,7 @@ struct TestFixture {
     device_token: String,
     device_token_other: String,
     device_token_no_read: String,
-    ephemeral: Arc<gs_service::InMemoryEphemeralStore>,
+    ephemeral: Arc<gs_service::EphemeralBackend>,
 }
 
 async fn setup_fixture() -> TestFixture {
@@ -189,7 +189,7 @@ async fn setup_fixture() -> TestFixture {
     let rotator =
         CryptoRotator::empty().with_active(DataCipher::new("test_key", &raw).expect("cipher"));
 
-    let ephemeral = gs_service::InMemoryEphemeralStore::new();
+    let ephemeral = gs_service::EphemeralBackend::memory();
 
     let api_state = SessionApiState {
         pool: pool.clone(),
@@ -199,7 +199,7 @@ async fn setup_fixture() -> TestFixture {
         crypto_rotator: Some(Arc::new(rotator)),
         idempotency_retention: Duration::from_secs(3600),
         ephemeral: ephemeral.clone(),
-        bus: gs_service::InMemoryBus::new(),
+        bus: gs_service::BusBackend::memory(),
         redis_key_prefix: "gs".to_string(),
         stream_ticket: StreamTicketConfig::default(),
         rate_limit_config: gs_api::RateLimitConfig::default(),

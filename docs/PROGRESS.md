@@ -26,7 +26,7 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 | T-E1-04 — `gs-ffi` | completada | — |
 | T-E1-05 — CI multiarch | parcialmente (workflow añadido) | wasm + musl |
 | T-E1-06 — propiedades | completada | 4 propiedades |
-| **T-F6-01 — Redis/Valkey** | **en curso** (Angel Nereira con agente, 2026-10-31) | Posee `gs-ephemeral` y `gs-bus`. Parte 1 hecha: backends y suites. Parte 2: cablearlos en `serve`, `gs-api` y `gs-stream`, que hoy usan los tipos en memoria aunque `GS_STATE_BACKEND=redis` |
+| **T-F6-01 — Redis/Valkey** | **hecha en local; cierre pendiente de CI** (Angel Nereira con agente, 2026-10-31) | Backends, suites y cableado en `serve`. No se puede cerrar según `19` §1.3 mientras GitHub Actions no ejecute (ver bloqueos). Siguiente en F6: T-F6-02 (desplazamiento entre instancias) y T-F6-03 (degradación) |
 
 
 ## Bloqueos y solicitudes de decisión abiertas
@@ -82,7 +82,7 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 | E7 | pendiente | | |
 | E8 | pendiente | | **Bloqueada por T-E8-06**: protección DULT completa antes de cualquier release |
 | E9 | pendiente | | |
-| F6 | **en curso** (adelantada al cerrar F4) | | T-F6-01 parte 1: backends Redis/Valkey con la suite compartida verde |
+| F6 | **en curso** (adelantada al cerrar F4) | | T-F6-01: backends Redis/Valkey con la suite compartida verde y `serve` usándolos |
 | F7 (M3) | pendiente | | |
 | F8 | pendiente | | |
 | F9 (M4) | pendiente | | |
@@ -93,6 +93,14 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-31 — T-F6-01 (parte 2) — `serve` usa el backend configurado
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: hecha en local; el cierre formal espera a que CI vuelva a ejecutar.
+- Qué: `EphemeralBackend` y `BusBackend` (enums que despachan a memoria o a Redis; los traits usan `async fn` y no admiten `dyn`, y con un tipo concreto los futures siguen siendo `Send` para axum) sustituyen a `InMemoryEphemeralStore`/`InMemoryBus` en `gs-api`, `gs-stream` y `gs-testkit`. `serve` elige con `GS_STATE_BACKEND`; con `redis` conecta antes de abrir el listener y no arranca si no alcanza `GS_REDIS_URL`; con `memory` en `prod` avisa en el log (`17` §3).
+- Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo fmt --all -- --check` OK; `cargo test --workspace --all-features` 675/675. `geostream serve` con `GS_STATE_BACKEND=redis` contra Valkey 7.2: `/health/ready` 200, el log dice `state backend: redis` y Valkey muestra dos clientes (RESP2 del almacén y RESP3 del bus). Con `GS_REDIS_URL` inalcanzable sale con código 1 y el log no contiene la contraseña de la URL.
+- **Efecto en producción al fusionar:** el servicio `geostream` de Railway ya tiene `GS_STATE_BACKEND=redis`, así que empezará a usar el Redis gestionado. Pendiente del propietario: revisar que ese Redis cumpla `11` §3 (sin persistencia, `noeviction`).
+- Pendiente: los escenarios SCN-001..008 con publicador y suscriptor en instancias distintas son T-F6-06; `/health/ready` todavía no informa del almacén efímero ni del bus, y la degradación de `04` §7.6 es T-F6-03.
 
 ### 2026-10-31 — T-F6-01 (parte 1) — `gs-ephemeral` y `gs-bus` sobre Redis/Valkey
 - Autor/agente: Angel Nereira (con agente de código).

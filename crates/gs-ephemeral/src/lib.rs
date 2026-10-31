@@ -12,8 +12,10 @@ use dashmap::DashMap;
 use thiserror::Error;
 use time::OffsetDateTime;
 
+mod backend;
 mod redis_store;
 
+pub use backend::EphemeralBackend;
 pub use redis_store::{
     DEVICE_SEQUENCE_TTL, MEMBERSHIP_VERSION_TTL, RedisEphemeralStore, SEQUENCE_TTL,
 };

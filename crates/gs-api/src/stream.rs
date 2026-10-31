@@ -27,7 +27,7 @@ use gs_service::gs_domain::negotiate_subprotocol;
 use gs_service::tickets::{
     TicketError, TicketGrant, redeem_stream_ticket, verify_ticket_principal_state,
 };
-use gs_service::{InMemoryEphemeralStore, migrate::PgPool};
+use gs_service::{EphemeralBackend, migrate::PgPool};
 use time::OffsetDateTime;
 
 use crate::problem::{Problem, ProblemResponse};
@@ -123,7 +123,7 @@ pub struct StreamApiState {
     /// PostgreSQL pool, for the state checks of docs/06 §7.
     pub pool: PgPool,
     /// Ephemeral store that holds the tickets (docs/06 §5).
-    pub ephemeral: Arc<InMemoryEphemeralStore>,
+    pub ephemeral: Arc<EphemeralBackend>,
     /// Ephemeral key prefix (`GS_REDIS_KEY_PREFIX`, default `gs`).
     pub redis_key_prefix: String,
     /// Upgrades per minute per IP (`GS_STREAM_UPGRADE_RPM_PER_IP`).

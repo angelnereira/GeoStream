@@ -133,6 +133,11 @@ Proyecto propio en Railway con tres servicios:
 (`GS_AUTO_MIGRATE` está prohibido en `prod`). Variables del servicio: `GS_ENV=prod`,
 `GS_PUBLIC_BASE_URL=https://<dominio público>`, `GS_DATABASE_URL`, `GS_REDIS_URL`, `GS_STATE_BACKEND=redis`.
 
+Con `GS_STATE_BACKEND=redis`, `serve` conecta el almacén efímero y el bus a `GS_REDIS_URL` **antes** de abrir el
+listener y no arranca si no lo alcanza (T-F6-01): una instancia con estado privado rompería en silencio la
+distribución entre instancias. `11` §3 exige además, en el servidor Redis/Valkey, sin persistencia (`save ""`,
+`appendonly no`) y `maxmemory-policy noeviction`; la plantilla gestionada de Railway hay que revisarla contra eso.
+
 ### Dominio público
 
 | Host | Destino | DNS (en el proveedor de `gravitalcloud.com`) |

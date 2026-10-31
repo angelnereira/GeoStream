@@ -335,8 +335,8 @@ async fn new_world() -> World {
         leeway_seconds: 60,
         crypto_rotator: Some(Arc::new(rotator)),
         idempotency_retention: Duration::from_secs(3600),
-        ephemeral: gs_service::InMemoryEphemeralStore::new(),
-        bus: gs_service::InMemoryBus::new(),
+        ephemeral: gs_service::EphemeralBackend::memory(),
+        bus: gs_service::BusBackend::memory(),
         redis_key_prefix: format!("gs:conf:{suffix}"),
         stream_ticket: StreamTicketConfig::default(),
         rate_limit_config: RateLimitConfig {

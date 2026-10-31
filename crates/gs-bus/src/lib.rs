@@ -13,8 +13,10 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 
+mod backend;
 mod redis_bus;
 
+pub use backend::BusBackend;
 pub use redis_bus::RedisBus;
 
 /// Message delivered by the bus.
