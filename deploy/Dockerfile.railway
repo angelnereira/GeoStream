@@ -1,0 +1,27 @@
+# GeoStream — imagen de SERVIDOR para Railway (docs/16 §2): solo el binario `geostream`.
+# PostgreSQL y Redis son servicios gestionados aparte en el mismo proyecto de Railway; el
+# volumen persistente va montado en /data (claves JWT y clave de cifrado de datos).
+# Build desde la raíz del repo:
+#   docker build -f deploy/Dockerfile.railway -t geostream:server .
+
+FROM rust:1.99-slim-bookworm AS builder
+WORKDIR /src
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates git \
+ && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN cargo build --release --locked -p geostream
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates curl tini \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /src/target/release/geostream /usr/local/bin/geostream
+COPY deploy/railway-entrypoint.sh /usr/local/bin/geostream-entrypoint
+RUN chmod +x /usr/local/bin/geostream-entrypoint
+
+ENV GS_HTTP_ADDR=0.0.0.0:8080 \
+    GS_JWT_KEYS_DIR=/data/jwt-keys \
+    GS_JWT_ACTIVE_KID=prod-key-1 \
+    GS_LOG_FORMAT=json
+EXPOSE 8080
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/geostream-entrypoint"]
+CMD ["serve"]
