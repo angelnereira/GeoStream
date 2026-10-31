@@ -88,7 +88,7 @@ Reglas:
 | FR-SDK-010 | MUST | F5 | Android en segundo plano | — | pendiente |
 | FR-SDK-011 | MUST | F7 | iOS en segundo plano | — | pendiente |
 | FR-SDK-012 | MUST | F5 | Vista de sesión | — | pendiente |
-| FR-SDK-013 | MUST | F5 | App de ejemplo | — | pendiente |
+| FR-SDK-013 | MUST | F5 | App de ejemplo | — (app de pruebas previa: `apps/flutter_app/test/`; no cubre el SDK) | pendiente |
 | FR-SDK-014 | SHOULD | F8 | Flutter Web | — | pendiente |
 | FR-SDK-015 | MUST | F5 | Inyección de dependencias | — | pendiente |
 | FR-SDK-016 | MUST | F5 | Núcleo sin mapas | — | pendiente |
@@ -108,7 +108,7 @@ Reglas:
 | FR-INT-003 | SHOULD | F8 | CORS por aplicación | — | pendiente |
 | FR-INT-004 | MUST | F8 | Guía de integración | — | pendiente |
 | FR-GEO-001 | MUST | F11 | Gestión de geocercas | — | pendiente |
-| FR-GEO-002 | MUST | F11 | Evaluación con histéresis | — | pendiente |
+| FR-GEO-002 | MUST | F11 | Evaluación con histéresis | — (vista previa en cliente: `apps/flutter_app/test/geofence_evaluator_test.dart`; la canónica es del servidor) | pendiente |
 | FR-GEO-003 | MUST | F11 | Eventos | — | pendiente |
 | FR-GEO-004 | SHOULD | F11 | Índice espacial en proceso | — | pendiente |
 | FR-GEO-005 | SHOULD | E5 | Transición DWELL | — | pendiente |
@@ -122,7 +122,7 @@ Reglas:
 | FR-HIS-001 | MUST | E6 | Historial con política, modo y consentimiento | — | pendiente |
 | FR-HIS-002 | MUST | E6 | Cola offline acumulada | — | pendiente |
 | FR-HIS-003 | MUST | E6 | Consulta de trazas y viajes | — | pendiente |
-| FR-HIS-004 | SHOULD | E7 | Calidad de trayectoria y map-matching | — | pendiente |
+| FR-HIS-004 | SHOULD | E7 | Calidad de trayectoria y map-matching | `crates/gs-mobility/tests/road_graph_map_matching_test.rs` (núcleo) | en curso |
 | FR-HIS-005 | MUST | E6 | Retención por particiones y supresión del subject | — | pendiente |
 | FR-HIS-006 | SHOULD | E6 | Exportación de historial | — | pendiente |
 | FR-HIS-007 | COULD | E6 | Reproducción de traza en vivo (`replay_trace`) | — | pendiente |
@@ -132,7 +132,7 @@ Reglas:
 | FR-ANA-004 | COULD | E6 | Matrices origen-destino | — | pendiente |
 | FR-LRN-001 | SHOULD | E7 | Perfiles de velocidad y corrección de ETA | — | pendiente |
 | FR-LRN-002 | SHOULD | E7 | Lugares aprendidos | — | pendiente |
-| FR-LRN-003 | SHOULD | E7 | Map-matching integrado sobre grafo propio | — | pendiente |
+| FR-LRN-003 | SHOULD | E7 | Map-matching integrado sobre grafo propio | `crates/gs-mobility/tests/road_graph_map_matching_test.rs` (núcleo; falta lector PBF y parámetros, DR-20261031-04) | en curso |
 | FR-LRN-004 | COULD | E7 | Ruta sobre grafo propio | — | pendiente |
 | FR-OPS-001 | MUST | F0 | Binario único con roles | `apps/geostream/tests/cli_test.rs` | cumplido |
 | FR-OPS-002 | MUST | F2 | Salud y métricas | `crates/gs-api/tests/skeleton_test.rs`, `apps/geostream/tests/cli_test.rs` | cumplido |

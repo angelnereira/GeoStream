@@ -30,7 +30,7 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 
 ## Bloqueos y solicitudes de decisión abiertas
 
-Cinco decisiones abiertas. Todas son contradicciones o información faltante reales
+Seis decisiones abiertas (DR-20261031-01/02/03 aceptadas el 2026-10-31). Todas son contradicciones o información faltante reales
 entre documentos normativos; `AGENTS.md` prohíbe que un agente las resuelva por su
 cuenta. Los **kernels puros** de todas ellas están implementados y probados; lo
 que falta es el esquema o la decisión de contrato.
@@ -42,6 +42,7 @@ que falta es el esquema o la decisión de contrato.
 | DR-20261018-02 | T-E8-04/05 | `edge_reports.finder_device_id NOT NULL` (`11` §2.0) contradice T-28 y `25` §2.4 («no guardar el dispositivo del buscador junto al blob»). | Almacén de tags (`/v1/tags`) y kernels de E8 (HMAC, EID, DULT) listos. |
 | DR-20261018-03 | T-E7-01..04 | `11` §2.0 **no define ninguna migración** para la capa aprendida (perfiles de velocidad, ETA, sinuosidad, lugares, demanda/oferta, matrices OD), que `24` §3.1 y `07` §9.11 sí requieren. | Kernels de E7 (DBSCAN, eventos de conducción, cubetas de velocidad, sinuosidad, k-anonimato) implementados. |
 | DR-20261018-04 | T-E8-08 | `edge_lpwan_integrations.secret_hash` (`11` §2.0) no puede verificar un HMAC, que necesita la clave; `07` §10.3 guarda el secreto cifrado. Ruta del webhook divergente (OpenAPI vs `25` §4). | Trait `LpwanDecoder` con registro y decodificador de referencia listos. |
+| DR-20261031-04 | T-E5-07, T-E7-05/06 | Leer `.osm.pbf` necesita descomprimir zlib (sin dependencia aprobada) y `17` no define los parámetros `mm_*` de `24` §3.3. | Grafo vial y map-matching HMM implementados y probados con red sintética. |
 
 Las cuatro decisiones que bloqueaban F4 están resueltas.
 
@@ -84,6 +85,27 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-31 — Precisión estricta, rechazo opcional de ubicaciones simuladas y núcleo de map-matching sobre OSM
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada la parte no bloqueada; el lector `.osm.pbf` y los parámetros `mm_*` quedan en DR-20261031-04.
+- Requisitos: FR-LRN-003 y FR-HIS-004 pasan a `en curso`. Decisiones DR-20261031-01/02/03 aceptadas por el propietario («Dale procede con todo»).
+- Qué: reglas 17–18 de `09` §3.1 y claves `reject_mock_samples`/`reject_network_only`; `max_horizontal_accuracy_m` desde 5 m; `gs-mobility::road_graph` y `gs-mobility::map_matching`.
+- Verificación: `cargo clippy --workspace --all-targets -D warnings` y `cargo fmt --check` en verde; `cargo test --workspace` con PostgreSQL y Redis locales: 516 pruebas en verde y 2 fallos de `gs-store/tests/history_test.rs` que solo aparecen con toda la suite en paralelo sobre la misma base (pasan 3/3 en aislamiento, con y sin este cambio; no tocan el código modificado); `gs-mobility` 9/9; `geostream-tools all` en verde; `flutter analyze` y `flutter test` 37/37.
+
+### 2026-10-31 — Guía de consumo del despliegue y tres solicitudes de decisión
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: documentación completada; la implementación de cuentas, antifraude y precisión estricta queda **bloqueada por decisión**.
+- Qué: `15` §10 explica cómo un proyecto consume `geostream.gravitalcloud.com` con lo ya implementado (alta por CLI, intercambio de token con la identidad propia de cada proyecto, transporte para móvil, microcontrolador y gateway, campos de precisión, y qué controles de precisión y plausibilidad existen). DR-20261031-01/02/03 recogen lo que pide el propietario y choca con `06` §2, D-10 y `17` §4.
+- Verificación: `cargo run -p geostream-tools -- all` en verde. Cada afirmación de `15` §10 contrastada con el código o el contrato (`gs-service/src/publishing.rs`, `location.proto`, `09` §3, `17` §4).
+
+### 2026-10-31 — Encargo del propietario — app Flutter de pruebas con mapa OSM y editor de geocercas; dominio de producción
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada (fuera del orden del roadmap, por petición directa del propietario).
+- Requisitos: ninguno se marca cumplido. Toca FR-SDK-013 (app de ejemplo, F5), FR-MAP-003 (MapLibre, F9) y FR-GEO-001/002 (F11) solo como herramienta de prueba: no sustituye al SDK ni al servidor de geocercas.
+- Qué: `apps/flutter_app` publica muestras reales por la ingesta HTTP y dibuja el snapshot sobre OpenStreetMap; el editor guarda geocercas en el teléfono, las valida con `14` §3 y las evalúa en local con `14` §4. Servicio de Railway con dominio `geostream.gravitalcloud.com` y despliegue desde `main`.
+- Verificación: `flutter analyze` sin avisos; `flutter test` 37/37; `cargo run -p geostream-tools -- all` en verde; `cargo build -p geostream` en verde tras excluir la app del workspace; despliegue de Railway desde `main` en `SUCCESS` con migraciones a la versión 5. **Pendiente del propietario**: crear los registros DNS (`deploy/README.md` §Dominio público) para que Railway emita el certificado; y compilar el APK/IPA con el SDK de Android o Xcode, que no hay en el entorno del agente.
+- Pendiente para el roadmap: cuando exista `POST /v1/geofences` (F11), la app puede enviar el JSON que ya genera.
 
 ### 2026-10-15 — Defecto corregido — el close frame podía adelantar al `StreamError` que lo acompaña
 - Autor/agente: Angel Nereira (con agente de código).

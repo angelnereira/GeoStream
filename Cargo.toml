@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["apps/*", "crates/*", "tools"]
+# App Flutter de pruebas (no es un crate): apps/flutter_app/README.md.
+exclude = ["apps/flutter_app"]
 
 [workspace.package]
 version = "0.0.0"

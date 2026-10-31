@@ -22,6 +22,8 @@ pub const POLICY_KEYS: &[&str] = &[
     "max_samples_per_publish_http",
     "max_horizontal_accuracy_m",
     "reject_null_island",
+    "reject_mock_samples",
+    "reject_network_only",
     "max_active_sessions_per_subject",
     "max_devices_per_subject",
     "invitation_max_ttl_seconds",
@@ -58,6 +60,12 @@ pub struct TenantPolicy {
     pub max_samples_per_publish_http: u32,
     pub max_horizontal_accuracy_m: f64,
     pub reject_null_island: bool,
+    /// DR-20261031-02: rechaza muestras con `quality.is_mock = true`. Apagado por defecto.
+    #[serde(default)]
+    pub reject_mock_samples: bool,
+    /// DR-20261031-02: rechaza muestras con `quality.source = NETWORK`. Apagado por defecto.
+    #[serde(default)]
+    pub reject_network_only: bool,
     pub max_active_sessions_per_subject: u32,
     pub max_devices_per_subject: u32,
     pub invitation_max_ttl_seconds: u64,
@@ -100,6 +108,8 @@ impl Default for TenantPolicy {
             max_samples_per_publish_http: 50,
             max_horizontal_accuracy_m: 50000.0,
             reject_null_island: true,
+            reject_mock_samples: false,
+            reject_network_only: false,
             max_active_sessions_per_subject: 50,
             max_devices_per_subject: 10,
             invitation_max_ttl_seconds: 604800,
@@ -245,11 +255,12 @@ impl TenantPolicy {
             });
         }
 
-        if !(100.0..=100000.0).contains(&self.max_horizontal_accuracy_m) {
+        // DR-20261031-03: el mínimo baja de 100 a 5 m; el default no cambia.
+        if !(5.0..=100000.0).contains(&self.max_horizontal_accuracy_m) {
             return Err(PolicyError::OutOfRange {
                 key: "max_horizontal_accuracy_m".to_string(),
                 message: format!(
-                    "value {} outside range 100.0..=100000.0",
+                    "value {} outside range 5.0..=100000.0",
                     self.max_horizontal_accuracy_m
                 ),
             });
@@ -559,6 +570,20 @@ impl TenantPolicy {
         if let Some(v) = obj.get("reject_null_island") {
             policy.reject_null_island = v.as_bool().ok_or_else(|| PolicyError::InvalidType {
                 key: "reject_null_island".to_string(),
+                message: "expected boolean".to_string(),
+            })?;
+        }
+
+        if let Some(v) = obj.get("reject_mock_samples") {
+            policy.reject_mock_samples = v.as_bool().ok_or_else(|| PolicyError::InvalidType {
+                key: "reject_mock_samples".to_string(),
+                message: "expected boolean".to_string(),
+            })?;
+        }
+
+        if let Some(v) = obj.get("reject_network_only") {
+            policy.reject_network_only = v.as_bool().ok_or_else(|| PolicyError::InvalidType {
+                key: "reject_network_only".to_string(),
                 message: "expected boolean".to_string(),
             })?;
         }

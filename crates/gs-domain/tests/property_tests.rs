@@ -153,6 +153,7 @@ proptest! {
             max_future_skew_ms: 5000,
             max_event_age_ms: 120000,
             max_samples_per_publish: 50,
+            ..LocationPolicy::default()
         };
         let pos_res = Position::new(lat, 10.0, 10.0, None, None, None, None, None, None, &policy);
         prop_assert_eq!(pos_res.is_ok(), is_valid);
@@ -167,6 +168,7 @@ proptest! {
             max_future_skew_ms: 5000,
             max_event_age_ms: 120000,
             max_samples_per_publish: 50,
+            ..LocationPolicy::default()
         };
         let pos_res = Position::new(10.0, lon, 10.0, None, None, None, None, None, None, &policy);
         prop_assert_eq!(pos_res.is_ok(), is_valid);
@@ -184,6 +186,7 @@ proptest! {
             max_future_skew_ms: 5000,
             max_event_age_ms: 120000,
             max_samples_per_publish: 50,
+            ..LocationPolicy::default()
         };
 
         let now = OffsetDateTime::now_utc();

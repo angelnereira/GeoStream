@@ -9,3 +9,4 @@ publish.workspace = true
 [dependencies]
 gs-geo.workspace = true
 gs-domain.workspace = true
+thiserror.workspace = true

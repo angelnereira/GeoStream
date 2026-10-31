@@ -1832,6 +1832,7 @@ version = "0.0.0"
 dependencies = [
  "gs-domain",
  "gs-geo",
+ "thiserror",
 ]
 
 [[package]]

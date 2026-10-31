@@ -197,6 +197,8 @@ async fn ingest_history_handler(
     let location_policy = LocationPolicy {
         max_horizontal_accuracy_m: policy.max_horizontal_accuracy_m,
         reject_null_island: policy.reject_null_island,
+        reject_mock_samples: policy.reject_mock_samples,
+        reject_network_only: policy.reject_network_only,
         max_future_skew_ms: 0,
         // The backfill window replaces the live age window.
         max_event_age_ms: (policy.history_backfill_max_age_s as i64) * 1000,

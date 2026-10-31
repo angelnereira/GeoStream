@@ -92,6 +92,7 @@ fn test_all_location_sample_cases_from_vectors() {
             .get("max_samples_per_publish")
             .and_then(|v| v.as_u64())
             .unwrap_or(50) as u32,
+        ..LocationPolicy::default()
     };
 
     let base_sample = root
@@ -312,6 +313,7 @@ fn test_all_location_batch_cases_from_vectors() {
             .get("max_samples_per_publish")
             .and_then(|v| v.as_u64())
             .unwrap_or(50) as u32,
+        ..LocationPolicy::default()
     };
 
     let base_sample = root
