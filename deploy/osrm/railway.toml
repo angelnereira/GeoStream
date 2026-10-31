@@ -5,7 +5,5 @@ dockerfilePath = "deploy/osrm/Dockerfile"
 watchPatterns = ["deploy/osrm/**"]
 
 [deploy]
-healthcheckPath = "/route/v1/driving/-79.5199,8.9824;-79.5100,8.9900?overview=false"
-healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
