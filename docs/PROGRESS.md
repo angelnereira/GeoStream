@@ -30,7 +30,7 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 
 ## Bloqueos y solicitudes de decisión abiertas
 
-Cinco decisiones abiertas. Todas son contradicciones o información faltante reales
+Ocho decisiones abiertas. Todas son contradicciones o información faltante reales
 entre documentos normativos; `AGENTS.md` prohíbe que un agente las resuelva por su
 cuenta. Los **kernels puros** de todas ellas están implementados y probados; lo
 que falta es el esquema o la decisión de contrato.
@@ -42,6 +42,9 @@ que falta es el esquema o la decisión de contrato.
 | DR-20261018-02 | T-E8-04/05 | `edge_reports.finder_device_id NOT NULL` (`11` §2.0) contradice T-28 y `25` §2.4 («no guardar el dispositivo del buscador junto al blob»). | Almacén de tags (`/v1/tags`) y kernels de E8 (HMAC, EID, DULT) listos. |
 | DR-20261018-03 | T-E7-01..04 | `11` §2.0 **no define ninguna migración** para la capa aprendida (perfiles de velocidad, ETA, sinuosidad, lugares, demanda/oferta, matrices OD), que `24` §3.1 y `07` §9.11 sí requieren. | Kernels de E7 (DBSCAN, eventos de conducción, cubetas de velocidad, sinuosidad, k-anonimato) implementados. |
 | DR-20261018-04 | T-E8-08 | `edge_lpwan_integrations.secret_hash` (`11` §2.0) no puede verificar un HMAC, que necesita la clave; `07` §10.3 guarda el secreto cifrado. Ruta del webhook divergente (OpenAPI vs `25` §4). | Trait `LpwanDecoder` con registro y decodificador de referencia listos. |
+| DR-20261031-01 | FR-AUTH-009, FR-ADM-004 | Registro de cuentas y federación con la identidad de los demás proyectos (JWKS). La identidad de Plenty-Pay firma con secreto simétrico, no federable. | El intercambio de token por el backend de cada proyecto funciona hoy (`15` §10.3). |
+| DR-20261031-02 | FR-TRK-002, `10` T-07 | Rechazar ubicaciones simuladas o implausibles revierte D-10; la atestación del dispositivo añade dependencias. | Las banderas de plausibilidad y `is_mock` ya viajan en `estimate`. |
+| DR-20261031-03 | `17` §4 | Exigir precisión mejor que 100 m: el rango de `max_horizontal_accuracy_m` empieza en 100. | Un tenant ya puede exigir ≤ 100 m. |
 
 Las cuatro decisiones que bloqueaban F4 están resueltas.
 
@@ -84,6 +87,12 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-31 — Guía de consumo del despliegue y tres solicitudes de decisión
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: documentación completada; la implementación de cuentas, antifraude y precisión estricta queda **bloqueada por decisión**.
+- Qué: `15` §10 explica cómo un proyecto consume `geostream.gravitalcloud.com` con lo ya implementado (alta por CLI, intercambio de token con la identidad propia de cada proyecto, transporte para móvil, microcontrolador y gateway, campos de precisión, y qué controles de precisión y plausibilidad existen). DR-20261031-01/02/03 recogen lo que pide el propietario y choca con `06` §2, D-10 y `17` §4.
+- Verificación: `cargo run -p geostream-tools -- all` en verde. Cada afirmación de `15` §10 contrastada con el código o el contrato (`gs-service/src/publishing.rs`, `location.proto`, `09` §3, `17` §4).
 
 ### 2026-10-31 — Encargo del propietario — app Flutter de pruebas con mapa OSM y editor de geocercas; dominio de producción
 - Autor/agente: Angel Nereira (con agente de código).
