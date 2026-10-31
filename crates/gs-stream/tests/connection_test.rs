@@ -25,7 +25,7 @@ use gs_service::control::GlobalBusEvent;
 use gs_service::gs_protocol::{MemberEventKind, SessionEventKind, SubscriptionEndReason};
 use gs_service::migrate::{connect_pool, run_migrations};
 use gs_service::tokens::{MintedToken, TokenRequest, TokenTtlBounds, mint_device_token};
-use gs_service::{AuthzCache, Bus, InMemoryBus, InMemoryEphemeralStore};
+use gs_service::{AuthzCache, Bus, BusBackend, EphemeralBackend};
 use gs_stream::{StreamConfig, StreamState, run_session};
 use serde_json::{Value, json};
 use tokio_tungstenite::MaybeTlsStream;
@@ -52,8 +52,8 @@ struct World {
     pool: gs_service::gs_store::PgPool,
     tenant_id: gs_service::gs_domain::ids::TenantId,
     application_id: gs_service::gs_domain::ids::ApplicationId,
-    ephemeral: Arc<InMemoryEphemeralStore>,
-    bus: Arc<InMemoryBus>,
+    ephemeral: Arc<EphemeralBackend>,
+    bus: Arc<BusBackend>,
     prefix: String,
     connections: ConnectionCounter,
     _server: tokio::task::JoinHandle<()>,
@@ -209,8 +209,8 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
     )
     .await;
 
-    let ephemeral = InMemoryEphemeralStore::new();
-    let bus = InMemoryBus::new();
+    let ephemeral = EphemeralBackend::memory();
+    let bus = BusBackend::memory();
     let prefix = format!("gs:stream:{suffix}");
     let connections = ConnectionCounter::new();
 
@@ -1382,7 +1382,7 @@ async fn start_sharing(world: &World, session_id: &str) {
         true,
         gs_service::members::SetSharingContext {
             ephemeral: world.ephemeral.as_ref(),
-            bus: &gs_service::InMemoryBus::new(),
+            bus: &gs_service::BusBackend::memory(),
             key_prefix: "gs:stream:publish",
             caller: gs_service::members::SetSharingCaller {
                 is_app: false,

@@ -146,8 +146,8 @@ async fn setup(suffix: &str) -> World {
         leeway_seconds: 30,
         crypto_rotator: None,
         idempotency_retention: Duration::from_secs(3600),
-        ephemeral: gs_service::InMemoryEphemeralStore::new(),
-        bus: gs_service::InMemoryBus::new(),
+        ephemeral: gs_service::EphemeralBackend::memory(),
+        bus: gs_service::BusBackend::memory(),
         redis_key_prefix: format!("gs:ticket:{suffix}"),
         stream_ticket: StreamTicketConfig {
             ttl: Duration::from_secs(30),

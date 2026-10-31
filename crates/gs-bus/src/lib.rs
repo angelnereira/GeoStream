@@ -1,4 +1,4 @@
-//! Bus trait with in-memory implementation (docs/04 §6.1, ADR-0010).
+//! Bus trait with in-memory and Redis/Valkey Pub/Sub implementations (docs/04 §6.1, ADR-0010).
 //!
 //! Topics carry control events, location updates and invalidation notices between instances.
 //! The in-memory backend is a single instance only: subscribers of other processes do not
@@ -12,6 +12,12 @@ use dashmap::DashMap;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast::{self, Receiver, Sender};
+
+mod backend;
+mod redis_bus;
+
+pub use backend::BusBackend;
+pub use redis_bus::RedisBus;
 
 /// Message delivered by the bus.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +54,11 @@ pub trait Bus: Send + Sync {
     async fn unsubscribe(&self, subscription_id: u64) -> Result<bool, BusError>;
 
     /// Publishes a payload to every subscriber of the topic.
+    ///
+    /// Returns how many receivers the backend reached, `0` meaning nobody listens. The unit
+    /// depends on the backend: local subscriptions in memory, subscribed instances in
+    /// Redis/Valkey (one connection per instance carries all its subscriptions). Callers must
+    /// not use it as a subscriber count; that is [`Bus::subscription_count`].
     async fn publish(&self, topic: &str, payload: &[u8]) -> Result<usize, BusError>;
 
     /// Waits for the next message of a subscription; `None` when it is closed.

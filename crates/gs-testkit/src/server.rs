@@ -14,8 +14,8 @@ use gs_api::{
     tools_router, v1_router,
 };
 use gs_auth::{SigningKey, generate_signing_key, parse_private_pem};
-use gs_bus::InMemoryBus;
-use gs_ephemeral::InMemoryEphemeralStore;
+use gs_bus::BusBackend;
+use gs_ephemeral::EphemeralBackend;
 use gs_service::auth::DeviceTokenKeys;
 use gs_service::authz::AuthzCache;
 use gs_service::migrate::{PgPool, connect_pool, run_migrations};
@@ -30,8 +30,8 @@ pub struct TestServer {
     pub http_base: String,
     pub ws_base: String,
     pub pool: PgPool,
-    pub ephemeral: Arc<InMemoryEphemeralStore>,
-    pub bus: Arc<InMemoryBus>,
+    pub ephemeral: Arc<EphemeralBackend>,
+    pub bus: Arc<BusBackend>,
     pub prefix: String,
     pub signing_key: SigningKey,
     pub kid: String,
@@ -68,8 +68,8 @@ impl TestServer {
         let keyset_arc = Arc::new(keyset);
 
         let prefix = format!("gs:scn:{}", &run_id[..8]);
-        let ephemeral = InMemoryEphemeralStore::new();
-        let bus = InMemoryBus::new();
+        let ephemeral = EphemeralBackend::memory();
+        let bus = BusBackend::memory();
         let connections = ConnectionCounter::new();
 
         // Parse config overrides

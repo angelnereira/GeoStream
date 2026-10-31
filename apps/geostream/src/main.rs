@@ -306,8 +306,7 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
             Some(Arc::new(rotator))
         });
 
-        let ephemeral = gs_api::gs_service::InMemoryEphemeralStore::new();
-        let bus = gs_api::gs_service::InMemoryBus::new();
+        let (ephemeral, bus) = connect_state_backend(cfg).await?;
         let prefix = cfg.redis_key_prefix.clone();
 
         if roles.contains(&Role::Api) {
@@ -473,6 +472,51 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
 
     info!("geostream server shutdown completed");
     Ok(())
+}
+
+/// Ephemeral store and bus selected by `GS_STATE_BACKEND` (docs/17 §2.3, ADR-0010).
+type StateBackends = (
+    Arc<gs_api::gs_service::EphemeralBackend>,
+    Arc<gs_api::gs_service::BusBackend>,
+);
+
+/// Builds the ephemeral store and the bus of the configured backend.
+///
+/// With `redis`, both connect to `GS_REDIS_URL` before the listener opens: an instance that
+/// cannot reach the shared state refuses to start instead of serving with a private one, which
+/// would silently break the fan-out between instances (docs/04 §7.6).
+async fn connect_state_backend(cfg: &gs_config::ServerConfig) -> Result<StateBackends> {
+    use gs_api::gs_service::{BusBackend, EphemeralBackend, RedisBus, RedisEphemeralStore};
+
+    match cfg.state_backend {
+        gs_config::StateBackend::Memory => {
+            if cfg.env == gs_config::Environment::Prod {
+                tracing::warn!(
+                    "GS_STATE_BACKEND=memory: state lives in this process, run a single instance only"
+                );
+            }
+            Ok((EphemeralBackend::memory(), BusBackend::memory()))
+        }
+        gs_config::StateBackend::Redis => {
+            let url = cfg
+                .redis_url
+                .as_ref()
+                .context("GS_REDIS_URL is required when GS_STATE_BACKEND=redis")?
+                .expose_secret();
+            let timeout = Duration::from_millis(cfg.redis_command_timeout_ms);
+            let ephemeral = RedisEphemeralStore::connect(url, timeout)
+                .await
+                .context("cannot reach the ephemeral store at GS_REDIS_URL")?;
+            let bus = RedisBus::connect(url, timeout)
+                .await
+                .context("cannot reach the bus at GS_REDIS_URL")?;
+            info!("state backend: redis (shared by every instance)");
+            Ok((
+                EphemeralBackend::from_redis(ephemeral),
+                BusBackend::from_redis(bus),
+            ))
+        }
+    }
 }
 
 /// Builds the readiness probe of the configured dependencies (docs/16 §4.1).

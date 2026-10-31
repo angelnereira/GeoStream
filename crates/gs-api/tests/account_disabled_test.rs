@@ -50,7 +50,7 @@ struct ApiFixture {
     address: String,
     _server: tokio::task::JoinHandle<()>,
     pool: gs_service::migrate::PgPool,
-    bus: Arc<gs_service::InMemoryBus>,
+    bus: Arc<gs_service::BusBackend>,
     tenant_id: String,
     app_id: String,
     app_key: String,
@@ -133,8 +133,8 @@ async fn setup_fixture() -> ApiFixture {
     let rotator = CryptoRotator::empty()
         .with_active(DataCipher::new("test_key_disable", &raw_key).expect("cipher"));
 
-    let ephemeral = gs_service::InMemoryEphemeralStore::new();
-    let bus = gs_service::InMemoryBus::new();
+    let ephemeral = gs_service::EphemeralBackend::memory();
+    let bus = gs_service::BusBackend::memory();
 
     let state = SessionApiState {
         pool: pool.clone(),

@@ -26,6 +26,7 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 | T-E1-04 — `gs-ffi` | completada | — |
 | T-E1-05 — CI multiarch | parcialmente (workflow añadido) | wasm + musl |
 | T-E1-06 — propiedades | completada | 4 propiedades |
+| **T-F6-01 — Redis/Valkey** | **hecha en local; cierre pendiente de CI** (Angel Nereira con agente, 2026-10-31) | Backends, suites y cableado en `serve`. No se puede cerrar según `19` §1.3 mientras GitHub Actions no ejecute (ver bloqueos). Siguiente en F6: T-F6-02 (desplazamiento entre instancias) y T-F6-03 (degradación) |
 
 
 ## Bloqueos y solicitudes de decisión abiertas
@@ -43,6 +44,13 @@ que falta es el esquema o la decisión de contrato.
 | DR-20261018-03 | T-E7-01..04 | `11` §2.0 **no define ninguna migración** para la capa aprendida (perfiles de velocidad, ETA, sinuosidad, lugares, demanda/oferta, matrices OD), que `24` §3.1 y `07` §9.11 sí requieren. | Kernels de E7 (DBSCAN, eventos de conducción, cubetas de velocidad, sinuosidad, k-anonimato) implementados. |
 | DR-20261018-04 | T-E8-08 | `edge_lpwan_integrations.secret_hash` (`11` §2.0) no puede verificar un HMAC, que necesita la clave; `07` §10.3 guarda el secreto cifrado. Ruta del webhook divergente (OpenAPI vs `25` §4). | Trait `LpwanDecoder` con registro y decodificador de referencia listos. |
 | DR-20261031-04 | T-E5-07, T-E7-05/06 | Leer `.osm.pbf` necesita descomprimir zlib (sin dependencia aprobada) y `17` no define los parámetros `mm_*` de `24` §3.3. | Grafo vial y map-matching HMM implementados y probados con red sintética. |
+
+**Bloqueos operativos (no son decisiones de diseño), detectados el 2026-10-31:**
+
+| Bloqueo | Efecto | Quién lo resuelve |
+|---|---|---|
+| GitHub Actions no arranca ningún job: «the job was not started because your account is locked due to a billing issue». Los ocho últimos runs de `main` y de las ramas fallaron por esto en 2 s, no por el código. | Ningún PR puede cumplir la DoD de `19` §1 («pasan localmente **y en CI**»). La verificación queda en local hasta que vuelva CI. | Propietario: facturación de la cuenta de GitHub |
+| `cargo deny check advisories` falla también en `main`: RUSTSEC-2026-0381, -0382, -0383, -0385 y -0386 sobre dependencias transitivas (raíces de certificados, `rustls-webpki` y otras). | Etapa de seguridad roja con independencia de cada PR. | PR dedicado de actualización de dependencias (`19` §6.1) |
 
 Las cuatro decisiones que bloqueaban F4 están resueltas.
 
@@ -74,7 +82,7 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 | E7 | pendiente | | |
 | E8 | pendiente | | **Bloqueada por T-E8-06**: protección DULT completa antes de cualquier release |
 | E9 | pendiente | | |
-| F6 | pendiente | | |
+| F6 | **en curso** (adelantada al cerrar F4) | | T-F6-01: backends Redis/Valkey con la suite compartida verde y `serve` usándolos |
 | F7 (M3) | pendiente | | |
 | F8 | pendiente | | |
 | F9 (M4) | pendiente | | |
@@ -85,6 +93,23 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-31 — T-F6-01 (parte 2) — `serve` usa el backend configurado
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: hecha en local; el cierre formal espera a que CI vuelva a ejecutar.
+- Qué: `EphemeralBackend` y `BusBackend` (enums que despachan a memoria o a Redis; los traits usan `async fn` y no admiten `dyn`, y con un tipo concreto los futures siguen siendo `Send` para axum) sustituyen a `InMemoryEphemeralStore`/`InMemoryBus` en `gs-api`, `gs-stream` y `gs-testkit`. `serve` elige con `GS_STATE_BACKEND`; con `redis` conecta antes de abrir el listener y no arranca si no alcanza `GS_REDIS_URL`; con `memory` en `prod` avisa en el log (`17` §3).
+- Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo fmt --all -- --check` OK; `cargo test --workspace --all-features` 675/675. `geostream serve` con `GS_STATE_BACKEND=redis` contra Valkey 7.2: `/health/ready` 200, el log dice `state backend: redis` y Valkey muestra dos clientes (RESP2 del almacén y RESP3 del bus). Con `GS_REDIS_URL` inalcanzable sale con código 1 y el log no contiene la contraseña de la URL.
+- **Efecto en producción al fusionar:** el servicio `geostream` de Railway ya tiene `GS_STATE_BACKEND=redis`, así que empezará a usar el Redis gestionado. Pendiente del propietario: revisar que ese Redis cumpla `11` §3 (sin persistencia, `noeviction`).
+- Pendiente: los escenarios SCN-001..008 con publicador y suscriptor en instancias distintas son T-F6-06; `/health/ready` todavía no informa del almacén efímero ni del bus, y la degradación de `04` §7.6 es T-F6-03.
+
+### 2026-10-31 — T-F6-01 (parte 1) — `gs-ephemeral` y `gs-bus` sobre Redis/Valkey
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: parte 1 completada (backends y suites). La tarea sigue **en curso**: falta el cableado en `serve`.
+- Por qué ahora: F6 es adelantable desde el cierre de F4 (`21` §F6) y el despliegue de Railway ya define `GS_STATE_BACKEND=redis` con un Redis gestionado. Sin embargo, `apps/geostream/src/main.rs` crea siempre `InMemoryEphemeralStore` e `InMemoryBus`, así que ese Redis no se usa y el servicio no puede tener más de una instancia.
+- Requisitos: FR-STR-009 y FR-PRS-003 pasan a `en curso` (la aceptación completa exige el servidor cableado y los escenarios multi-nodo de T-F6-06).
+- Qué: `RedisEphemeralStore` con el keyspace de `11` §3, scripts Lua en `crates/gs-ephemeral/lua/` (secuencias u64 comparadas como cadenas decimales, porque los números de Lua son `double` y pierden precisión por encima de 2^53), `MULTI` para el resto, TTL en todas las claves y timeout por comando. `RedisBus` con una conexión RESP3 por instancia, refcount por tema, colas acotadas y resuscripción automática.
+- Hallazgos: `11` §3 llamaba `track_update.lua` al script que `03`, `22` y ADR-0023 llaman `track_cas.lua`; se corrige `11`, que es de menor rango (`00` §3). Había un borrador sin uso en `crates/gs-ephemeral/scripts/track_cas.lua` que guardaba un string `"<version>\n<blob>"` y afirmaba que un hash de Redis no admite binarios (sí los admite); se retira. El valor de `Bus::publish` no puede significar lo mismo en los dos backends (Redis cuenta conexiones, es decir, instancias), así que la suite comprueba que todos los suscriptores reciben, no el número.
+- Verificación (local, Valkey 7.2 de `deploy/docker-compose.dev.yml` y PostgreSQL local): `cargo fmt --all -- --check` OK; `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features`: 675 pruebas, 0 fallos; `cargo test -p gs-ephemeral` 11/11 Redis y `cargo test -p gs-bus` 6/6 Redis; `cargo run -p geostream-tools -- all` OK. Comprobado a mano: tras `docker restart` del servidor el bus se resuscribe y entrega; con el servidor parado `is_connected()` es `false` y `publish` devuelve error, y se recupera solo. **No verificado en CI** (cuenta bloqueada, ver bloqueos). `cargo deny check advisories` falla igual que en `main`.
 
 ### 2026-10-31 — Precisión estricta, rechazo opcional de ubicaciones simuladas y núcleo de map-matching sobre OSM
 - Autor/agente: Angel Nereira (con agente de código).

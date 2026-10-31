@@ -34,8 +34,10 @@ pub use authz::{
     DeviceMembershipView, PrincipalIdentity, verify_principal_state,
 };
 pub use control::*;
-pub use gs_bus::{Bus, BusError, BusMessage, InMemoryBus};
-pub use gs_ephemeral::{EphemeralError, EphemeralStore, InMemoryEphemeralStore};
+pub use gs_bus::{Bus, BusBackend, BusError, BusMessage, InMemoryBus, RedisBus};
+pub use gs_ephemeral::{
+    EphemeralBackend, EphemeralError, EphemeralStore, InMemoryEphemeralStore, RedisEphemeralStore,
+};
 pub use idempotency::{
     IDEMPOTENCY_KEY_MAX_LEN, IdempotencyContext, IdempotencyDecision, IdempotencyError,
     StoredResponse, begin as idempotency_begin, canonical_json, discard as idempotency_discard,

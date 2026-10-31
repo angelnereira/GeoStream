@@ -41,7 +41,7 @@ use crate::rate_limit::{
 use crate::router::REQUEST_ID_HEADER;
 use crate::security::{principal_from_header, request_id_from};
 
-use gs_service::{InMemoryBus, InMemoryEphemeralStore};
+use gs_service::{BusBackend, EphemeralBackend};
 use time::OffsetDateTime;
 
 /// State for the sessions endpoints.
@@ -60,9 +60,9 @@ pub struct SessionApiState {
     /// Idempotency retention duration.
     pub idempotency_retention: Duration,
     /// Ephemeral store for snapshots and counters (docs/11 §3).
-    pub ephemeral: Arc<InMemoryEphemeralStore>,
+    pub ephemeral: Arc<EphemeralBackend>,
     /// Bus for control event broadcasting (docs/04 §6.1).
-    pub bus: Arc<InMemoryBus>,
+    pub bus: Arc<BusBackend>,
     /// Ephemeral key prefix (`GS_REDIS_KEY_PREFIX`, default `gs`).
     pub redis_key_prefix: String,
     /// Stream ticket parameters (docs/06 §5, docs/17 §2.4 and §2.6).

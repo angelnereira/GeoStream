@@ -461,7 +461,7 @@ Todas con TTL. `{p}:trk:*` y `{p}:odo:*` guardan coordenadas derivadas: se aplic
 
 | Clave | Tipo | Valor | TTL | Escribe | Lee |
 |---|---|---|---|---|---|
-| `{p}:trk:{device}` | hash | estado del filtro de trayectoria: `pos`, `vel`, `var`, `last_t`, `seq`, `odo`, `frames`, `version` (`22` §2.1) | `GS_TRACK_STATE_TTL_S` | stream, api (ingesta) | stream, api |
+| `{p}:trk:{device}` | hash | estado del filtro de trayectoria en dos campos: `state` (punto de control codificado con `pos`, `vel`, `var`, `last_t`, `seq`, `odo` y `frames`, `22` §2.1) y `version` (entero que incrementa cada escritura) | `GS_TRACK_STATE_TTL_S` | stream, api (ingesta) | stream, api |
 | `{p}:odo:{session}:{member}` | string | odómetro acumulado en metros (decimal) | `snapshot_ttl_seconds` | stream | stream, api |
 | `{p}:stop:{session}:{member}` | string | paradas online vigentes: JSON compacto con centroide, radio, `started_at` e índice | `snapshot_ttl_seconds` | stream | stream |
 | `{p}:pool:{session}` | zset | índice espacial del pool: score = lat, Miembro = `lon_e7:{member_id}` en el hash lateral | `GS_POOL_PRUNE_INTERVAL_S` * 3 | stream, api | stream, api |
@@ -474,9 +474,11 @@ Operaciones atómicas requeridas (scripts Lua versionados en `crates/gs-ephemera
 - `seq_cas.lua`: compare-and-set de secuencia (`09` §4).
 - `devseq_max.lua`: `SET` solo si mayor.
 - `presence_release.lua`: borrar presencia solo si `connection_id` coincide.
-- `track_update.lua`: leer estado, aplicar el filtro y escribir con control de versión; si la versión no coincide, devuelve `CONFLICT` y el publicador emite la muestra **sin estimación** (`09` §4-bis).
+- `track_cas.lua`: escribir el estado del filtro solo si `version` sigue siendo la leída; si no coincide, devuelve conflicto y el publicador emite la muestra **sin estimación** (`09` §4-bis). El filtro se aplica en Rust entre la lectura y esta escritura.
 - `pool_update.lua`: upsert en el índice de un pool con borrado síncrono en la misma operación (`23` §2.2).
 - Ticket: `GETDEL` nativo (Redis ≥ 6.2 / Valkey).
+
+TTL de `{p}:mver:{session}`: «vida de la sesión + 1 día» se implementa como el máximo del rango de `max_session_ttl_seconds` (`17` §4) más un día, renovado en cada incremento. El almacén no conoce la vida de cada sesión, y la clave no puede caducar antes que la sesión: reiniciar el contador haría que una entrada vieja de la caché de autorización pareciera vigente (ADR-0009).
 
 Configuración obligatoria del servidor Redis/Valkey en producción: sin persistencia (`save ""`, `appendonly no`), `maxmemory-policy noeviction`, autenticación, red privada. Ver `16_OPERATIONS.md` §2.
 

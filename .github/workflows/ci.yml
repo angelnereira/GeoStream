@@ -57,6 +57,30 @@ jobs:
   stage4-tests:
     name: "Etapa 4: Pruebas automatizadas"
     runs-on: ubuntu-latest
+    # Las pruebas de gs-store, gs-api, gs-stream y gs-testkit usan PostgreSQL real, y las de
+    # gs-ephemeral y gs-bus, Redis/Valkey real (T-F6-01). Mismas imágenes que deploy/docker-compose.dev.yml.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: geostream
+          POSTGRES_PASSWORD: geostream_dev_password
+          POSTGRES_DB: geostream_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geostream -d geostream_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      valkey:
+        image: valkey/valkey:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      GS_DATABASE_URL: postgres://geostream:geostream_dev_password@127.0.0.1:5432/geostream_test
+      GS_TEST_REDIS_URL: redis://127.0.0.1:6379
     steps:
       - uses: actions/checkout@v4
       - name: Instalar Rust toolchain
