@@ -136,3 +136,9 @@ Proyecto propio en Railway con tres servicios:
 Alta del primer tenant, app y API key: `geostream admin …` (`docs/16` §3) desde una shell del servicio
 (`railway ssh`). La API key se muestra una sola vez: guárdala directamente en el gestor de secretos del integrador,
 nunca en chats, tickets ni en el repositorio.
+
+### Motor de rutas `osrm`
+Servicio aparte en el mismo proyecto (`deploy/osrm/Dockerfile`, configuración `deploy/osrm/railway.toml`): OSRM 5.27
+con el extracto de Panamá de Geofabrik, preprocesado al construir (perfil `car`, algoritmo MLD). Lo usa GravitalPay
+para dibujar la ruta del repartidor al cliente (`GET /route/v1/driving/{lon},{lat};{lon},{lat}?overview=full&geometries=polyline6`).
+Datos ODbL: la app muestra «© OpenStreetMap contributors». Para refrescar el mapa, redesplegar (vuelve a descargar el extracto).
