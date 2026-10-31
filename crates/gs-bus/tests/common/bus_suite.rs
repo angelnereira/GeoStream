@@ -1,7 +1,7 @@
 //! Backend-agnostic suite for the bus (docs/04 §6.1, ADR-0010).
 //!
-//! The in-memory implementation runs it in `memory_bus_test.rs`; the Redis/Valkey Pub/Sub
-//! implementation of T-F6-01 must run the same suite so both backends behave identically.
+//! The in-memory implementation runs it in `memory_bus_test.rs` and the Redis/Valkey Pub/Sub
+//! implementation in `redis_bus_test.rs`, so both backends behave identically.
 #![forbid(unsafe_code)]
 
 use gs_bus::Bus;
@@ -40,11 +40,13 @@ async fn fan_out_to_every_subscriber<B: Bus>(bus: &B) {
     let first = bus.subscribe("suite:fanout").await.expect("subscribe");
     let second = bus.subscribe("suite:fanout").await.expect("subscribe");
 
-    assert_eq!(
+    // Memory counts subscriptions (2) and Redis counts instances (1): both reached someone,
+    // and every subscriber must receive the message.
+    assert!(
         bus.publish("suite:fanout", b"event")
             .await
-            .expect("publish"),
-        2
+            .expect("publish")
+            >= 1
     );
     for subscription in [first, second] {
         let message = bus

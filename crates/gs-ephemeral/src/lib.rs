@@ -1,4 +1,4 @@
-//! Ephemeral store trait and in-memory implementation (docs/11 §3, ADR-0010).
+//! Ephemeral store trait with in-memory and Redis/Valkey implementations (docs/11 §3, ADR-0010).
 //!
 //! The trait mirrors the keyspace of `docs/11_DATA_STORAGE.md` §3. Callers compose the keys
 //! (`{p}:snap:{session}:{member}`, …) so that the memory and Redis/Valkey backends share the
@@ -11,6 +11,12 @@ use std::time::Duration;
 use dashmap::DashMap;
 use thiserror::Error;
 use time::OffsetDateTime;
+
+mod redis_store;
+
+pub use redis_store::{
+    DEVICE_SEQUENCE_TTL, MEMBERSHIP_VERSION_TTL, RedisEphemeralStore, SEQUENCE_TTL,
+};
 
 /// Result of an atomic sequence compare-and-set (docs/09 §4, ADR-0008).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +141,7 @@ pub trait EphemeralStore: Send + Sync {
     async fn get_checkpoint(&self, key: &str) -> Result<Option<(Vec<u8>, u64)>, EphemeralError>;
 
     /// Atomically writes the checkpoint only if its version is still
-    /// `expected_version` (`track_cas.lua`, `docs/22` §2.1).
+    /// `expected_version` (`lua/track_cas.lua` in Redis, `docs/22` §2.1).
     async fn compare_and_set_checkpoint(
         &self,
         key: &str,

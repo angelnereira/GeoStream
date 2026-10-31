@@ -5,9 +5,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 ## [Unreleased]
 
 ### Added
+- `gs-ephemeral` y `gs-bus` (T-F6-01): backends Redis/Valkey de `ADR-0010`. `RedisEphemeralStore` implementa el keyspace de `11` §3 con scripts Lua versionados en `crates/gs-ephemeral/lua/` (`seq_cas`, `devseq_max`, `presence_release`, `track_cas`), TTL en todas las claves y timeout por comando (`GS_REDIS_COMMAND_TIMEOUT_MS`). `RedisBus` usa una conexión RESP3 por instancia con conteo de referencias por tema, colas acotadas por suscripción (`Lagged` si un suscriptor se atrasa) y resuscripción automática al reconectar. Ambos pasan la misma suite que el backend en memoria. **Todavía no se usan en `serve`**: el cableado es la siguiente parte de la tarea.
+- CI: la etapa 4 levanta PostgreSQL 16 y Valkey 7.2 como servicios, que las pruebas de integración ya necesitaban.
 - Despliegue: servicio `osrm` en Railway (`deploy/osrm/Dockerfile`), OSRM 5.27 con el extracto de Panamá de Geofabrik preprocesado al construir (perfil `car`, MLD), para dibujar rutas sobre OpenStreetMap sin Google. Datos ODbL con atribución obligatoria.
 
 ### Changed
+- `gs-bus`: `Bus::publish` documenta que su resultado cuenta receptores del backend (suscripciones en memoria, instancias en Redis/Valkey), no suscriptores.
+- `docs/11` §3: el script de CAS del filtro se llama `track_cas.lua`, como en `03`, `22` y ADR-0023 (de mayor rango); `{p}:trk:{device}` guarda `state` y `version`; se explica el TTL de `{p}:mver:{session}`. Se retira `crates/gs-ephemeral/scripts/track_cas.lua`, un borrador sin uso que guardaba un string en vez del hash de `11` §3.1.
 - Railway: la configuración de cada servicio (Dockerfile, healthcheck, rutas vigiladas) pasa a los ajustes del servicio y se elimina el `railway.toml` de la raíz, que Railway aplicaría a todos los servicios del repositorio. Verificado que el servicio `geostream` conserva `deploy/Dockerfile.railway` y el healthcheck `/health/ready`.
 
 - Antisuplantación y precisión (DR-20261031-02/03, aceptadas): claves de política `reject_mock_samples` y `reject_network_only` (apagadas por defecto), reglas 17–18 de `09` §3.1 que rechazan con `INVALID_LOCATION` y `field = quality.is_mock` / `quality.source`, y `max_horizontal_accuracy_m` exigible desde **5 m** (antes 100). Aplica igual al stream, a la ingesta HTTP y al relleno de historial. Pruebas en `gs-domain` y `gs-config`.
