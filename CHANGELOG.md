@@ -4,6 +4,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 ## [Unreleased]
 
+### Added
+- `apps/flutter_app` (GeoStream Tester): app Flutter Android/iOS de pruebas para validar en un teléfono real que la ubicación precisa llega al servidor de Railway. Crea o usa una sesión, activa la compartición propia (apagada por defecto), publica por `POST /v1/ingest/locations` y lee `GET /v1/sessions/{id}/snapshot`. Mapa OpenStreetMap sobre `maplibre_gl` con atribución ODbL siempre visible y URL de teselas configurable (`GS_TILE_URL`). Editor de geocercas (círculo y polígono) validado con las reglas de `14` §3, que exporta el `CreateGeofenceRequest` del contrato y las evalúa **localmente** con la histéresis de `14` §4 como vista previa (el servidor aún no implementa F11). Solo dependencias aprobadas (`19` §6.3). 37 pruebas.
+- Despliegue: dominio `geostream.gravitalcloud.com` en el servicio `geostream` de Railway, `GS_PUBLIC_BASE_URL` apuntando a él y despliegue desde `main` (antes, desde una rama de trabajo). Documentado en `deploy/README.md` con los registros DNS.
+
+### Changed
+- `Cargo.toml`: `exclude = ["apps/flutter_app"]`, porque el glob `apps/*` del workspace rompía `cargo` al encontrar un directorio sin `Cargo.toml`. `.dockerignore` deja la app fuera de la imagen del servidor.
+
 
 ### Added
 - `gs-track`: núcleo server-side del motor de trayectoria (E2, parcial). Filtro de Kalman velocidad constante 4×4 en `LocalFrame` con Joseph y puerta de Mahalanobis, puerta de plausibilidad (las 7 banderas), ZUPT, odometer por ancla y detector de paradas O(1). Compila sin warnings.

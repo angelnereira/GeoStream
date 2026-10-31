@@ -88,7 +88,7 @@ Reglas:
 | FR-SDK-010 | MUST | F5 | Android en segundo plano | — | pendiente |
 | FR-SDK-011 | MUST | F7 | iOS en segundo plano | — | pendiente |
 | FR-SDK-012 | MUST | F5 | Vista de sesión | — | pendiente |
-| FR-SDK-013 | MUST | F5 | App de ejemplo | — | pendiente |
+| FR-SDK-013 | MUST | F5 | App de ejemplo | — (app de pruebas previa: `apps/flutter_app/test/`; no cubre el SDK) | pendiente |
 | FR-SDK-014 | SHOULD | F8 | Flutter Web | — | pendiente |
 | FR-SDK-015 | MUST | F5 | Inyección de dependencias | — | pendiente |
 | FR-SDK-016 | MUST | F5 | Núcleo sin mapas | — | pendiente |
@@ -108,7 +108,7 @@ Reglas:
 | FR-INT-003 | SHOULD | F8 | CORS por aplicación | — | pendiente |
 | FR-INT-004 | MUST | F8 | Guía de integración | — | pendiente |
 | FR-GEO-001 | MUST | F11 | Gestión de geocercas | — | pendiente |
-| FR-GEO-002 | MUST | F11 | Evaluación con histéresis | — | pendiente |
+| FR-GEO-002 | MUST | F11 | Evaluación con histéresis | — (vista previa en cliente: `apps/flutter_app/test/geofence_evaluator_test.dart`; la canónica es del servidor) | pendiente |
 | FR-GEO-003 | MUST | F11 | Eventos | — | pendiente |
 | FR-GEO-004 | SHOULD | F11 | Índice espacial en proceso | — | pendiente |
 | FR-GEO-005 | SHOULD | E5 | Transición DWELL | — | pendiente |
