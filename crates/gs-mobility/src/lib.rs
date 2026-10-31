@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+pub mod map_matching;
+pub mod road_graph;
+
 use gs_geo::{LatLon, geodesic_distance};
 
 /// Travel mode with the documented default speed (`docs/17` §2.11).
