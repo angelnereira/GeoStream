@@ -1,9 +1,0 @@
-# Railway: servicio `osrm` (motor de rutas). Build desde la raíz del repo.
-[build]
-builder = "DOCKERFILE"
-dockerfilePath = "deploy/osrm/Dockerfile"
-watchPatterns = ["deploy/osrm/**"]
-
-[deploy]
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 5
