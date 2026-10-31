@@ -261,7 +261,10 @@ final class TrackingController extends ChangeNotifier {
           if (s != null) _evaluateFences(s);
         } else if (r.status == 'REJECTED') {
           _rejected++;
-          _note('Muestra ${r.sequence} rechazada: ${r.errorCode}');
+          _note(
+            'Muestra ${r.sequence} rechazada: ${r.errorCode}'
+            '${r.field == null ? '' : ' (${r.field})'}',
+          );
         }
       }
       notifyListeners();

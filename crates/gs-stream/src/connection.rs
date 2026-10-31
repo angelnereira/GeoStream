@@ -1380,6 +1380,8 @@ impl Connection {
         let location = gs_service::gs_domain::location::LocationPolicy {
             max_horizontal_accuracy_m: policy.max_horizontal_accuracy_m,
             reject_null_island: policy.reject_null_island,
+            reject_mock_samples: policy.reject_mock_samples,
+            reject_network_only: policy.reject_network_only,
             // `GS_LOCATION_MAX_FUTURE_SKEW_MS` and `GS_LOCATION_MAX_EVENT_AGE_MS` are server
             // parameters; the connection reports them in `limits` (docs/08 §6.1).
             max_future_skew_ms: self.config.max_future_skew_ms,

@@ -231,8 +231,10 @@ Se guarda en `tenants.policy` (JSONB) y se gestiona con `geostream admin policy`
 | `publish_burst` | int | 5 | 1..=20 | `08` §7.4 |
 | `max_samples_per_publish` | int | 1 | 1..=50 | `08` §6.4, `limits` |
 | `max_samples_per_publish_http` | int | 50 | 1..=50 | `07` §9.8 |
-| `max_horizontal_accuracy_m` | float | 50000 | 100..=100000 | `09` §3.1 |
+| `max_horizontal_accuracy_m` | float | 50000 | 5..=100000 (DR-20261031-03) | `09` §3.1 |
 | `reject_null_island` | bool | `true` | | `09` §3.1 |
+| `reject_mock_samples` | bool | `false` | | `09` §3.1 regla 17 (DR-20261031-02) |
+| `reject_network_only` | bool | `false` | | `09` §3.1 regla 18 (DR-20261031-02) |
 | `max_active_sessions_per_subject` | int | 50 | 1..=1000 | `09` §5 |
 | `max_devices_per_subject` | int | 10 | 1..=100 | `05` §3.4 |
 | `invitation_max_ttl_seconds` | int | 604800 | 60..=2592000 | `05` §6 |

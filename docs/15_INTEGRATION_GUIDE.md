@@ -1,6 +1,6 @@
 # 15 — Guía de integración para sistemas terceros
 
-**ID:** GS-INT-001 · **Versión:** 0.2.0 · **Requisitos:** FR-INT-001..004, NFR-DX-001
+**ID:** GS-INT-001 · **Versión:** 0.2.1 · **Requisitos:** FR-INT-001..004, NFR-DX-001
 
 Esta guía es normativa en los **flujos** y en las **reglas para integradores**; los fragmentos de código son ILUSTRATIVOS y sus versiones ejecutables viven en `examples/` (F8), probadas en CI.
 
@@ -200,3 +200,90 @@ Los cinco anteriores siguen siendo antipatrones. Estos se añaden:
 - **Degradar en silencio a la estimación propia cuando el proveedor falla.** Devuelve `503 PROVIDER_UNAVAILABLE`: un integrador que eligió proveedor por cobertura necesita distinguir "no hay ruta" de "no supe".
 - **Enviar la predicción visual como si fuera una medición.** Se rechaza con `INVALID_LOCATION`. La predicción es para dibujar; el dato persistente es la medición.
 - **Tratar `density` como `nearby`.** `density` está deliberadamente empobrecido (sin identificadores, con desplazamiento y retraso). Pedir `nearby` para un pasajero es pedir una surveillance de la ubicación de los conductores; por eso exige `pools:query`, que es de aplicación.
+
+## 10. Consumir el despliegue gestionado (`geostream.gravitalcloud.com`)
+
+Esta sección es **operativa**: describe cómo un proyecto (propio o de terceros) consume la instancia de Railway con lo
+que **ya está implementado**. Lo que aún requiere decisión está enlazado al final.
+
+### 10.1 Puntos de entrada
+
+| Uso | URL |
+|---|---|
+| REST | `https://geostream.gravitalcloud.com/v1/…` (contrato: `contracts/openapi/geostream.v1.yaml`) |
+| Stream | `wss://geostream.gravitalcloud.com/v1/stream?ticket=<gst_…>`, subprotocolo `gs.v1.proto` (§08 §2). `gs.v1.json` está apagado en `prod` (`17`, `GS_STREAM_JSON_ENABLED`) |
+| Salud | `GET /health/live`, `GET /health/ready` |
+
+### 10.2 Alta de un proyecto consumidor
+
+Cada proyecto es una **aplicación** dentro de un tenant, con su propia API key y sus scopes mínimos (`06` §3.4).
+Hoy el alta la hace el operador por CLI (`16` §3); no hay registro de cuentas por HTTP (FR-ADM-004 es F15).
+
+```sh
+geostream admin tenant create --name <proyecto>
+geostream admin app create --tenant ten_… --name <proyecto>-movil \
+  --device-scopes sessions:create,invitations:redeem,stream:connect,sharing:write,ingest:write
+geostream admin key create --app app_… --scopes tokens:mint,sessions:write,members:write,sessions:read
+```
+
+Proyectos distintos van en **tenants distintos**: toda consulta filtra por `tenant_id` y un tenant nunca ve datos
+de otro (`06` §8).
+
+### 10.3 Autenticación de usuarios con la identidad que ya tiene cada proyecto
+
+GeoStream **no** gestiona cuentas de usuario final ni contraseñas: confía en el backend de cada proyecto, que ya
+autentica a sus usuarios (OTP, WebAuthn/passkeys, lo que use). El patrón es un **intercambio de token**:
+
+```mermaid
+sequenceDiagram
+  participant App as App del proyecto
+  participant BE as Backend del proyecto (ya autentica usuarios)
+  participant GS as GeoStream
+  App->>BE: POST /geo/token (sesión propia del proyecto, installation_id)
+  BE->>BE: verifica la sesión con SU identidad
+  BE->>GS: POST /v1/tokens (API key, external_subject_id opaco)
+  GS-->>BE: access_token (≤ GS_TOKEN_MAX_TTL_S)
+  BE-->>App: access_token, expires_at
+  App->>GS: REST / stream con el token de dispositivo
+```
+
+- El usuario no se registra dos veces ni ve GeoStream: el inicio de sesión es el del proyecto.
+- `external_subject_id` es el ID interno del usuario en el proyecto, opaco (nunca correo ni teléfono, `05` §2).
+- **No** compartas con GeoStream el secreto con que tu identidad firma sus propios tokens, ni reutilices esos
+  tokens como credencial de GeoStream: quien tuviera ese secreto podría acuñar sesiones de tu producto.
+- La federación directa (GeoStream verifica tokens firmados por tu identidad con JWKS, FR-AUTH-009) exige firma
+  asimétrica en el emisor; aprobada como siguiente paso en `docs/decisions/accepted/DR-20261031-01.md`.
+
+### 10.4 Dispositivos: móvil, microcontrolador o gateway
+
+Toda muestra lleva coordenada **y** su radio de confianza en metros; sin `horizontal_accuracy_m` válido la muestra
+se rechaza (`09` §3).
+
+| Dispositivo | Transporte recomendado | Notas |
+|---|---|---|
+| App móvil | SDK (F5) o `apps/flutter_app` como referencia | Ingesta REST o stream |
+| Microcontrolador con IP (ESP32 + GNSS, módulo LTE-M) | Stream `gs.v1.proto`: una conexión persistente y `PublishLocation` binario; Protobuf con nanopb | Una muestra con posición, precisión, secuencia, instante y calidad ocupa del orden de 60 bytes. El dispositivo pide su token a **tu** backend (nunca guarda una API key) y lo renueva antes de `expires_at` con `AuthRefresh` (`08` §6.6) |
+| Microcontrolador sin stream | `POST /v1/ingest/locations` (JSON, hasta 50 muestras por lote) | Más simple; útil para lotes tras pérdida de cobertura |
+| Rastreador LPWAN/celular | A través del servidor de red del operador (`25` §4) | Pendiente de DR-20261018-04 |
+
+Campos que un dispositivo **debe** rellenar con honestidad (`contracts/proto/geostream/v1/location.proto`):
+`latitude`, `longitude`, `horizontal_accuracy_m` (el radio de precisión que da el receptor GNSS en cada medición, nunca un valor fijo), `captured_at`
+(instante de la medición, no de envío), `sequence` (monotónica y persistida, `12` §9), `quality.source` (`GNSS`,
+`NETWORK`, `FUSED`…) y `quality.is_mock` si la plataforma lo sabe. Opcionales: velocidad, rumbo, altitud y sus
+precisiones.
+
+### 10.5 Precisión y ubicaciones falsas: qué hace hoy el servidor
+
+| Mecanismo | Estado | Dónde |
+|---|---|---|
+| Rechazar muestras con precisión peor que un umbral por tenant | Implementado. `max_horizontal_accuracy_m`, rango `5..=100000` m | `geostream admin policy set --tenant ten_… max_horizontal_accuracy_m=25` |
+| Rechazar `0,0` (Null Island), coordenadas no finitas, secuencias repetidas, muestras del futuro | Implementado | `09` §3 |
+| Señales de plausibilidad por muestra (`MOCK_FLAGGED`, velocidad o aceleración imposibles, fix congelado, solo red, baja precisión) y puntuación `plausibility` | Implementado: viajan en `estimate` de cada `LocationUpdate` del stream | `22` §2.2, `22` §2.7 |
+| Rechazar ubicaciones simuladas (`is_mock = true`) | Implementado, opcional por tenant | `geostream admin policy set --tenant ten_… reject_mock_samples=true` (`09` §3.1 regla 17) |
+| Rechazar muestras solo de red (sin GNSS) | Implementado, opcional por tenant | `reject_network_only=true` (regla 18) |
+| Atestación del dispositivo (Play Integrity, App Attest, elemento seguro) | Pendiente de ADR | `docs/decisions/accepted/DR-20261031-02.md` fase 2 |
+
+Ninguna técnica del lado servidor impide del todo que un dispositivo rooteado o un firmware modificado invente
+coordenadas: lo que se puede hacer es **encarecer** el engaño (atestación de la app, coherencia física de la
+trayectoria) y dejar la sanción al negocio del integrador. Una muestra rechazada vuelve con `status = REJECTED`, `error_code = INVALID_LOCATION` y `field` (`quality.is_mock`, `quality.source` o `position.horizontal_accuracy_m`).
+
