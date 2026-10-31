@@ -85,6 +85,14 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 
 Formato de cada entrada (más reciente arriba):
 
+### 2026-10-31 — Encargo del propietario — app Flutter de pruebas con mapa OSM y editor de geocercas; dominio de producción
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada (fuera del orden del roadmap, por petición directa del propietario).
+- Requisitos: ninguno se marca cumplido. Toca FR-SDK-013 (app de ejemplo, F5), FR-MAP-003 (MapLibre, F9) y FR-GEO-001/002 (F11) solo como herramienta de prueba: no sustituye al SDK ni al servidor de geocercas.
+- Qué: `apps/flutter_app` publica muestras reales por la ingesta HTTP y dibuja el snapshot sobre OpenStreetMap; el editor guarda geocercas en el teléfono, las valida con `14` §3 y las evalúa en local con `14` §4. Servicio de Railway con dominio `geostream.gravitalcloud.com` y despliegue desde `main`.
+- Verificación: `flutter analyze` sin avisos; `flutter test` 37/37; `cargo run -p geostream-tools -- all` en verde; `cargo build -p geostream` en verde tras excluir la app del workspace; despliegue de Railway desde `main` en `SUCCESS` con migraciones a la versión 5. **Pendiente del propietario**: crear los registros DNS (`deploy/README.md` §Dominio público) para que Railway emita el certificado; y compilar el APK/IPA con el SDK de Android o Xcode, que no hay en el entorno del agente.
+- Pendiente para el roadmap: cuando exista `POST /v1/geofences` (F11), la app puede enviar el JSON que ya genera.
+
 ### 2026-10-15 — Defecto corregido — el close frame podía adelantar al `StreamError` que lo acompaña
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: corregido.

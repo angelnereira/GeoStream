@@ -1,0 +1,23 @@
+name: geostream_tester
+description: "App de pruebas de GeoStream: ubicación precisa, mapa OpenStreetMap y editor de geocercas."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  geolocator: 14.1.2
+  http: 1.6.0
+  maplibre_gl: 0.27.1
+  shared_preferences: 2.5.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 6.0.0
+
+flutter:
+  uses-material-design: true

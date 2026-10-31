@@ -133,6 +133,20 @@ Proyecto propio en Railway con tres servicios:
 (`GS_AUTO_MIGRATE` está prohibido en `prod`). Variables del servicio: `GS_ENV=prod`,
 `GS_PUBLIC_BASE_URL=https://<dominio público>`, `GS_DATABASE_URL`, `GS_REDIS_URL`, `GS_STATE_BACKEND=redis`.
 
+### Dominio público
+
+| Host | Destino | DNS (en el proveedor de `gravitalcloud.com`) |
+|---|---|---|
+| `geostream.gravitalcloud.com` | servicio `geostream`, puerto 8080 | `CNAME geostream → 7z7x5pyj.up.railway.app` y `TXT _railway-verify.geostream` con el valor que muestra Railway |
+| `geostream-production-cf6b.up.railway.app` | el mismo servicio | gestionado por Railway |
+
+`GS_PUBLIC_BASE_URL=https://geostream.gravitalcloud.com`. El servicio despliega desde la rama `main`. El dominio
+raíz y `api.gravitalcloud.com` pertenecen a otro proyecto de Railway: no reutilizarlos.
+
 Alta del primer tenant, app y API key: `geostream admin …` (`docs/16` §3) desde una shell del servicio
 (`railway ssh`). La API key se muestra una sola vez: guárdala directamente en el gestor de secretos del integrador,
 nunca en chats, tickets ni en el repositorio.
+
+Para consumir el servicio, cada integrador recibe su propia aplicación y API key; sus apps móviles reciben **tokens
+de dispositivo** que emite su backend con `POST /v1/tokens` (`docs/15_INTEGRATION_GUIDE.md`). La app de pruebas
+`apps/flutter_app` documenta el flujo completo con un token emitido a mano.
