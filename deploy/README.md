@@ -117,3 +117,22 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 ```
 
 La comprobación forma parte del checklist de liberación (`docs/templates/RELEASE_TEMPLATE.md` §3).
+
+## Railway (producción gestionada)
+
+Proyecto propio en Railway con tres servicios:
+
+| Servicio | Origen | Notas |
+|---|---|---|
+| `Postgres` | plantilla gestionada de Railway | `GS_DATABASE_URL=${{Postgres.DATABASE_URL}}` |
+| `Redis` | plantilla gestionada de Railway | `GS_REDIS_URL=${{Redis.REDIS_URL}}`, `GS_STATE_BACKEND=redis` |
+| `geostream` | este repositorio, `railway.toml` → `deploy/Dockerfile.railway` | volumen en `/data`; healthcheck `/health/ready` |
+
+`deploy/railway-entrypoint.sh` genera en el volumen, la primera vez, el par Ed25519 (`/data/jwt-keys`) y la clave
+`GS_DATA_ENCRYPTION_KEY` (`/data/secrets`), sin imprimirlos, y corre `geostream migrate` antes de `serve`
+(`GS_AUTO_MIGRATE` está prohibido en `prod`). Variables del servicio: `GS_ENV=prod`,
+`GS_PUBLIC_BASE_URL=https://<dominio público>`, `GS_DATABASE_URL`, `GS_REDIS_URL`, `GS_STATE_BACKEND=redis`.
+
+Alta del primer tenant, app y API key: `geostream admin …` (`docs/16` §3) desde una shell del servicio
+(`railway ssh`). La API key se muestra una sola vez: guárdala directamente en el gestor de secretos del integrador,
+nunca en chats, tickets ni en el repositorio.
