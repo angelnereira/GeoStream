@@ -307,8 +307,8 @@ integradores existentes, y convive con F5–F12 porque toca crates y rutas propi
 | T-F15-08 | Pruebas de seguridad de T-32 a T-37 y revisión antes de abrir el registro al público | FR-CON-005, NFR-SEC-004 | 10 §4, §12 | T-F15-06, T-F15-07 |
 | T-F15-09 | Portal público `apps/portal` (Flutter Web + nginx): landing, contratos y guías publicados, estado en vivo; servicio `portal` en Railway | FR-PRT-001, FR-PRT-002, FR-PRT-003 | ADR-0034 §1–§3 | T-F15-01 |
 | T-F15-10 | Servicio `tiles`: teselas vectoriales propias desde el extracto de OSM de Panamá, con estilo abierto y atribución; **medir** tamaño, memoria y tiempo de construcción | FR-MAP-007 | ADR-0034 §6, 13 §2 | T-F15-09 |
-| T-F15-11 | CORS por aplicación (T-F8-04 adelantada): orígenes de `application.allowed_origins`, sin credenciales | FR-INT-003 | 07 §12, 10 T-38 | T-F15-09 |
-| T-F15-12 | Acceso con API key de solo lectura (memoria), lista de sesiones y mapa en vivo con las teselas propias | FR-PRT-004 | ADR-0034 §4 | T-F15-10, T-F15-11 |
+| T-F15-11 | CORS por aplicación (T-F8-04 adelantada) para clientes web de terceros: **requiere antes una decisión de seguridad** (el preflight no lleva credenciales; ADR-0035). Ya no bloquea el portal | FR-INT-003 | 07 §12, ADR-0035 | T-F15-09 |
+| T-F15-12 | Proxy `/api/…` del mismo origen con las rutas de solo lectura (ADR-0035), acceso con API key en memoria, lista de sesiones y mapa en vivo con las teselas propias | FR-PRT-004 | ADR-0034 §4, ADR-0035 | T-F15-10 |
 | T-F15-13 | Demo con repartidores simulados y límites propios | FR-PRT-005 | ADR-0034 §5, 10 T-39 | T-F15-12 |
 | T-F15-14 | Reglas y límites en el mapa: geocercas evaluadas en el cliente y, con F11, en el servidor | FR-PRT-006, FR-GEO-001 | 14 | T-F15-12; F11 |
 

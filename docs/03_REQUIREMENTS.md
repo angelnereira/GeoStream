@@ -585,8 +585,8 @@ Cada requisito tiene el formato:
 
 #### FR-PRT-004 · SHOULD · F15 — Acceso con API key de solo lectura
 - Descripción: el portal acepta una API key de solo lectura, la guarda solo en memoria y rechaza keys con scopes de escritura.
-- Aceptación: la key no aparece en `localStorage`, `sessionStorage` ni cookies tras usarla; una key con `sessions:write` es rechazada.
-- Ref: ADR-0034 §4; FR-INT-003.
+- Aceptación: la key no aparece en `localStorage`, `sessionStorage` ni cookies tras usarla; una key con `sessions:write` es rechazada; el proxy del portal responde 404 a cualquier ruta o método fuera de la lista de solo lectura.
+- Ref: ADR-0034 §4; ADR-0035.
 
 #### FR-PRT-005 · SHOULD · F15 — Demo con datos simulados
 - Descripción: cualquier visitante ve un mapa en vivo con repartidores simulados, marcados como simulados, sin cuenta.

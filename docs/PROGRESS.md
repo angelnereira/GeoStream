@@ -96,6 +96,12 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 
 Formato de cada entrada (más reciente arriba):
 
+### 2026-11-01 — T-F15-11 — CORS por aplicación: bloqueado por decisión; el portal no lo necesita
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: tarea **no implementada** a propósito; alternativa documentada en ADR-0035.
+- Hallazgo: FR-INT-003 / `07` §12 solo dicen «orígenes de `application.allowed_origins`», pero un preflight no lleva credenciales y la autenticación se resuelve dentro de cada handler. Aplicarlo exige una decisión de seguridad no especificada (condición 2 de `20` §6): aceptar la unión de orígenes de todas las aplicaciones en el preflight, o volver a autenticar la credencial en una capa.
+- Qué se hizo: ADR-0035 hace que el portal use un proxy nginx del mismo origen con solo rutas de lectura (sin CORS); T-F15-11 queda para clientes web de terceros y pendiente de una solicitud de decisión cuando se aborde.
+
 ### 2026-11-01 — T-F15-09 — Portal público: landing, documentación publicada y estado
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada en local (imagen construida y probada); **sin desplegar**: necesita la rama en `main`, un servicio nuevo en Railway y un registro DNS que crea el propietario. Cierre formal pendiente de CI (facturación de GitHub).
