@@ -251,9 +251,10 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
         .or_else(|| env_map.get("GS_DATABASE_URL").cloned());
 
     // 4. Connect to PostgreSQL, verify schema version (or auto-migrate in dev), and build routers.
+    let state_cell: StateCell = Arc::new(std::sync::OnceLock::new());
     let mut app = gs_api::http_router_with_readiness(
         max_body_bytes,
-        readiness_probe(database_url.as_deref()),
+        readiness_probe(database_url.as_deref(), Arc::clone(&state_cell)),
     );
 
     if let Some(cfg) = &server_config {
@@ -307,6 +308,10 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
         });
 
         let (ephemeral, bus) = connect_state_backend(cfg).await?;
+        // Published to the readiness probe before the listener opens (see `StateCell`). The cell
+        // is set once, here: `set` can only fail if it was already set, and then the probe keeps
+        // reading the value it already has.
+        let _ = state_cell.set((Arc::clone(&ephemeral), Arc::clone(&bus)));
         let prefix = cfg.redis_key_prefix.clone();
 
         if roles.contains(&Role::Api) {
@@ -519,45 +524,75 @@ async fn connect_state_backend(cfg: &gs_config::ServerConfig) -> Result<StateBac
     }
 }
 
+/// Backends of the instance, shared with the readiness probe once they are connected.
+///
+/// The probe is built with the router, before the backends exist; it reads this cell on every
+/// request. The listener opens only after the cell is set, so no request sees it empty.
+type StateCell = Arc<std::sync::OnceLock<StateBackends>>;
+
 /// Builds the readiness probe of the configured dependencies (docs/16 §4.1).
 ///
-/// `/health/ready` answers 503 whenever PostgreSQL does not answer within the documented
-/// timeout; the ephemeral store and the bus are reported when they are configured.
-fn readiness_probe(database_url: Option<&str>) -> gs_api::ReadinessProbe {
+/// `/health/ready` answers 503 whenever PostgreSQL or, with `GS_STATE_BACKEND=redis`, the
+/// ephemeral store or the bus do not answer within `READINESS_TIMEOUT`. With the `memory` backend
+/// those two are reported as `not_configured`: there is nothing to reach.
+fn readiness_probe(database_url: Option<&str>, state: StateCell) -> gs_api::ReadinessProbe {
     let database_url = database_url.map(str::to_string);
-    match database_url {
-        Some(url) => gs_api::ReadinessProbe::new(move || {
-            let url = url.clone();
-            async move {
-                let mut checked = Vec::new();
-                match tokio::time::timeout(gs_api::READINESS_TIMEOUT, async {
-                    let pool = gs_api::migrate::connect_pool(&url).await?;
-                    let connection = pool.acquire().await?;
-                    Ok::<_, gs_api::migrate::StoreError>(connection)
-                })
-                .await
-                {
-                    Ok(Ok(_connection)) => checked.push(gs_api::DependencyStatus {
-                        name: "postgresql".to_string(),
-                        ok: true,
-                        detail: None,
-                    }),
-                    Ok(Err(error)) => checked.push(gs_api::DependencyStatus {
-                        name: "postgresql".to_string(),
-                        ok: false,
-                        detail: Some(error.to_string()),
-                    }),
-                    Err(_elapsed) => checked.push(gs_api::DependencyStatus {
-                        name: "postgresql".to_string(),
-                        ok: false,
-                        detail: Some("timeout".to_string()),
-                    }),
-                }
-                checked
+    let Some(url) = database_url else {
+        return gs_api::ReadinessProbe::default();
+    };
+    gs_api::ReadinessProbe::new(move || {
+        let url = url.clone();
+        let state = Arc::clone(&state);
+        async move {
+            let mut checked = vec![check_postgresql(&url).await];
+            if let Some((ephemeral, bus)) = state.get() {
+                checked.extend(check_state_backends(ephemeral, bus).await);
             }
-        }),
-        None => gs_api::ReadinessProbe::default(),
+            checked
+        }
+    })
+}
+
+/// Opens a connection to PostgreSQL within the readiness timeout.
+async fn check_postgresql(url: &str) -> gs_api::DependencyStatus {
+    let reachable = tokio::time::timeout(gs_api::READINESS_TIMEOUT, async {
+        let pool = gs_api::migrate::connect_pool(url).await?;
+        let _connection = pool.acquire().await?;
+        Ok::<_, gs_api::migrate::StoreError>(())
+    })
+    .await;
+    match reachable {
+        Ok(Ok(())) => gs_api::DependencyStatus::ok("postgresql"),
+        _ => gs_api::DependencyStatus::failing("postgresql"),
     }
+}
+
+/// Checks the ephemeral store and the bus with an active `PING` each.
+async fn check_state_backends(
+    ephemeral: &gs_api::gs_service::EphemeralBackend,
+    bus: &gs_api::gs_service::BusBackend,
+) -> [gs_api::DependencyStatus; 2] {
+    let ephemeral_status = if !ephemeral.is_shared() {
+        gs_api::DependencyStatus::not_configured("ephemeral")
+    } else if matches!(
+        tokio::time::timeout(gs_api::READINESS_TIMEOUT, ephemeral.ping()).await,
+        Ok(Ok(()))
+    ) {
+        gs_api::DependencyStatus::ok("ephemeral")
+    } else {
+        gs_api::DependencyStatus::failing("ephemeral")
+    };
+    let bus_status = if !bus.is_shared() {
+        gs_api::DependencyStatus::not_configured("bus")
+    } else if matches!(
+        tokio::time::timeout(gs_api::READINESS_TIMEOUT, bus.ping()).await,
+        Ok(Ok(()))
+    ) {
+        gs_api::DependencyStatus::ok("bus")
+    } else {
+        gs_api::DependencyStatus::failing("bus")
+    };
+    [ephemeral_status, bus_status]
 }
 
 /// Graceful shutdown listener for SIGINT and SIGTERM signals.
@@ -583,5 +618,52 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use std::time::Duration;
+
+    use gs_api::gs_service::{BusBackend, EphemeralBackend, RedisBus, RedisEphemeralStore};
+    use gs_api::{CheckState, DependencyStatus};
+
+    use super::check_state_backends;
+
+    fn state_of(checks: &[DependencyStatus], name: &str) -> CheckState {
+        checks
+            .iter()
+            .find(|check| check.name == name)
+            .map(|check| check.state)
+            .expect("check is present")
+    }
+
+    #[tokio::test]
+    async fn test_fr_ops_002_memory_backends_are_reported_as_not_configured() {
+        // covers: FR-OPS-002, docs/16 §4.1
+        let checks = check_state_backends(&EphemeralBackend::memory(), &BusBackend::memory()).await;
+        assert_eq!(state_of(&checks, "ephemeral"), CheckState::NotConfigured);
+        assert_eq!(state_of(&checks, "bus"), CheckState::NotConfigured);
+    }
+
+    #[tokio::test]
+    async fn test_fr_ops_002_redis_backends_are_checked_and_ok_when_reachable() {
+        // covers: FR-OPS-002, docs/16 §4.1
+        let url = std::env::var("GS_TEST_REDIS_URL")
+            .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let timeout = Duration::from_millis(500);
+        let ephemeral = EphemeralBackend::from_redis(
+            RedisEphemeralStore::connect(&url, timeout)
+                .await
+                .expect("connect the ephemeral store to GS_TEST_REDIS_URL"),
+        );
+        let bus = BusBackend::from_redis(
+            RedisBus::connect(&url, timeout)
+                .await
+                .expect("connect the bus to GS_TEST_REDIS_URL"),
+        );
+        let checks = check_state_backends(&ephemeral, &bus).await;
+        assert_eq!(state_of(&checks, "ephemeral"), CheckState::Ok);
+        assert_eq!(state_of(&checks, "bus"), CheckState::Ok);
     }
 }

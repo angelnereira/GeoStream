@@ -119,6 +119,21 @@ impl RedisBus {
         })
     }
 
+    /// Sends `PING` and updates the connection flag with the result.
+    ///
+    /// [`Bus::is_connected`] only changes when a command or a push arrives, so an idle instance
+    /// would keep reporting a lost connection after the server came back. Readiness calls this.
+    pub async fn ping(&self) -> Result<(), BusError> {
+        let mut connection = self.connection.clone();
+        self.run(async move {
+            redis::cmd("PING")
+                .query_async::<String>(&mut connection)
+                .await
+        })
+        .await
+        .map(|_| ())
+    }
+
     /// Runs one command with the timeout and keeps the connection flag in sync.
     async fn run<T>(
         &self,
