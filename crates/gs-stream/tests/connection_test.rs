@@ -100,6 +100,13 @@ async fn session_of(world: &World) -> String {
 }
 
 async fn setup(suffix: &str, config: StreamConfig) -> World {
+    setup_with(suffix, config, None).await
+}
+
+/// State shared by several instances: the ephemeral store and the bus (docs/04 §6).
+type SharedState = (Arc<EphemeralBackend>, Arc<BusBackend>);
+
+async fn setup_with(suffix: &str, config: StreamConfig, shared: Option<SharedState>) -> World {
     let pool = connect_pool(&test_database_url()).await.expect("connect");
     run_migrations(&pool).await.expect("migrate");
 
@@ -209,8 +216,8 @@ async fn setup(suffix: &str, config: StreamConfig) -> World {
     )
     .await;
 
-    let ephemeral = EphemeralBackend::memory();
-    let bus = BusBackend::memory();
+    let (ephemeral, bus) =
+        shared.unwrap_or_else(|| (EphemeralBackend::memory(), BusBackend::memory()));
     let prefix = format!("gs:stream:{suffix}");
     let connections = ConnectionCounter::new();
 
@@ -326,17 +333,89 @@ impl World {
 
     /// Opens a WebSocket against the upgrade route with the given ticket.
     async fn connect(&self, ticket: &str, protocols: &str) -> Socket {
-        let mut request = format!("{}/v1/stream?ticket={}", self.ws_base, ticket)
-            .into_client_request()
-            .expect("request");
-        request.headers_mut().insert(
-            header::SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_str(protocols).expect("header"),
-        );
-        let (socket, _response) = tokio_tungstenite::connect_async(request)
+        connect_ws(&self.ws_base, ticket, protocols).await
+    }
+
+    /// Starts a second instance over the same database, signing key, key prefix, ephemeral
+    /// store and bus: what a second replica behind the balancer looks like (FR-STR-009).
+    async fn start_peer(&self, config: StreamConfig) -> Peer {
+        let mut keyset = DeviceTokenKeys::default();
+        keyset.insert_signing_key(&self.kid, self.signing.clone());
+        let keyset = Arc::new(keyset);
+        let connections = ConnectionCounter::new();
+
+        let stream_state = Arc::new(StreamState {
+            pool: self.pool.clone(),
+            ephemeral: self.ephemeral.clone(),
+            bus: self.bus.clone(),
+            authz: Arc::new(AuthzCache::new(config.authz_cache_ttl)),
+            fanout: Arc::new(gs_stream::Fanout::new(
+                self.bus.clone(),
+                self.prefix.clone(),
+            )),
+            redis_key_prefix: self.prefix.clone(),
+            config: config.clone(),
+            signing_keys: keyset.clone(),
+            jwt_issuer: ISSUER.to_string(),
+            jwt_leeway_seconds: 30,
+        });
+        let runner: SessionRunner = Arc::new(move |accepted: gs_api::AcceptedWebSocket| {
+            let state = Arc::clone(&stream_state);
+            Box::pin(async move {
+                run_session(
+                    gs_stream::AcceptedSession {
+                        subprotocol: accepted.subprotocol,
+                        grant: accepted.grant,
+                        request_id: accepted.request_id,
+                        socket: accepted.socket,
+                    },
+                    state,
+                )
+                .await;
+            })
+        });
+        let session_state = SessionApiState {
+            pool: self.pool.clone(),
+            signing_keys: keyset,
+            issuer: ISSUER.to_string(),
+            leeway_seconds: 30,
+            crypto_rotator: None,
+            idempotency_retention: Duration::from_secs(3600),
+            ephemeral: self.ephemeral.clone(),
+            bus: self.bus.clone(),
+            redis_key_prefix: self.prefix.clone(),
+            stream_ticket: StreamTicketConfig {
+                ttl: Duration::from_secs(30),
+                app_max_connection_age: Duration::from_secs(3600),
+                public_base_url: "https://geostream.example.com".to_string(),
+            },
+            rate_limit_config: RateLimitConfig::default(),
+        };
+        let stream_api_state = StreamApiState {
+            pool: self.pool.clone(),
+            ephemeral: self.ephemeral.clone(),
+            redis_key_prefix: self.prefix.clone(),
+            upgrade_rpm_per_ip: 120,
+            max_connections: config.max_connections,
+            max_frame_bytes: 16_384,
+            connections,
+            json_subprotocol_enabled: config.json_subprotocol_enabled,
+            session_runner: runner,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        drop(listener);
+        let tokio_listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
             .await
-            .expect("websocket upgrade");
-        socket
+            .expect("bind");
+        let router = sessions_router(session_state).merge(stream_route(stream_api_state));
+        let server = tokio::spawn(async move {
+            axum::serve(tokio_listener, router).await.expect("serve");
+        });
+        Peer {
+            ws_base: format!("ws://127.0.0.1:{port}"),
+            _server: server,
+        }
     }
 
     /// Attempts an upgrade that the server must refuse, returning status and problem body.
@@ -364,6 +443,33 @@ impl World {
             Err(other) => panic!("unexpected handshake error: {other}"),
         }
     }
+}
+
+/// A second instance started by [`World::start_peer`].
+struct Peer {
+    ws_base: String,
+    _server: tokio::task::JoinHandle<()>,
+}
+
+impl Peer {
+    async fn connect(&self, ticket: &str, protocols: &str) -> Socket {
+        connect_ws(&self.ws_base, ticket, protocols).await
+    }
+}
+
+/// Opens a WebSocket against `ws_base` with the given ticket.
+async fn connect_ws(ws_base: &str, ticket: &str, protocols: &str) -> Socket {
+    let mut request = format!("{ws_base}/v1/stream?ticket={ticket}")
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        header::SEC_WEBSOCKET_PROTOCOL,
+        HeaderValue::from_str(protocols).expect("header"),
+    );
+    let (socket, _response) = tokio_tungstenite::connect_async(request)
+        .await
+        .expect("websocket upgrade");
+    socket
 }
 
 /// Sends a `ClientHello` and returns the `ServerHello` as JSON (docs/08 §6.1).
@@ -3042,5 +3148,139 @@ async fn test_fr_auth_007_application_cannot_refresh_authentication() {
             );
         }
         other => panic!("expected StreamError, got {other:?}"),
+    }
+}
+
+/// Redis/Valkey of the test environment (`deploy/docker-compose.dev.yml`).
+fn test_redis_url() -> String {
+    std::env::var("GS_TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
+}
+
+/// Ephemeral store and bus over the real Redis/Valkey, shared by every instance of a test.
+async fn redis_state() -> SharedState {
+    let timeout = Duration::from_millis(500);
+    let ephemeral = gs_service::RedisEphemeralStore::connect(&test_redis_url(), timeout)
+        .await
+        .expect("connect the ephemeral store to GS_TEST_REDIS_URL");
+    let bus = gs_service::RedisBus::connect(&test_redis_url(), timeout)
+        .await
+        .expect("connect the bus to GS_TEST_REDIS_URL");
+    (
+        EphemeralBackend::from_redis(ephemeral),
+        BusBackend::from_redis(bus),
+    )
+}
+
+/// Waits until the device of `world` has a presence key written by `instance_id`.
+async fn presence_instance(world: &World, device_id: &str) -> Option<String> {
+    let key = format!("{}:presence:{}", world.prefix, device_id);
+    world
+        .ephemeral
+        .get_presence(&key)
+        .await
+        .expect("presence")
+        .and_then(|fields| {
+            fields
+                .into_iter()
+                .find(|(name, _)| name == "instance_id")
+                .map(|(_, value)| value)
+        })
+}
+
+#[tokio::test]
+async fn test_fr_str_007_supersede_crosses_instances_through_the_bus() {
+    // covers: FR-STR-007, FR-STR-009, FR-PRS-003, docs/04 §6.3, docs/08 §6.7
+    let config_a = StreamConfig {
+        instance_id: "instance-a".to_string(),
+        ..StreamConfig::default()
+    };
+    let config_b = StreamConfig {
+        instance_id: "instance-b".to_string(),
+        ..StreamConfig::default()
+    };
+    let world = setup_with("supersede-x", config_a, Some(redis_state().await)).await;
+    let peer = world.start_peer(config_b).await;
+    let token = &world.device_token.response.access_token;
+    let device_id = world.device_token.response.device_id.clone();
+
+    // The device connects to instance A.
+    let ticket_a = world.ticket(token).await;
+    let mut socket_a = world.connect(&ticket_a, "gs.v1.proto").await;
+    let hello_a = hello(&mut socket_a, Subprotocol::Proto).await;
+    let conn_a = hello_a["connectionId"].as_str().unwrap().to_string();
+    assert_eq!(
+        presence_instance(&world, &device_id).await.as_deref(),
+        Some("instance-a")
+    );
+
+    // The same device reconnects, now through instance B. The ticket is redeemed on B: tickets
+    // live in the shared store, not in the memory of the instance that issued them.
+    let ticket_b = world.ticket(token).await;
+    let mut socket_b = peer.connect(&ticket_b, "gs.v1.proto").await;
+    let hello_b = hello(&mut socket_b, Subprotocol::Proto).await;
+    let conn_b = hello_b["connectionId"].as_str().unwrap().to_string();
+    assert_ne!(conn_a, conn_b);
+
+    // Instance A closes the old connection with 4409 although B never touched its memory.
+    assert_eq!(read_close_code(&mut socket_a).await, 4409);
+
+    // Presence points to B, and B's own connection survives its own Supersede event.
+    assert_eq!(
+        presence_instance(&world, &device_id).await.as_deref(),
+        Some("instance-b")
+    );
+    heartbeat(&mut socket_b, Subprotocol::Proto).await;
+}
+
+#[tokio::test]
+async fn test_fr_prs_003_presence_outlives_a_closed_connection_only_until_its_release() {
+    // covers: FR-PRS-003, docs/04 §6.3
+    let world = setup_with(
+        "presence-x",
+        StreamConfig {
+            instance_id: "instance-a".to_string(),
+            ..StreamConfig::default()
+        },
+        Some(redis_state().await),
+    )
+    .await;
+    let peer = world
+        .start_peer(StreamConfig {
+            instance_id: "instance-b".to_string(),
+            ..StreamConfig::default()
+        })
+        .await;
+    let token = &world.device_token.response.access_token;
+    let device_id = world.device_token.response.device_id.clone();
+
+    // Connect through A, then B takes the device over.
+    let ticket_a = world.ticket(token).await;
+    let mut socket_a = world.connect(&ticket_a, "gs.v1.proto").await;
+    hello(&mut socket_a, Subprotocol::Proto).await;
+    let ticket_b = world.ticket(token).await;
+    let mut socket_b = peer.connect(&ticket_b, "gs.v1.proto").await;
+    hello(&mut socket_b, Subprotocol::Proto).await;
+    assert_eq!(read_close_code(&mut socket_a).await, 4409);
+
+    // A's connection is gone, but the release it runs on close must not delete B's presence
+    // (the compare-and-delete of `presence_release.lua` checks the `connection_id`).
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        presence_instance(&world, &device_id).await.as_deref(),
+        Some("instance-b")
+    );
+
+    // When B's connection closes normally, presence is released.
+    socket_b
+        .close(None)
+        .await
+        .expect("close the connection of instance B");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while presence_instance(&world, &device_id).await.is_some() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "presence must be released after the last connection closes"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
