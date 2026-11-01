@@ -88,6 +88,28 @@ jobs:
       - name: Ejecutar pruebas
         run: cargo test --workspace --all-features
 
+  stage6-portal:
+    name: "Etapa 6: Portal público (Flutter Web, ADR-0034)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/portal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.6"
+          channel: stable
+          cache: true
+      - name: Dependencias
+        run: flutter pub get
+      - name: Análisis estático
+        run: flutter analyze
+      - name: Pruebas
+        run: flutter test
+      - name: Compilar para web
+        run: flutter build web --release --no-web-resources-cdn
+
   stage5-multiarch:
     name: "Etapa 5: Compilacion multiplataforma (FR-OPS-007, T-E1-05)"
     runs-on: ubuntu-latest

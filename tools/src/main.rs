@@ -37,6 +37,8 @@ enum Commands {
     Phases,
     /// Verify enum parity across Protobuf, OpenAPI and the normative docs
     Enums,
+    /// Verify the documents the public portal publishes (ADR-0034 §2)
+    PortalDocs,
     /// Verify relative markdown links across the repository
     MarkdownLinks,
     /// Verify CHANGELOG.md format and optional PR update
@@ -124,6 +126,11 @@ fn run_all(root: &Path) -> bool {
     }) {
         all_ok = false;
     }
+    if !run_check("Portal Published Docs (ADR-0034 §2)", || {
+        portal_docs::check_portal_docs(root)
+    }) {
+        all_ok = false;
+    }
     if !run_check("Markdown Relative Links", || {
         markdown_links::check_markdown_links(root)
     }) {
@@ -176,6 +183,9 @@ fn main() -> ExitCode {
         ),
         Commands::Enums => run_check("Enum Parity (proto, OpenAPI, docs)", || {
             enums::check_enum_parity(&root)
+        }),
+        Commands::PortalDocs => run_check("Portal Published Docs (ADR-0034 §2)", || {
+            portal_docs::check_portal_docs(&root)
         }),
         Commands::MarkdownLinks => run_check("Markdown Relative Links", || {
             markdown_links::check_markdown_links(&root)

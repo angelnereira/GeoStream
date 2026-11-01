@@ -26,6 +26,7 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 | T-E1-04 — `gs-ffi` | completada | — |
 | T-E1-05 — CI multiarch | parcialmente (workflow añadido) | wasm + musl |
 | T-E1-06 — propiedades | completada | 4 propiedades |
+| **T-F15-01 — adopción de la consola** | completada (documental) | DR-20261031-05, ADR-0033, FR-CON-*, T-32 a T-37, `17` §2.12. Siguiente: T-F15-02 (externa, Plenty-Pay) y T-F15-03 (contrato) |
 | **T-F6-01 — Redis/Valkey** | **hecha en local; cierre pendiente de CI** (Angel Nereira con agente, 2026-10-31) | Backends, suites y cableado en `serve`. No se puede cerrar según `19` §1.3 mientras GitHub Actions no ejecute (ver bloqueos). Siguiente en F6: T-F6-02 (desplazamiento entre instancias) y T-F6-03 (degradación) |
 
 
@@ -82,6 +83,7 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 | E7 | pendiente | | |
 | E8 | pendiente | | **Bloqueada por T-E8-06**: protección DULT completa antes de cualquier release |
 | E9 | pendiente | | |
+| F15 | **en curso** (activada 2026-10-31, DR-20261031-05) | | T-F15-01 completada: adopción documental de la consola de desarrolladores |
 | F6 | **en curso** (adelantada al cerrar F4) | | T-F6-01: backends Redis/Valkey con la suite compartida verde y `serve` usándolos |
 | F7 (M3) | pendiente | | |
 | F8 | pendiente | | |
@@ -93,6 +95,31 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-11-01 — T-F15-11 — CORS por aplicación: bloqueado por decisión; el portal no lo necesita
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: tarea **no implementada** a propósito; alternativa documentada en ADR-0035.
+- Hallazgo: FR-INT-003 / `07` §12 solo dicen «orígenes de `application.allowed_origins`», pero un preflight no lleva credenciales y la autenticación se resuelve dentro de cada handler. Aplicarlo exige una decisión de seguridad no especificada (condición 2 de `20` §6): aceptar la unión de orígenes de todas las aplicaciones en el preflight, o volver a autenticar la credencial en una capa.
+- Qué se hizo: ADR-0035 hace que el portal use un proxy nginx del mismo origen con solo rutas de lectura (sin CORS); T-F15-11 queda para clientes web de terceros y pendiente de una solicitud de decisión cuando se aborde.
+
+### 2026-11-01 — T-F15-09 — Portal público: landing, documentación publicada y estado
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada en local (imagen construida y probada); **sin desplegar**: necesita la rama en `main`, un servicio nuevo en Railway y un registro DNS que crea el propietario. Cierre formal pendiente de CI (facturación de GitHub).
+- Origen: DR-20261101-01 y ADR-0034. El propietario pidió un portal con landing, contratos publicados, disponibilidad, acceso y mapas en tiempo real; esta parte es lo que no depende de nada externo. El acceso con API key exige CORS (T-F15-11) y el mapa propio (T-F15-10); el inicio de sesión con Gravital sigue bloqueado por OIDC (T-F15-02).
+- Qué: `apps/portal` (Flutter Web, solo `http` de la lista aprobada), `tool/build_docs.mjs`, `nginx.conf.template`, `Dockerfile` y `Dockerfile.dockerignore` propio; `geostream-tools portal-docs`; etapa 6 de CI.
+- Defectos encontrados al probar: (1) nginx descartaba las cabeceras de seguridad de `/` porque un `location` con su propio `add_header` reemplaza las del nivel `server`; ahora cada `location` incluye `security-headers.conf`. (2) La referencia de la API que genera Redocly carga su script y fuentes desde CDN de terceros y usa estilos en línea, incompatible con una CSP de `script-src 'self'`; se aloja Redoc 2.5.1 en el propio portal. (3) El `.dockerignore` de la raíz excluye `docs/` y `*.md`; el portal usa `apps/portal/Dockerfile.dockerignore`.
+- Verificación: `flutter analyze` sin avisos; `flutter test` 10/10; `cargo test -p geostream-tools` 17/17 (5 nuevas); `cargo clippy --workspace --all-targets --all-features -- -D warnings` y `cargo fmt --check` OK; `docker build` desde cero OK; contenedor en marcha: `/`, `/docs/api.html`, guías, `.proto` y OpenAPI responden 200 y `10`/`16` 404; Chrome headless carga landing, guía y referencia de la API sin violaciones de CSP (el único bloqueo es un logo decorativo de Redoc en su CDN). Imagen de ~42 MB de contenido estático.
+- Pendiente de decisión del propietario: dominio (`console.geostream.gravitalcloud.com`, registro CNAME que da Railway), y crear el servicio en Railway tras fusionar.
+- Nota: contra la API en producción el estado muestra «Sin datos» porque aún devuelve el cuerpo anterior de `/health/ready`; se resuelve al desplegar T-F6-03.
+
+### 2026-10-31 — T-F15-01 — Adopción de la consola de desarrolladores (sin código)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Origen: el propietario pide un portal web donde cualquier desarrollador entre con su cuenta de Gravital, obtenga API keys y use GeoStream como servicio, al estilo de Google Maps Platform. DR-20261031-01 había dejado esa consola «solo si GeoStream se ofrece a terceros»; ahora es el caso. Respuestas del propietario en DR-20261031-05.
+- Hallazgo que condiciona el plan: `identity` de Gravital (Plenty-Pay) firma con secretos simétricos, no publica JWKS ni OIDC y no tiene dominio público (Railway, 2026-10-31). La consola no puede abrirse hasta T-F15-02, que se hace en ese repositorio.
+- Qué: ADR-0033; FR-ADM-004 activado y FR-CON-001 a FR-CON-008; amenazas T-32 a T-37; `17` §2.12 y cuotas de §4; fase F15 en `21`.
+- Verificación: `cargo run -p geostream-tools -- all` (resultado en el PR).
+- Efecto en producción: ninguno (solo documentación). Despliegue de T-F6-01 comprobado en Railway: `SUCCESS`, log `state backend: redis` y `/health/ready` 200 en `geostream.gravitalcloud.com`.
 
 ### 2026-10-31 — T-F6-01 (parte 2) — `serve` usa el backend configurado
 - Autor/agente: Angel Nereira (con agente de código).

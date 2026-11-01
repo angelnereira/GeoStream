@@ -13,3 +13,5 @@ node_modules/
 *.log
 # App Flutter de pruebas: no forma parte de la imagen del servidor.
 apps/flutter_app/
+# Portal público: tiene su propia imagen (apps/portal/Dockerfile).
+apps/portal/

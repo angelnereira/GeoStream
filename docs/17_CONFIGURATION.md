@@ -201,6 +201,21 @@ local; la calidad de trayectoria y el map-matching usan la geodésica.
 | Velocidades por modo del estimador de ETA | auto 6,9 m/s · moto 8,3 m/s · bicicleta 4,2 m/s · a pie 1,3 m/s | `23` §4 |
 | Tolerancia de simplificación online | `offline_simplify_tolerance_m`, en **metros**, no en grados | `22` §3.5 |
 
+### 2.12 Consola de desarrolladores (F15, ADR-0033)
+
+Solo se leen cuando el proceso tiene el rol `console`. Sin `GS_CONSOLE_OIDC_ISSUER` el rol no arranca.
+
+| Variable | Tipo | Default | Rango | Efecto |
+|---|---|---|---|---|
+| `GS_CONSOLE_OIDC_ISSUER` | url | — | `https://` en `prod`; obligatorio con el rol `console` | Emisor OIDC de Gravital; su descubrimiento da el JWKS |
+| `GS_CONSOLE_OIDC_AUDIENCE` | string | `geostream-console-api` | 1..=128 caracteres | Valor que el `aud` del access token debe contener |
+| `GS_CONSOLE_OIDC_CLIENT_ID` | string | `geostream-console` | 1..=128 caracteres | Cliente público OIDC del portal (PKCE, sin secreto) |
+| `GS_CONSOLE_OIDC_JWKS_CACHE_TTL_S` | dur_s | 600 | 60..=86400 | Vida del JWKS en caché |
+| `GS_CONSOLE_OIDC_JWKS_MIN_REFRESH_S` | dur_s | 30 | 5..=3600 | Intervalo mínimo entre recargas del JWKS por `kid` desconocido |
+| `GS_CONSOLE_PUBLIC_URL` | url | — | `https://` en `prod` | Origen del portal: única entrada CORS de `/v1/console/*` y base de la `redirect_uri` |
+| `GS_CONSOLE_MAX_ORGS_PER_ACCOUNT` | int | 3 | 1..=100 | Organizaciones que una cuenta puede crear por autoservicio |
+| `GS_CONSOLE_SIGNUP_RPM_PER_IP` | int | 10 | 1..=600 | Altas de cuenta y de organización por minuto e IP |
+
 ## 3. Restricciones por entorno
 
 | Regla | `dev` | `test` | `prod` |
@@ -246,6 +261,10 @@ Se guarda en `tenants.policy` (JSONB) y se gestiona con `geostream admin policy`
 | `geofence_exit_buffer_m` | float | 20 | 0..=500 | `14` §4 |
 | `geofence_max_accuracy_m` | float | 100 | 10..=1000 | `14` §4 |
 | `history_allowed` | bool | `false` | `24` §1 | `03` FR-HIS-001 |
+| `max_applications_per_tenant` | int | 10 | 1..=1000 | Proyectos por organización (FR-CON-004, ADR-0033 §4) |
+| `quota_monthly_location_samples` | int | 1000000 | 1..=10000000000 | Muestras aceptadas por aplicación y mes natural UTC (FR-CON-006) |
+| `quota_monthly_rest_requests` | int | 100000 | 1..=10000000000 | Peticiones REST autenticadas por aplicación y mes natural UTC (FR-CON-006) |
+| `quota_concurrent_stream_connections` | int | 100 | 1..=1000000 | Conexiones de stream simultáneas por aplicación (FR-CON-006) |
 
 ### 4.1 Política del motor (pista E)
 

@@ -288,6 +288,37 @@ Adelantable: puede empezar al cerrar F6.
 
 ---
 
+## F15 — Consola de desarrolladores y federación OIDC (activada 2026-10-31)
+
+Activada por DR-20261031-05 y ADR-0033: GeoStream se ofrece como plataforma a terceros, con una consola web donde un
+desarrollador entra con su cuenta de Gravital, crea proyectos y obtiene API keys con cuotas gratuitas. Cumple el
+criterio de entrada de F15 (demanda del propietario y ADR). Es **aditiva**: no cambia el camino de datos ni a los
+integradores existentes, y convive con F5–F12 porque toca crates y rutas propias (`/v1/console/*`, rol `console`).
+
+| ID | Tarea y entregable | Requisitos | Leer | Depende |
+|---|---|---|---|---|
+| T-F15-01 | Adopción documental sin código: ADR-0033, DR-20261031-05, `03`, `10` (T-32 a T-37), `17` (§2.12, cuotas de §4), esta sección, `TRACEABILITY` | FR-ADM-004 | ADR-0033, 06, 10 | — |
+| T-F15-02 | **Externa (repositorio Plenty-Pay):** `identity` de Gravital como proveedor OIDC: descubrimiento, JWKS con EdDSA o ES256, `authorize` con PKCE `S256`, `token`, cliente público `geostream-console` y dominio público | FR-CON-001 | ADR-0033 §2 | T-F15-01 |
+| T-F15-03 | Contrato, único PR sobre `contracts/`: OpenAPI `/v1/console/*`, prefijo `acc_`, código de cuota en el catálogo, scopes de consola; enmiendas de `06`, `07`, `09` y `11` | FR-CON-002, FR-CON-003 | 06, 07, 09, 11, contracts/README | T-F15-01 |
+| T-F15-04 | Migración de `console_accounts`, `tenant_memberships` y contadores de uso; repositorios en `gs-store` | FR-CON-002, FR-CON-003 | 11 | T-F15-03 |
+| T-F15-05 | Verificador OIDC con caché de JWKS en `gs-auth`; rol `console` con las rutas de organizaciones, proyectos y keys; vinculación por CLI de organizaciones existentes | FR-CON-001..005, FR-CON-008 | ADR-0033, 06 §4.3 | T-F15-02, T-F15-04 |
+| T-F15-06 | Cuotas y medición de uso por aplicación; panel de uso | FR-CON-006, FR-CON-007 | ADR-0033 §4, 17 §4 | T-F15-05 |
+| T-F15-07 | Portal `apps/console` en Flutter Web; servicio de Railway en `console.geostream.gravitalcloud.com` con CSP estricta | FR-CON-001, FR-CON-004, FR-CON-007 | ADR-0033 §1 | T-F15-05 |
+| T-F15-08 | Pruebas de seguridad de T-32 a T-37 y revisión antes de abrir el registro al público | FR-CON-005, NFR-SEC-004 | 10 §4, §12 | T-F15-06, T-F15-07 |
+| T-F15-09 | Portal público `apps/portal` (Flutter Web + nginx): landing, contratos y guías publicados, estado en vivo; servicio `portal` en Railway | FR-PRT-001, FR-PRT-002, FR-PRT-003 | ADR-0034 §1–§3 | T-F15-01 |
+| T-F15-10 | Servicio `tiles`: teselas vectoriales propias desde el extracto de OSM de Panamá, con estilo abierto y atribución; **medir** tamaño, memoria y tiempo de construcción | FR-MAP-007 | ADR-0034 §6, 13 §2 | T-F15-09 |
+| T-F15-11 | CORS por aplicación (T-F8-04 adelantada) para clientes web de terceros: **requiere antes una decisión de seguridad** (el preflight no lleva credenciales; ADR-0035). Ya no bloquea el portal | FR-INT-003 | 07 §12, ADR-0035 | T-F15-09 |
+| T-F15-12 | Proxy `/api/…` del mismo origen con las rutas de solo lectura (ADR-0035), acceso con API key en memoria, lista de sesiones y mapa en vivo con las teselas propias | FR-PRT-004 | ADR-0034 §4, ADR-0035 | T-F15-10 |
+| T-F15-13 | Demo con repartidores simulados y límites propios | FR-PRT-005 | ADR-0034 §5, 10 T-39 | T-F15-12 |
+| T-F15-14 | Reglas y límites en el mapa: geocercas evaluadas en el cliente y, con F11, en el servidor | FR-PRT-006, FR-GEO-001 | 14 | T-F15-12; F11 |
+
+**Criterios de salida (consola, T-F15-01 a T-F15-08):** un desarrollador sin acceso al servidor entra con su cuenta de Gravital, crea una
+organización y un proyecto, obtiene una API key y publica una ubicación con ella; las pruebas negativas de FR-CON-001
+y la matriz de roles de FR-CON-003 verdes; cuotas observadas en una prueba; **T-F15-08 cerrada** antes de abrir el
+registro público.
+
+---
+
 ---
 
 ## Pista E — Motor de ubicación y movilidad (E0–E9)
@@ -562,5 +593,5 @@ Cada pista requiere, antes de empezar: un caso de uso real de al menos un integr
 |---|---|---|---|
 | F13 | **Eliminada.** Sus cuatro elementos son ahora E3 (cola cifrada), E6 (historial), E2 (calidad de trayectoria) y E7 (map-matching), cada uno con su propio ADR y su propia fase. | — | — |
 | F14 | Puente MQTT para IoT | FR-IOT-001 | ADR de broker y autenticación de dispositivos |
-| F15 | **Parcialmente eliminada.** Los SDKs nativos son ahora E9 y las geocercas en dispositivo son E3 (`FR-GEO-007`): comparten el núcleo Rust y no tienen sentido como pista aparte. Quedan aquí la API de administración, los tokens firmados por el integrador y la aprobación de solicitudes de unión. | FR-AUTH-009, FR-ADM-004, FR-INV-004 | Demanda medida; ADR por cada elemento |
+| F15 | **Parcialmente eliminada.** Los SDKs nativos son ahora E9 y las geocercas en dispositivo son E3 (`FR-GEO-007`): comparten el núcleo Rust y no tienen sentido como pista aparte. Quedan aquí la API de administración, los tokens firmados por el integrador y la aprobación de solicitudes de unión. **La consola (FR-ADM-004) se activó el 2026-10-31: ver la sección F15 de arriba.** | FR-AUTH-009, FR-ADM-004, FR-INV-004, FR-CON-001..008 | Demanda medida; ADR por cada elemento |
 | F16 | Modo E2EE y transporte P2P WebRTC | FR-E2E-001, FR-P2P-001 | Revisión criptográfica externa; aceptación explícita de perder snapshots en claro y geocercas del servidor. Ojo: los tags Beacon de E8 **ya** tienen E2EE (`10` T-22), así que esta pista cubre sesión y REST, no el producto entero |

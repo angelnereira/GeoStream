@@ -10,4 +10,5 @@ pub mod error_catalog;
 pub mod json;
 pub mod markdown_links;
 pub mod phases;
+pub mod portal_docs;
 pub mod requirements;

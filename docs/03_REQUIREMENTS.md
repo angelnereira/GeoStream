@@ -88,7 +88,47 @@ Cada requisito tiene el formato:
 
 #### FR-ADM-004 · COULD · F15 — API HTTP de administración
 - Descripción: endpoints de administración para una consola SaaS.
-- Aceptación: requiere ADR y modelo de amenazas propio.
+- Aceptación: requiere ADR y modelo de amenazas propio. **Activado el 2026-10-31** por DR-20261031-05: ADR-0033 y las amenazas T-32 a T-37 de `10`; el detalle verificable está en FR-CON-001 a FR-CON-008.
+
+#### FR-CON-001 · MUST · F15 — Inicio de sesión de consola con Gravital (OIDC)
+- Descripción: la consola inicia sesión con la cuenta de Gravital mediante OIDC *Authorization Code* con PKCE; la API de consola acepta solo access tokens de `GS_CONSOLE_OIDC_ISSUER` firmados con clave asimétrica.
+- Aceptación: pruebas negativas rechazan con 401 un token con `alg` `none` o HS*, `iss` o `aud` distintos, caducado, firmado con una clave fuera del JWKS o con `kid` desconocido tras recargar el JWKS.
+- Ref: ADR-0033 §2; `17` §2.12.
+
+#### FR-CON-002 · MUST · F15 — Cuenta de consola separada de los usuarios finales
+- Descripción: la identidad de consola es el par `(iss, sub)` del token; una cuenta de consola nunca es un subject ni un dispositivo y no puede publicar, suscribirse ni leer ubicaciones.
+- Aceptación: un token de consola presentado en `/v1/sessions`, `/v1/stream/tickets` o `/v1/ingest/*` devuelve 401; el email nunca se usa como identidad.
+- Ref: ADR-0033 §2–§3; `06` §2.
+
+#### FR-CON-003 · MUST · F15 — Organizaciones y roles
+- Descripción: una organización es un tenant; una cuenta pertenece a organizaciones con rol `OWNER`, `ADMIN` o `VIEWER`, y cada operación de consola comprueba el rol en esa organización.
+- Aceptación: matriz de autorización de consola probada para los tres roles y para una cuenta de otra organización (404, sin revelar existencia).
+- Ref: ADR-0033 §3.
+
+#### FR-CON-004 · MUST · F15 — Proyectos y API keys por autoservicio
+- Descripción: un `OWNER` o `ADMIN` crea, deshabilita y borra proyectos (aplicaciones) y crea, rota y revoca sus API keys; la key en claro se muestra una sola vez.
+- Aceptación: tras crear una key, ninguna respuesta posterior la contiene; una key revocada desde la consola falla en REST dentro del plazo de NFR-SEC-002.
+- Ref: ADR-0033 §3; FR-AUTH-001; FR-ADM-003.
+
+#### FR-CON-005 · MUST · F15 — Registro público con límites anti-abuso
+- Descripción: cualquier cuenta Gravital puede registrarse y crear organizaciones dentro de `GS_CONSOLE_MAX_ORGS_PER_ACCOUNT` y `GS_CONSOLE_SIGNUP_RPM_PER_IP`; la organización nace con la política por defecto y las capacidades opcionales apagadas.
+- Aceptación: superar cualquiera de los dos límites devuelve 429; una organización nueva tiene todas las claves `*_allowed` de `17` §4.1 en `false`.
+- Ref: ADR-0033 §4.
+
+#### FR-CON-006 · MUST · F15 — Cuotas gratuitas por proyecto
+- Descripción: cada aplicación respeta `quota_monthly_location_samples`, `quota_monthly_rest_requests` y `quota_concurrent_stream_connections`; al superarlas el servidor responde con el código de cuota definido en T-F15-03.
+- Aceptación: pruebas que agotan cada cuota observan el rechazo y su fin al empezar el periodo siguiente.
+- Ref: ADR-0033 §4; `17` §4.
+
+#### FR-CON-007 · SHOULD · F15 — Panel de uso
+- Descripción: la consola muestra el uso del periodo por proyecto frente a sus cuotas, sin datos de usuarios finales.
+- Aceptación: el uso mostrado coincide con los contadores del servidor en una prueba con tráfico conocido.
+- Ref: ADR-0033 §4.
+
+#### FR-CON-008 · MUST · F15 — Auditoría de la consola
+- Descripción: crear o borrar organizaciones y proyectos, cambiar roles y crear, rotar o revocar keys queda auditado con la cuenta de consola como actor.
+- Aceptación: cada operación genera su evento de auditoría con actor, tenant y objetivo, sin la key en claro.
+- Ref: `10` §8.3; ADR-0033.
 
 ### 2.3 API general (API)
 
@@ -474,6 +514,11 @@ Cada requisito tiene el formato:
 - Descripción: documentar términos, cuotas, atribución y costos de cada proveedor soportado.
 - Aceptación: sección completa en `13` revisada en el PR del adaptador.
 
+#### FR-MAP-007 · SHOULD · F15 — Mapa propio con teselas de OpenStreetMap
+- Descripción: un servicio propio sirve teselas derivadas del extracto de OpenStreetMap de la región; el portal y la app de pruebas lo usan en lugar de los servidores comunitarios, con la atribución ODbL siempre visible.
+- Aceptación: el estilo del portal no referencia `tile.openstreetmap.org`; una prueba lo verifica y comprueba que la atribución está en el estilo.
+- Ref: ADR-0034 §6; `13` §2.
+
 ### 2.13 Webhooks (WHK)
 
 #### FR-WHK-001 · MUST · F8 — Registro de endpoints
@@ -520,6 +565,38 @@ Cada requisito tiene el formato:
 - Descripción: guía con patrones, flujo de tokens del backend y verificación de webhooks, con ejemplos ejecutables.
 - Aceptación: los ejemplos se ejecutan en CI contra el servidor.
 - Ref: `15`.
+
+### 2.14.1 Portal público (PRT)
+
+#### FR-PRT-001 · MUST · F15 — Landing con contratos publicados
+- Descripción: el portal publica el OpenAPI renderizado, los `.proto` y las guías de integración, generados desde el repositorio.
+- Aceptación: la imagen del portal contiene el HTML del OpenAPI y cada `.proto`; una prueba compara los archivos publicados con los de `contracts/`.
+- Ref: ADR-0034 §2.
+
+#### FR-PRT-002 · MUST · F15 — Estado en vivo
+- Descripción: el portal muestra el `ReadinessStatus` de la API con la hora de consulta y, si no obtiene respuesta, «sin datos» en lugar de «disponible».
+- Aceptación: con la API parada o con 503 el portal no muestra «disponible»; no se muestra ningún porcentaje de disponibilidad sin medición.
+- Ref: ADR-0034 §3.
+
+#### FR-PRT-003 · MUST · F15 — Documentación sin internos de seguridad
+- Descripción: solo se publican los documentos del manifiesto permitido; `10`, `16`, `17` y `docs/decisions/` no se publican nunca.
+- Aceptación: una prueba falla si el manifiesto contiene un documento fuera de la lista permitida.
+- Ref: ADR-0034 §2; `10` T-40.
+
+#### FR-PRT-004 · SHOULD · F15 — Acceso con API key de solo lectura
+- Descripción: el portal acepta una API key de solo lectura, la guarda solo en memoria y rechaza keys con scopes de escritura.
+- Aceptación: la key no aparece en `localStorage`, `sessionStorage` ni cookies tras usarla; una key con `sessions:write` es rechazada; el proxy del portal responde 404 a cualquier ruta o método fuera de la lista de solo lectura.
+- Ref: ADR-0034 §4; ADR-0035.
+
+#### FR-PRT-005 · SHOULD · F15 — Demo con datos simulados
+- Descripción: cualquier visitante ve un mapa en vivo con repartidores simulados, marcados como simulados, sin cuenta.
+- Aceptación: la interfaz etiqueta los datos como simulados y la demo no contiene ubicaciones de personas reales.
+- Ref: ADR-0034 §5.
+
+#### FR-PRT-006 · COULD · F15 — Mapa en vivo con reglas del usuario
+- Descripción: el usuario ve en el mapa sus sesiones, quién está cerca y las reglas y límites que configuró (geocercas).
+- Aceptación: depende de F11 para evaluar geocercas en el servidor; hasta entonces se evalúan en el cliente y la interfaz lo declara.
+- Ref: ADR-0034; `14`.
 
 ### 2.15 Geocercas (GEO)
 

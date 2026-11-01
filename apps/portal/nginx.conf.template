@@ -1,0 +1,69 @@
+# Portal público de GeoStream (ADR-0034). Las variables ${...} las sustituye la imagen de nginx
+# al arrancar (NGINX_ENVSUBST_FILTER limita cuáles); las de nginx ($host, $uri…) no se tocan.
+server {
+    listen ${PORT};
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # `connect-src 'self'`: el portal solo habla con su propio origen; el estado pasa por el proxy
+    # de abajo. Se ampliará con el mapa propio y la API cuando existan (T-F15-10, T-F15-12).
+    # Flutter necesita 'wasm-unsafe-eval' y estilos en línea. Las cabeceras comunes van en
+    # security-headers.conf, incluido en cada location (add_header no se hereda si el location
+    # define otro).
+    set $app_csp "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'";
+
+    # Estado en vivo: proxy del `/health/ready` público de la API (mismo origen, sin CORS).
+    location = /status/ready {
+        proxy_pass ${PORTAL_API_UPSTREAM}/health/ready;
+        proxy_ssl_server_name on;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 3s;
+        proxy_hide_header Set-Cookie;
+        # 502/504 llegan al cliente como «sin datos», nunca como disponible.
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "no-store" always;
+        add_header Content-Security-Policy "default-src 'none'" always;
+    }
+
+    # La referencia de la API (Redoc) usa estilos en línea (styled-components) y un worker en un blob.
+    # Todo lo demás sigue siendo del propio origen: sin CDN y sin fuentes de terceros.
+    location = /docs/api.html {
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=300" always;
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'" always;
+    }
+
+    # Documentación y contratos publicados (HTML estático generado en la construcción).
+    location /docs/ {
+        try_files $uri =404;
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=300" always;
+        add_header Content-Security-Policy "default-src 'none'; style-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'" always;
+    }
+    location /contracts/ {
+        try_files $uri $uri/ =404;
+        default_type text/plain;
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=300" always;
+        add_header Content-Security-Policy "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'" always;
+    }
+
+    # La aplicación Flutter: el HTML y el cargador no se cachean; los activos con hash, sí.
+    location = /index.html {
+        include /etc/nginx/security-headers.conf;
+        add_header Content-Security-Policy $app_csp always;
+        add_header Cache-Control "no-cache" always;
+    }
+    location = /flutter_service_worker.js {
+        include /etc/nginx/security-headers.conf;
+        add_header Content-Security-Policy $app_csp always;
+        add_header Cache-Control "no-cache" always;
+    }
+    location / {
+        include /etc/nginx/security-headers.conf;
+        add_header Content-Security-Policy $app_csp always;
+        try_files $uri $uri/ /index.html;
+    }
+}
