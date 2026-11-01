@@ -105,6 +105,14 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-01 — Ingesta HTTP y prueba de humo del consumidor
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: dos defectos corregidos en `POST /v1/ingest/locations` y un script de humo para proyectos consumidores. Sin tarea nueva del roadmap: es la comprobación de que Plenty-Pay puede consumir el servicio.
+- Defectos (ambos hacían inútil la ingesta HTTP para un cliente tipado contra el OpenAPI): enums solo con nombres del Protobuf, y límites de antigüedad a 0 (todo `IGNORED_STALE`). Causa de que nadie lo viera: no había ninguna prueba HTTP de la ruta.
+- **Corrección de lo que dije antes:** afirmé que GeoStream no rechazaba `(0,0)`. Sí lo hace por defecto (`reject_null_island = true`, `17` y `location.rs`); lo verifica el script y una prueba nueva.
+- Verificación: `cargo clippy --workspace --all-targets -- -D warnings` limpio; `cargo test --workspace` sin fallos; `deploy/consumer-smoke.sh` TODO OK contra un servidor local con una key creada por el CLI.
+- Pendiente: ejecutar el script contra producción cuando exista una API key (la crea el propietario desde la consola).
+
 ### 2026-11-01 — T-F15-18 — Consola en el portal
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada la interfaz y el proxy. **No está activa en producción** hasta que el propietario ponga la clave del proveedor de correo (T-F15-19): sin ella el servidor no puede enviar el código.

@@ -211,9 +211,7 @@ impl TestServer {
             .merge(edge_router(EdgeState {
                 sessions: session_state.clone(),
             }))
-            .merge(ingest_router(IngestState {
-                sessions: session_state,
-            }));
+            .merge(ingest_router(IngestState::with_defaults(session_state)));
 
         let server_handle = tokio::spawn(async move {
             let _ = axum::serve(tokio_listener, router).await;

@@ -386,6 +386,8 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                 }))
                 .merge(gs_api::ingest_router(gs_api::IngestState {
                     sessions: session_state.clone(),
+                    max_event_age_ms: cfg.location_max_event_age_ms as i64,
+                    max_future_skew_ms: cfg.location_max_future_skew_ms as i64,
                 }))
                 .merge(gs_api::analytics_router(gs_api::AnalyticsState {
                     sessions: session_state.clone(),
