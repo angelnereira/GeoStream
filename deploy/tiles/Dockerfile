@@ -15,9 +15,12 @@ FROM ghcr.io/onthegomap/planetiler@sha256:179c83912057f57b266fb46676ae11b96deeba
 # teselas no vuelve a descargar nada.
 RUN ["java", "-Xmx3g", "-cp", "@/app/jib-classpath-file", "com.onthegomap.planetiler.Main", \
      "--only-download", "--download", "--area=panama"]
+# Sin `--nodemap-type=array`: ese índice reserva memoria para el mayor ID de nodo de OSM y Planetiler lo estima en
+# 112 GB para Panamá, así que se niega a empezar (probado: «Insufficient resources for read phase»). El valor por
+# defecto, `sparsearray`, es el que recomienda la propia herramienta. Nunca se pasa `--force`: ocultaría justo
+# esta clase de fallo y la construcción podría agotar la memoria del constructor.
 RUN ["java", "-Xmx3g", "-cp", "@/app/jib-classpath-file", "com.onthegomap.planetiler.Main", \
-     "--download", "--area=panama", "--output=/tmp/panama.mbtiles", \
-     "--nodemap-type=array", "--storage=ram"]
+     "--download", "--area=panama", "--output=/tmp/panama.mbtiles"]
 
 # --- 2. Fuentes para las etiquetas -------------------------------------------------------------
 FROM debian:bookworm-slim AS fonts
@@ -32,6 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-core
 FROM ghcr.io/maplibre/martin@sha256:59902019bf9038926ff0c71174237d6852e64c457830a6349abe7090be8818ca
 COPY --from=build /tmp/panama.mbtiles /data/panama.mbtiles
 COPY --from=fonts /fonts /fonts
+# Sin privilegios: los archivos son legibles por cualquiera y el puerto es > 1024.
+USER 65532:65532
 ENV PORT=8080
 EXPOSE 8080
 # Sirve /panama (TileJSON), /panama/{z}/{x}/{y} y /font/{fontstack}/{range} (glifos generados de /fonts).
