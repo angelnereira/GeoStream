@@ -32,9 +32,11 @@ docker run --rm -p 8080:8080 geostream-portal
 | Variable | Default | Efecto |
 |---|---|---|
 | `PORT` | `8080` | Puerto de nginx (Railway lo define) |
-| `PORTAL_API_UPSTREAM` | `https://geostream.gravitalcloud.com` | API cuyo `/health/ready` expone `/status/ready` |
+| `PORTAL_API_UPSTREAM` | `https://geostream.gravitalcloud.com` | API a la que apuntan `/status/ready` y el proxy de solo lectura `/api/…` |
+| `PORTAL_TILES_UPSTREAM` | `http://tiles.railway.internal:8080` | Servicio `tiles` (mapa propio) detrás de `/tiles/…`; el portal arranca aunque aún no exista |
 
-Rutas: `/` (aplicación), `/status/ready` (proxy del estado), `/docs/…` (guías y referencia de la API con Redoc
+Rutas: `/` (aplicación), `/status/ready` (proxy del estado), `/api/v1/sessions…` (proxy de **solo lectura**, ADR-0035),
+`/tiles/…` (mapa propio con caché), `/map/style.json`, `/vendor/maplibre-gl/…` (MapLibre alojado en el portal), `/docs/…` (guías y referencia de la API con Redoc
 alojado en el propio portal, sin CDN) y `/contracts/…` (OpenAPI y `.proto`).
 
 ## Despliegue en Railway
@@ -50,3 +52,16 @@ vigiladas `apps/portal/**`, `contracts/**` y `docs/**`, healthcheck `/`. Dominio
   desplegada devuelva el cuerpo anterior (`{"ready","dependencies"}`, corregido en T-F6-03), el portal muestra
   «Sin datos»: no interpreta lo que no cumple el contrato.
 - El logo «API docs by Redocly» del pie de la referencia viene de un CDN y la CSP lo bloquea; no afecta al contenido.
+
+## Acceso con API key y mapa en vivo
+
+La pantalla «Ver mis sesiones en el mapa» pide una API key, la guarda solo en memoria (se pierde al recargar) y la
+envía únicamente por `/api/…`. nginx solo reenvía `GET`/`HEAD` de sesiones, una sesión, sus miembros y su snapshot;
+todo lo demás responde 404 (ADR-0035). El mapa consulta el snapshot cada 5 s. Usa una key con solo `sessions:read` y
+`locations:read`: el portal no puede comprobar los permisos de la key, así que no te protege de pegar una de escritura.
+
+Dos trampas ya resueltas y que conviene recordar al tocar la imagen:
+
+- MapLibre carga un worker, y el worker hereda la CSP de **su propio script**: los archivos de `/vendor/` llevan
+  `connect-src 'self'` para poder pedir teselas. Con `default-src 'none'` el mapa queda en blanco sin errores visibles.
+- En nginx, `rewrite … break` corta las directivas posteriores: el `set` del destino va antes del `rewrite`.

@@ -63,3 +63,19 @@ Aditivo. Nada cambia para integradores.
 ## Evidencia y referencias
 
 `07` §12; ADR-0034; revisión de `crates/gs-api/src/security.rs` y de los handlers (2026-11-01).
+
+## Erratas de implementación (2026-11-01, T-F15-12)
+
+Al implementarlo aparecieron tres precisiones que no cambian la decisión:
+
+1. **La API no ofrece forma de consultar los scopes de una key** (no hay introspección en el contrato), así que el
+   portal **no puede rechazar** una key con permisos de escritura, como decía ADR-0034 §4. La garantía de solo lectura
+   la da el borde: nginx solo reenvía `GET`/`HEAD` de `/v1/sessions`, `/v1/sessions/{id}`, `/v1/sessions/{id}/members`
+   y `/v1/sessions/{id}/snapshot`; cualquier otra ruta o método devuelve 404. La interfaz pide una key de solo lectura,
+   pero no puede comprobarlo. Una introspección (`GET /v1/credentials/me`) sería un cambio de contrato para T-F15-03.
+2. **El mapa se actualiza consultando el snapshot cada 5 s**, no por el stream. En producción `gs.v1.json` está apagado
+   (`17`) y el binario exige código Dart generado de los `.proto`, que queda para una tarea posterior. Por eso la ruta
+   `POST /v1/stream/tickets` y `GET /v1/stream` no están en la lista de rutas reenviadas.
+3. **Un worker hereda la CSP de la respuesta de su propio script.** El worker de MapLibre pide las teselas, así que los
+   archivos de `/vendor/` se sirven con `connect-src 'self'`; con `default-src 'none'` el mapa queda en blanco sin
+   ningún error visible en la página.

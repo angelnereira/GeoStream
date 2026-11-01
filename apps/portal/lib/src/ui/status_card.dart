@@ -59,22 +59,22 @@ class _StatusCardState extends State<StatusCard> {
     final snapshot = _snapshot;
     final theme = Theme.of(context);
     final (icon, label, color) = switch (snapshot) {
-      null => (Icons.hourglass_empty, 'Consultando…', theme.colorScheme.outline),
+      null => (
+        Icons.hourglass_empty,
+        'Consultando…',
+        theme.colorScheme.outline,
+      ),
       ReadinessUnknown() => (
-          Icons.help_outline,
-          'Sin datos',
-          theme.colorScheme.outline
-        ),
+        Icons.help_outline,
+        'Sin datos',
+        theme.colorScheme.outline,
+      ),
       ReadinessKnown(ready: true) => (
-          Icons.check_circle,
-          'Operativo',
-          Colors.green.shade700
-        ),
-      ReadinessKnown() => (
-          Icons.error,
-          'Degradado',
-          theme.colorScheme.error
-        ),
+        Icons.check_circle,
+        'Operativo',
+        Colors.green.shade700,
+      ),
+      ReadinessKnown() => (Icons.error, 'Degradado', theme.colorScheme.error),
     };
     return Card(
       child: Padding(

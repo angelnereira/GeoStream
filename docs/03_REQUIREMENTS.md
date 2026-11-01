@@ -584,8 +584,8 @@ Cada requisito tiene el formato:
 - Ref: ADR-0034 §2; `10` T-40.
 
 #### FR-PRT-004 · SHOULD · F15 — Acceso con API key de solo lectura
-- Descripción: el portal acepta una API key de solo lectura, la guarda solo en memoria y rechaza keys con scopes de escritura.
-- Aceptación: la key no aparece en `localStorage`, `sessionStorage` ni cookies tras usarla; una key con `sessions:write` es rechazada; el proxy del portal responde 404 a cualquier ruta o método fuera de la lista de solo lectura.
+- Descripción: el portal acepta una API key, la guarda solo en memoria y solo puede leer: el proxy del portal reenvía únicamente `GET`/`HEAD` de las rutas de sesiones, miembros y snapshot. La API no permite consultar los scopes de una key, así que el portal no puede rechazar una key con permisos de escritura; lo impide el borde (ADR-0035, erratas).
+- Aceptación: la key no aparece en el almacenamiento del navegador ni en la URL; el proxy responde 404 a cualquier ruta o método fuera de la lista de solo lectura y 401 sin key; el mapa muestra las posiciones del snapshot y su antigüedad.
 - Ref: ADR-0034 §4; ADR-0035.
 
 #### FR-PRT-005 · SHOULD · F15 — Demo con datos simulados

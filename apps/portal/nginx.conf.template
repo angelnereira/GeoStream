@@ -1,7 +1,15 @@
 # Portal público de GeoStream (ADR-0034). Las variables ${...} las sustituye la imagen de nginx
 # al arrancar (NGINX_ENVSUBST_FILTER limita cuáles); las de nginx ($host, $uri…) no se tocan.
+# Límite de tasa del proxy de la API y de las teselas, por IP (ADR-0035, 10 T-39).
+limit_req_zone $binary_remote_addr zone=portal_api:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=portal_tiles:10m rate=60r/s;
+# Caché de teselas: las teselas son públicas y cambian solo al reconstruir el servicio.
+proxy_cache_path /var/cache/nginx/tiles levels=1:2 keys_zone=portal_tiles_cache:10m max_size=512m inactive=7d use_temp_path=off;
+
 server {
     listen ${PORT};
+    # Los destinos se resuelven en cada petición: el portal arranca aunque el servicio de teselas aún no exista.
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=30s ipv6=on;
     server_name _;
 
     root /usr/share/nginx/html;
@@ -25,6 +33,72 @@ server {
         include /etc/nginx/security-headers.conf;
         add_header Cache-Control "no-store" always;
         add_header Content-Security-Policy "default-src 'none'" always;
+    }
+
+    # Proxy de SOLO LECTURA de la API (ADR-0035). Únicas rutas reenviadas: sesiones, una sesión, sus
+    # miembros y su snapshot. Cualquier otra ruta o método devuelve 404 en el borde, así que el portal no
+    # puede escribir aunque la API key lo permita. Sin registro de cabeceras: `Authorization` no llega a ningún log.
+    location ~ "^/api/v1/sessions(/ses_[0-9a-f]{32}(/(members|snapshot))?)?$" {
+        if ($request_method !~ ^(GET|HEAD)$) { return 404; }
+        access_log off;
+        limit_req zone=portal_api burst=20 nodelay;
+        # `set` antes de `rewrite … break`: el `break` corta las directivas de reescritura que siguen.
+        set $api_upstream ${PORTAL_API_UPSTREAM};
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass $api_upstream;
+        proxy_ssl_server_name on;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+        proxy_hide_header Set-Cookie;
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "no-store" always;
+        add_header Content-Security-Policy "default-src 'none'" always;
+    }
+    location /api/ {
+        return 404;
+    }
+
+    # Teselas y glifos del mapa propio (servicio `tiles`, ADR-0034 §6), con caché.
+    location /tiles/ {
+        if ($request_method !~ ^(GET|HEAD)$) { return 404; }
+        access_log off;
+        limit_req zone=portal_tiles burst=200 nodelay;
+        set $tiles_upstream ${PORTAL_TILES_UPSTREAM};
+        rewrite ^/tiles/(.*)$ /$1 break;
+        proxy_pass $tiles_upstream;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+        proxy_cache portal_tiles_cache;
+        proxy_cache_valid 200 7d;
+        proxy_cache_valid 404 1m;
+        proxy_cache_use_stale error timeout updating;
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=3600" always;
+        add_header X-Tile-Cache $upstream_cache_status always;
+        add_header Content-Security-Policy "default-src 'none'" always;
+    }
+
+    # Estilo del mapa propio y MapLibre alojado en el portal (sin CDN).
+    location /map/ {
+        try_files $uri =404;
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=300" always;
+        add_header Content-Security-Policy "default-src 'none'" always;
+    }
+    # MapLibre 6 se distribuye como módulos ES: sin este tipo MIME el navegador se niega a cargarlos.
+    location ~ ^/vendor/.*\.mjs$ {
+        types { text/javascript mjs; }
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=86400" always;
+        # Un worker hereda la CSP de la respuesta de SU script, no la de la página: el worker de MapLibre
+        # (maplibre-gl-worker.mjs) pide las teselas, así que necesita `connect-src 'self'`.
+        add_header Content-Security-Policy "default-src 'none'; connect-src 'self'" always;
+    }
+    location /vendor/ {
+        try_files $uri =404;
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "public, max-age=86400" always;
+        add_header Content-Security-Policy "default-src 'none'; connect-src 'self'" always;
     }
 
     # La referencia de la API (Redoc) usa estilos en línea (styled-components) y un worker en un blob.
