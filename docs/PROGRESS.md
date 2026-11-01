@@ -96,6 +96,16 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 
 Formato de cada entrada (más reciente arriba):
 
+### 2026-11-01 — T-F15-10 — Mapa propio con teselas de OpenStreetMap
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: servicio y estilo completos y verificados con la ejecución real de Planetiler y Martin; **la imagen Docker de `deploy/tiles` está pendiente de verificar de principio a fin** (ver abajo). Sin desplegar.
+- Requisitos: FR-MAP-007 `en curso` (falta que el portal use el estilo, T-F15-12, y desplegar el servicio).
+- Qué: `deploy/tiles/Dockerfile` (Planetiler y Martin fijados por digest, Noto Sans), `deploy/tiles/style.json`, `geostream-tools tiles-style` con 5 pruebas, sección «Mapa propio» en `deploy/README.md`.
+- **Medido** (esta máquina, 12 CPU y 30 GB; no es Railway): construcción completa 23 min 11 s con ~9 min de descarga; `panama.mbtiles` de 58 MB; montón de la JVM hasta 1,3 GB de 1,9 GB en la lectura de OSM; tesela máxima 320 kB (199 kB comprimida). La descarga varió mucho entre ejecuciones (los polígonos de agua de 932 MB llegaron a ~200 kB/s desde un servidor de terceros, más de 25 min solo en descargar), así que el tiempo de construcción en Railway es un riesgo no medido.
+- Defectos encontrados al probar: (1) el TileJSON de Martin anuncia la URL absoluta de Martin; tras un proxy el navegador la saltaría, por eso el estilo declara `tiles` explícito y relativo. (2) Los workers de MapLibre no resuelven URLs relativas («Failed to parse URL»): el cliente debe hacer absolutas las rutas del estilo con su origen; documentado en `deploy/README.md` y a recordar en T-F15-12. (3) La descarga de datos tardaba una hora en una capa junto a la generación; ahora es una capa propia (`--only-download`) y cacheable.
+- Verificación: Chrome headless cargó el estilo con teselas y glifos propios en z13 y z16: 0 errores de mapa y 2 523 y 245 elementos renderizados; Panamá, avenidas, ríos, edificios y atribución visibles. `cargo test -p geostream-tools` 17 pruebas y clippy OK; `geostream-tools all` OK.
+- Pendiente: resultado del `docker build` completo de `deploy/tiles` con la capa de descarga separada (se registra al terminar); cobertura fuera de Panamá; sprites e iconos de puntos de interés; el portal debe servirlo en `/tiles/` con caché (T-F15-12).
+
 ### 2026-11-01 — T-F15-11 — CORS por aplicación: bloqueado por decisión; el portal no lo necesita
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: tarea **no implementada** a propósito; alternativa documentada en ADR-0035.

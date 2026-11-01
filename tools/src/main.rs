@@ -39,6 +39,8 @@ enum Commands {
     Enums,
     /// Verify the documents the public portal publishes (ADR-0034 §2)
     PortalDocs,
+    /// Verify the own-map style: own tiles, own fonts and ODbL attribution (FR-MAP-007)
+    TilesStyle,
     /// Verify relative markdown links across the repository
     MarkdownLinks,
     /// Verify CHANGELOG.md format and optional PR update
@@ -131,6 +133,11 @@ fn run_all(root: &Path) -> bool {
     }) {
         all_ok = false;
     }
+    if !run_check("Own Map Style (FR-MAP-007)", || {
+        tiles_style::check_tiles_style(root)
+    }) {
+        all_ok = false;
+    }
     if !run_check("Markdown Relative Links", || {
         markdown_links::check_markdown_links(root)
     }) {
@@ -186,6 +193,9 @@ fn main() -> ExitCode {
         }),
         Commands::PortalDocs => run_check("Portal Published Docs (ADR-0034 §2)", || {
             portal_docs::check_portal_docs(&root)
+        }),
+        Commands::TilesStyle => run_check("Own Map Style (FR-MAP-007)", || {
+            tiles_style::check_tiles_style(&root)
         }),
         Commands::MarkdownLinks => run_check("Markdown Relative Links", || {
             markdown_links::check_markdown_links(&root)
