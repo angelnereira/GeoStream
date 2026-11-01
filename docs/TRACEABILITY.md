@@ -34,7 +34,7 @@ Reglas:
 | FR-PRT-001 | MUST | F15 | Landing con contratos publicados | `tools/src/portal_docs.rs`, `apps/portal/test/landing_page_test.dart` | en curso |
 | FR-PRT-002 | MUST | F15 | Estado en vivo | `apps/portal/test/status_client_test.dart`, `apps/portal/test/landing_page_test.dart` | cumplido |
 | FR-PRT-003 | MUST | F15 | Documentación sin internos de seguridad | `tools/src/portal_docs.rs` | cumplido |
-| FR-PRT-004 | SHOULD | F15 | Acceso con API key de solo lectura | — | pendiente |
+| FR-PRT-004 | SHOULD | F15 | Acceso con API key de solo lectura | `apps/portal/test/api_client_test.dart`, `apps/portal/test/console_page_test.dart` | en curso |
 | FR-PRT-005 | SHOULD | F15 | Demo con datos simulados | — | pendiente |
 | FR-PRT-006 | COULD | F15 | Mapa en vivo con reglas del usuario | — | pendiente |
 | FR-MAP-007 | SHOULD | F15 | Mapa propio con teselas de OpenStreetMap | `tools/src/tiles_style.rs` | en curso |

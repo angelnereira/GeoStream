@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../platform/link_opener.dart';
+import 'console_page.dart';
 import '../status/status_client.dart';
 import 'status_card.dart';
 
@@ -84,10 +85,13 @@ const List<({String name, bool today, String note})> _capabilities = [
 /// Página única: presentación, estado, documentación y cómo empezar.
 class LandingPage extends StatelessWidget {
   /// Crea la página.
-  const LandingPage({super.key, required this.status});
+  const LandingPage({super.key, required this.status, this.createClient});
 
   /// Origen del estado en vivo.
   final StatusClient status;
+
+  /// Crea el cliente de la API para el acceso con API key; sin él no se ofrece el acceso.
+  final ApiClientFactory? createClient;
 
   @override
   Widget build(BuildContext context) {
@@ -105,6 +109,19 @@ class LandingPage extends StatelessWidget {
                     const _Header(),
                     const SizedBox(height: 32),
                     const _Hero(),
+                    if (createClient != null) ...[
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                ConsolePage(createClient: createClient!),
+                          ),
+                        ),
+                        icon: const Icon(Icons.map_outlined),
+                        label: const Text('Ver mis sesiones en el mapa'),
+                      ),
+                    ],
                     const SizedBox(height: 32),
                     _Section(
                       title: 'Estado del servicio',
@@ -193,7 +210,10 @@ class _Section extends StatelessWidget {
         children: [
           Semantics(
             header: true,
-            child: Text(title, style: Theme.of(context).textTheme.headlineSmall),
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
           ),
           const SizedBox(height: 12),
           child,
@@ -215,7 +235,9 @@ class _CapabilityList extends StatelessWidget {
             ListTile(
               leading: Icon(
                 capability.today ? Icons.check_circle : Icons.schedule,
-                semanticLabel: capability.today ? 'Disponible hoy' : 'En camino',
+                semanticLabel: capability.today
+                    ? 'Disponible hoy'
+                    : 'En camino',
               ),
               title: Text(capability.name),
               subtitle: Text(capability.note),
@@ -270,9 +292,21 @@ class _Steps extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const steps = [
-      ('1', 'Pide acceso', 'Hoy el alta de cada proyecto la hace el operador y te entrega una API key. El registro por autoservicio llega con la consola.'),
-      ('2', 'Obtén tokens', 'Tu backend usa la API key para emitir un token a cada dispositivo de tus usuarios. Nunca pongas la API key en una app.'),
-      ('3', 'Conecta', 'Abre el stream con el token y publica o recibe ubicaciones. La guía de integración tiene ejemplos paso a paso.'),
+      (
+        '1',
+        'Pide acceso',
+        'Hoy el alta de cada proyecto la hace el operador y te entrega una API key. El registro por autoservicio llega con la consola.',
+      ),
+      (
+        '2',
+        'Obtén tokens',
+        'Tu backend usa la API key para emitir un token a cada dispositivo de tus usuarios. Nunca pongas la API key en una app.',
+      ),
+      (
+        '3',
+        'Conecta',
+        'Abre el stream con el token y publica o recibe ubicaciones. La guía de integración tiene ejemplos paso a paso.',
+      ),
     ];
     return Column(
       children: [

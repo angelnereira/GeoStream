@@ -13,6 +13,9 @@ apps/flutter_app/
 apps/portal/build/
 apps/portal/.dart_tool/
 deploy/
+!deploy/tiles/
+deploy/tiles/*
+!deploy/tiles/style.json
 migrations/
 tools/
 sdks/

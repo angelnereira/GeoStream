@@ -14,12 +14,12 @@ enum CheckState {
 
   /// Interpreta el valor del contrato; `null` si no es uno de los cuatro.
   static CheckState? parse(Object? value) => switch (value) {
-        'ok' => CheckState.ok,
-        'failing' => CheckState.failing,
-        'draining' => CheckState.draining,
-        'not_configured' => CheckState.notConfigured,
-        _ => null,
-      };
+    'ok' => CheckState.ok,
+    'failing' => CheckState.failing,
+    'draining' => CheckState.draining,
+    'not_configured' => CheckState.notConfigured,
+    _ => null,
+  };
 }
 
 /// Resultado de consultar el estado de la API.
