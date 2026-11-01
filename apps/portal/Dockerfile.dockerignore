@@ -1,0 +1,24 @@
+# Contexto del portal (BuildKit usa este archivo en lugar del .dockerignore de la raíz, que
+# excluye docs/ y *.md porque la imagen del servidor no los necesita; el portal sí).
+.git/
+target/
+**/target/
+node_modules/
+**/node_modules/
+crates/
+apps/geostream/
+apps/gs-devclient/
+apps/gs-loadgen/
+apps/flutter_app/
+apps/portal/build/
+apps/portal/.dart_tool/
+deploy/
+migrations/
+tools/
+sdks/
+docs/decisions/
+docs/adr/
+docs/proposals/
+docs/PROGRESS.md
+docs/TRACEABILITY.md
+GeoStream_Repo_*.zip

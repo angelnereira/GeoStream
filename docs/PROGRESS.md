@@ -96,6 +96,16 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 
 Formato de cada entrada (más reciente arriba):
 
+### 2026-11-01 — T-F15-09 — Portal público: landing, documentación publicada y estado
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada en local (imagen construida y probada); **sin desplegar**: necesita la rama en `main`, un servicio nuevo en Railway y un registro DNS que crea el propietario. Cierre formal pendiente de CI (facturación de GitHub).
+- Origen: DR-20261101-01 y ADR-0034. El propietario pidió un portal con landing, contratos publicados, disponibilidad, acceso y mapas en tiempo real; esta parte es lo que no depende de nada externo. El acceso con API key exige CORS (T-F15-11) y el mapa propio (T-F15-10); el inicio de sesión con Gravital sigue bloqueado por OIDC (T-F15-02).
+- Qué: `apps/portal` (Flutter Web, solo `http` de la lista aprobada), `tool/build_docs.mjs`, `nginx.conf.template`, `Dockerfile` y `Dockerfile.dockerignore` propio; `geostream-tools portal-docs`; etapa 6 de CI.
+- Defectos encontrados al probar: (1) nginx descartaba las cabeceras de seguridad de `/` porque un `location` con su propio `add_header` reemplaza las del nivel `server`; ahora cada `location` incluye `security-headers.conf`. (2) La referencia de la API que genera Redocly carga su script y fuentes desde CDN de terceros y usa estilos en línea, incompatible con una CSP de `script-src 'self'`; se aloja Redoc 2.5.1 en el propio portal. (3) El `.dockerignore` de la raíz excluye `docs/` y `*.md`; el portal usa `apps/portal/Dockerfile.dockerignore`.
+- Verificación: `flutter analyze` sin avisos; `flutter test` 10/10; `cargo test -p geostream-tools` 17/17 (5 nuevas); `cargo clippy --workspace --all-targets --all-features -- -D warnings` y `cargo fmt --check` OK; `docker build` desde cero OK; contenedor en marcha: `/`, `/docs/api.html`, guías, `.proto` y OpenAPI responden 200 y `10`/`16` 404; Chrome headless carga landing, guía y referencia de la API sin violaciones de CSP (el único bloqueo es un logo decorativo de Redoc en su CDN). Imagen de ~42 MB de contenido estático.
+- Pendiente de decisión del propietario: dominio (`console.geostream.gravitalcloud.com`, registro CNAME que da Railway), y crear el servicio en Railway tras fusionar.
+- Nota: contra la API en producción el estado muestra «Sin datos» porque aún devuelve el cuerpo anterior de `/health/ready`; se resuelve al desplegar T-F6-03.
+
 ### 2026-10-31 — T-F15-01 — Adopción de la consola de desarrolladores (sin código)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada.

@@ -1,0 +1,21 @@
+name: geostream_portal
+description: "Portal público de GeoStream: landing, documentación publicada y estado."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+# Solo paquetes de la lista aprobada (docs/19 §6.3): `http`.
+dependencies:
+  flutter:
+    sdk: flutter
+  http: 1.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

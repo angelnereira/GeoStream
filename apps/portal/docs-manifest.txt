@@ -1,0 +1,16 @@
+# Qué publica el portal (ADR-0034 §2, FR-PRT-001, FR-PRT-003).
+# Formato: <tipo> <ruta relativa a la raíz del repositorio>
+# Tipos: openapi, proto, doc.
+# `geostream-tools portal-docs` falla si aparece un documento fuera de la lista permitida
+# (nunca se publican 10, 16, 17 ni docs/decisions/) o si falta algún contrato.
+openapi contracts/openapi/geostream.v1.yaml
+proto contracts/proto/geostream/v1/common.proto
+proto contracts/proto/geostream/v1/location.proto
+proto contracts/proto/geostream/v1/session.proto
+proto contracts/proto/geostream/v1/stream.proto
+doc docs/07_REST_API.md
+doc docs/08_STREAM_PROTOCOL.md
+doc docs/09_VALIDATION_ERRORS.md
+doc docs/12_FLUTTER_SDK.md
+doc docs/13_MAPS_PROVIDERS.md
+doc docs/15_INTEGRATION_GUIDE.md
