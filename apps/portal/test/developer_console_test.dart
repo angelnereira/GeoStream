@@ -23,7 +23,11 @@ class _Call {
 }
 
 /// Servidor simulado del contrato: devuelve lo que el contrato dice para cada ruta.
-ConsoleApi _api(List<_Call> calls, {int verifyStatus = 200}) {
+ConsoleApi _api(
+  List<_Call> calls, {
+  int verifyStatus = 200,
+  bool disabled = false,
+}) {
   return ConsoleApi(
     base: Uri.parse('https://portal.example/api/'),
     client: MockClient((request) async {
@@ -35,6 +39,7 @@ ConsoleApi _api(List<_Call> calls, {int verifyStatus = 200}) {
           request.body,
         ),
       );
+      if (disabled) return http.Response('', 404);
       final route = '${request.method} ${request.url.path}';
       http.Response json(int status, String body) => http.Response(
         body,
@@ -169,6 +174,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('aceptar las condiciones'), findsWidgets);
   });
+
+  testWidgets(
+    'si la consola no está activada lo dice en vez de un error genérico',
+    (tester) async {
+      await _pump(tester, _api([], disabled: true));
+      await tester.enterText(find.byType(TextField), 'dev@example.test');
+      await tester.tap(find.text('Enviarme un código'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('todavía no está activo'), findsOneWidget);
+      expect(find.text('Código'), findsNothing);
+    },
+  );
 
   test('el cliente nunca manda la sesión sin haberla abierto', () async {
     final api = _api([]);

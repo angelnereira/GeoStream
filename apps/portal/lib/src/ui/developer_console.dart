@@ -101,6 +101,14 @@ class DocLink extends StatelessWidget {
 }
 
 String _messageFor(ConsoleApiException error) {
+  // Un 404 sin cuerpo del contrato no viene de la API de la consola: la consola no está
+  // activada en este entorno (sin clave de correo) y el borde no encuentra la ruta.
+  if (error.status == 404 && error.code.isEmpty) {
+    return 'El registro todavía no está activo en este entorno. Inténtalo más tarde.';
+  }
+  if (error.status == 0) {
+    return 'No pudimos conectar con el servicio. Revisa tu conexión e inténtalo de nuevo.';
+  }
   switch (error.code) {
     case 'UNAUTHENTICATED':
       return 'El código no es válido o ya caducó. Pide uno nuevo.';
