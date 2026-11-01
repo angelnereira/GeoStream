@@ -69,7 +69,7 @@ void main() {
     expect(find.text('Referencia de la API REST'), findsOneWidget);
     expect(find.text('Contratos Protobuf'), findsOneWidget);
     // Lo que no está implementado se declara «En camino», no «Hoy».
-    expect(find.text('En camino'), findsNWidgets(3));
-    expect(find.text('Hoy'), findsNWidgets(5));
+    expect(find.text('En camino'), findsNWidgets(2));
+    expect(find.text('Hoy'), findsNWidgets(6));
   });
 }
