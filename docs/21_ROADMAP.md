@@ -298,10 +298,10 @@ integradores existentes, y convive con F5–F12 porque toca crates y rutas propi
 | ID | Tarea y entregable | Requisitos | Leer | Depende |
 |---|---|---|---|---|
 | T-F15-01 | Adopción documental sin código: ADR-0033, DR-20261031-05, `03`, `10` (T-32 a T-37), `17` (§2.12, cuotas de §4), esta sección, `TRACEABILITY` | FR-ADM-004 | ADR-0033, 06, 10 | — |
-| T-F15-02 | **Externa (repositorio Plenty-Pay):** `identity` de Gravital como proveedor OIDC: descubrimiento, JWKS con EdDSA o ES256, `authorize` con PKCE `S256`, `token`, cliente público `geostream-console` y dominio público | FR-CON-001 | ADR-0033 §2 | T-F15-01 |
-| T-F15-03 | Contrato, único PR sobre `contracts/`: OpenAPI `/v1/console/*`, prefijo `acc_`, código de cuota en el catálogo, scopes de consola; enmiendas de `06`, `07`, `09` y `11` | FR-CON-002, FR-CON-003 | 06, 07, 09, 11, contracts/README | T-F15-01 |
+| T-F15-02 | **Externa y posterior (repositorio Plenty-Pay):** `identity` de Gravital como proveedor OIDC (hoy es gRPC interno con mTLS y secreto simétrico, DR-20261101-02). Ya no bloquea la consola: habilita «Entrar con Gravital» | FR-CON-001 | ADR-0036 §6 | T-F15-01 |
+| T-F15-03 | Contrato, único PR sobre `contracts/`: OpenAPI `/v1/console/*` (códigos, sesión, organizaciones, proyectos, keys), prefijo `acc_`, código de cuota en el catálogo, scopes de consola; enmiendas de `06`, `07`, `09` y `11` | FR-CON-002, FR-CON-003 | 06, 07, 09, 11, contracts/README | T-F15-01 |
 | T-F15-04 | Migración de `console_accounts`, `tenant_memberships` y contadores de uso; repositorios en `gs-store` | FR-CON-002, FR-CON-003 | 11 | T-F15-03 |
-| T-F15-05 | Verificador OIDC con caché de JWKS en `gs-auth`; rol `console` con las rutas de organizaciones, proyectos y keys; vinculación por CLI de organizaciones existentes | FR-CON-001..005, FR-CON-008 | ADR-0033, 06 §4.3 | T-F15-02, T-F15-04 |
+| T-F15-05 | Rol `console` en el servidor: rutas de organizaciones, proyectos y keys sobre `gs-service::admin`, autenticación por sesión de consola (T-F15-17); vinculación por CLI de las organizaciones existentes | FR-CON-003, FR-CON-004, FR-CON-005, FR-CON-008, FR-CON-012 | ADR-0033, ADR-0036 §5 | T-F15-17 |
 | T-F15-06 | Cuotas y medición de uso por aplicación; panel de uso | FR-CON-006, FR-CON-007 | ADR-0033 §4, 17 §4 | T-F15-05 |
 | T-F15-07 | Portal `apps/console` en Flutter Web; servicio de Railway en `console.geostream.gravitalcloud.com` con CSP estricta | FR-CON-001, FR-CON-004, FR-CON-007 | ADR-0033 §1 | T-F15-05 |
 | T-F15-08 | Pruebas de seguridad de T-32 a T-37 y revisión antes de abrir el registro al público | FR-CON-005, NFR-SEC-004 | 10 §4, §12 | T-F15-06, T-F15-07 |
@@ -309,8 +309,18 @@ integradores existentes, y convive con F5–F12 porque toca crates y rutas propi
 | T-F15-10 | Servicio `tiles`: teselas vectoriales propias desde el extracto de OSM de Panamá, con estilo abierto y atribución; **medir** tamaño, memoria y tiempo de construcción | FR-MAP-007 | ADR-0034 §6, 13 §2 | T-F15-09 |
 | T-F15-11 | CORS por aplicación (T-F8-04 adelantada) para clientes web de terceros: **requiere antes una decisión de seguridad** (el preflight no lleva credenciales; ADR-0035). Ya no bloquea el portal | FR-INT-003 | 07 §12, ADR-0035 | T-F15-09 |
 | T-F15-12 | Proxy `/api/…` del mismo origen con las rutas de solo lectura (ADR-0035), acceso con API key en memoria, lista de sesiones y mapa en vivo con las teselas propias | FR-PRT-004 | ADR-0034 §4, ADR-0035 | T-F15-10 |
-| T-F15-13 | Demo con repartidores simulados y límites propios | FR-PRT-005 | ADR-0034 §5, 10 T-39 | T-F15-12 |
+| T-F15-13 | ~~Demo con repartidores simulados~~ **Retirada** por el propietario: el mapa solo muestra posiciones reales | FR-PRT-005 | DR-20261101-02 | — |
 | T-F15-14 | Reglas y límites en el mapa: geocercas evaluadas en el cliente y, con F11, en el servidor | FR-PRT-006, FR-GEO-001 | 14 | T-F15-12; F11 |
+| T-F15-15 | Adopción documental de las cuentas propias (DR-20261101-02, ADR-0036): requisitos, amenazas y claves de configuración. Sin código | FR-CON-001, FR-CON-009..FR-CON-012 | ADR-0036 | T-F15-01 |
+| T-F15-16 | Migración `0006_console_accounts.sql` (cuentas, códigos, sesiones, identidades reservadas, membresías) y repositorios en `gs-store`; comando de administración que vincula una organización a una cuenta | FR-CON-002, FR-CON-003 | 11, ADR-0036 §1 | T-F15-03 |
+| T-F15-17 | `gs-console`: código de un solo uso, sesiones y puerto de correo (`resend` y `file`), con límites, enfriamiento y tope diario; suite de privacidad sin correo ni código en logs | FR-CON-001, FR-CON-009, FR-CON-010, FR-CON-011 | ADR-0036 §2–§4, 10 T-41..T-43 | T-F15-16 |
+| T-F15-18 | Portal: registro e inicio de sesión, organizaciones, proyectos y gestión de API keys con documentación enlazada en cada paso | FR-CON-001, FR-CON-012, FR-PRT-004 | ADR-0036 §5 | T-F15-05 |
+| T-F15-19 | Acceso desde `gravitalcloud.com`: dominio `console.geostream.gravitalcloud.com` con certificado, variables del correo y la clave HMAC en Railway | FR-CON-001 | 16 | T-F15-18 |
+| T-F15-20 | «Entrar con Gravital»: verificador OIDC con caché de JWKS y `console_identities` | FR-CON-001 | ADR-0036 §6, ADR-0033 §2 | T-F15-02, T-F15-17 |
+
+**Orden acordado (DR-20261101-02):** cuentas y consola (T-F15-15 a T-F15-19, con T-F15-03 y T-F15-05) → webhooks (F8,
+`T-F8-01`, estimación de este documento 3–4 semanas) → geocercas en el servidor (F11, 2–3 semanas). Los webhooks y las
+geocercas se entregan como PR propios; las geocercas usan los webhooks para avisar.
 
 **Criterios de salida (consola, T-F15-01 a T-F15-08):** un desarrollador sin acceso al servidor entra con su cuenta de Gravital, crea una
 organización y un proyecto, obtiene una API key y publica una ubicación con ella; las pruebas negativas de FR-CON-001

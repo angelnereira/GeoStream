@@ -105,6 +105,16 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-01 — T-F15-15 — Adopción documental de las cuentas propias de la consola
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada (sin código).
+- Origen: el propietario no puede crear ni configurar una API key de GeoStream sin entrar al contenedor de producción y no encuentra la documentación; pide consola con registro e inicio de sesión, mapa solo con datos reales, geocercas y webhooks, accesibles desde `gravitalcloud.com`.
+- Hallazgo (repositorio `Plenty-Pay`, lectura): `identity` es un servicio gRPC interno (puerto 50060) con mTLS/SPIFFE y tokens firmados con secreto simétrico, no un proveedor web de OIDC. Hacerlo proveedor es trabajo de semanas sobre una plataforma de pagos. Por eso el login de ADR-0033 §2 se sustituye (ADR-0036) por cuentas propias con correo y código, y «Entrar con Gravital» pasa a T-F15-20.
+- Decisiones del propietario: cuentas propias primero, después Gravital; orden consola → webhooks → geocercas; la demo simulada se retira.
+- Qué: DR-20261101-02, ADR-0036, `03` (FR-CON-001 reescrito, FR-CON-009 a FR-CON-012 nuevos, FR-PRT-005 retirado), `10` (T-41 a T-43), `17` (claves del correo y del código), `21` (T-F15-15 a T-F15-20 y el orden).
+- Verificación: `geostream-tools all` (resultado en el PR).
+- Siguiente: T-F15-03 (contrato, único PR sobre `contracts/`), T-F15-16 (migración), T-F15-17 (`gs-console`).
+
 ### 2026-11-01 — T-F15-10 (corrección) — La imagen de `deploy/tiles` ahora se construye y arranca
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: la verificación que quedó pendiente en la entrada anterior se hizo y **encontró un error**: el segundo paso del Dockerfile fallaba con «Insufficient resources for read phase» porque `--nodemap-type=array` pide 112 GB de montón para Panamá. La ejecución directa de Planetiler que se había dado por buena llevaba `--force`, que se salta esa comprobación y ocultó el problema.

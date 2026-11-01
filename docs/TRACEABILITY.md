@@ -23,7 +23,7 @@ Reglas:
 | FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | cumplido |
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs`, `crates/gs-service/tests/tokens_test.rs`, `crates/gs-api/tests/account_disabled_test.rs` | cumplido |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | en curso |
-| FR-CON-001 | MUST | F15 | Inicio de sesión de consola con Gravital (OIDC) | — | pendiente |
+| FR-CON-001 | MUST | F15 | Registro e inicio de sesión con correo y código | — | pendiente |
 | FR-CON-002 | MUST | F15 | Cuenta de consola separada de los usuarios finales | — | pendiente |
 | FR-CON-003 | MUST | F15 | Organizaciones y roles | — | pendiente |
 | FR-CON-004 | MUST | F15 | Proyectos y API keys por autoservicio | — | pendiente |
@@ -31,11 +31,15 @@ Reglas:
 | FR-CON-006 | MUST | F15 | Cuotas gratuitas por proyecto | — | pendiente |
 | FR-CON-007 | SHOULD | F15 | Panel de uso | — | pendiente |
 | FR-CON-008 | MUST | F15 | Auditoría de la consola | — | pendiente |
+| FR-CON-009 | MUST | F15 | Sin enumeración de cuentas ni abuso del correo | — | pendiente |
+| FR-CON-010 | MUST | F15 | Sesiones de consola revocables | — | pendiente |
+| FR-CON-011 | MUST | F15 | Correo y código fuera de los registros | — | pendiente |
+| FR-CON-012 | MUST | F15 | Gestión de API keys desde la consola | — | pendiente |
 | FR-PRT-001 | MUST | F15 | Landing con contratos publicados | `tools/src/portal_docs.rs`, `apps/portal/test/landing_page_test.dart` | en curso |
 | FR-PRT-002 | MUST | F15 | Estado en vivo | `apps/portal/test/status_client_test.dart`, `apps/portal/test/landing_page_test.dart` | cumplido |
 | FR-PRT-003 | MUST | F15 | Documentación sin internos de seguridad | `tools/src/portal_docs.rs` | cumplido |
 | FR-PRT-004 | SHOULD | F15 | Acceso con API key de solo lectura | `apps/portal/test/api_client_test.dart`, `apps/portal/test/console_page_test.dart` | en curso |
-| FR-PRT-005 | SHOULD | F15 | Demo con datos simulados | — | pendiente |
+| FR-PRT-005 | SHOULD | F15 | Demo con datos simulados | — | RETIRADO |
 | FR-PRT-006 | COULD | F15 | Mapa en vivo con reglas del usuario | — | pendiente |
 | FR-MAP-007 | SHOULD | F15 | Mapa propio con teselas de OpenStreetMap | `tools/src/tiles_style.rs` | en curso |
 | FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs`, `crates/gs-api/tests/skeleton_test.rs`, `crates/gs-api/tests/conformance_test.rs` | cumplido |

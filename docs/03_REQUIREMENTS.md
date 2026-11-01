@@ -90,10 +90,10 @@ Cada requisito tiene el formato:
 - Descripción: endpoints de administración para una consola SaaS.
 - Aceptación: requiere ADR y modelo de amenazas propio. **Activado el 2026-10-31** por DR-20261031-05: ADR-0033 y las amenazas T-32 a T-37 de `10`; el detalle verificable está en FR-CON-001 a FR-CON-008.
 
-#### FR-CON-001 · MUST · F15 — Inicio de sesión de consola con Gravital (OIDC)
-- Descripción: la consola inicia sesión con la cuenta de Gravital mediante OIDC *Authorization Code* con PKCE; la API de consola acepta solo access tokens de `GS_CONSOLE_OIDC_ISSUER` firmados con clave asimétrica.
-- Aceptación: pruebas negativas rechazan con 401 un token con `alg` `none` o HS*, `iss` o `aud` distintos, caducado, firmado con una clave fuera del JWKS o con `kid` desconocido tras recargar el JWKS.
-- Ref: ADR-0033 §2; `17` §2.12.
+#### FR-CON-001 · MUST · F15 — Registro e inicio de sesión con correo y código
+- Descripción: una persona se registra e inicia sesión con su correo y un código de un solo uso (ADR-0036); la sesión es un token opaco con caducidad. «Entrar con Gravital» (OIDC, T-F15-20) es un segundo método posterior.
+- Aceptación: un código correcto crea la sesión; uno incorrecto, caducado, ya usado o tras agotar los intentos la rechaza con 401; el código nunca se guarda en claro; la respuesta de pedir un código es idéntica exista o no la cuenta.
+- Ref: ADR-0036 §2–§3; `17` §2.12.
 
 #### FR-CON-002 · MUST · F15 — Cuenta de consola separada de los usuarios finales
 - Descripción: la identidad de consola es el par `(iss, sub)` del token; una cuenta de consola nunca es un subject ni un dispositivo y no puede publicar, suscribirse ni leer ubicaciones.
@@ -124,6 +124,26 @@ Cada requisito tiene el formato:
 - Descripción: la consola muestra el uso del periodo por proyecto frente a sus cuotas, sin datos de usuarios finales.
 - Aceptación: el uso mostrado coincide con los contadores del servidor en una prueba con tráfico conocido.
 - Ref: ADR-0033 §4.
+
+#### FR-CON-009 · MUST · F15 — Sin enumeración de cuentas ni abuso del correo
+- Descripción: pedir un código responde 202 con el mismo cuerpo exista o no la cuenta; hay un enfriamiento por correo, un límite por IP y un tope diario global de correos enviados.
+- Aceptación: pruebas que comparan las respuestas para un correo existente y uno inexistente (idénticas en cuerpo y forma); superar el límite por IP devuelve 429; al llegar al tope diario no se envían más correos y se responde igual.
+- Ref: ADR-0036 §2; `10` T-42, T-43.
+
+#### FR-CON-010 · MUST · F15 — Sesiones de consola revocables
+- Descripción: el token de sesión se guarda solo como SHA-256, caduca a `GS_CONSOLE_SESSION_TTL_S` y se revoca al cerrar sesión; una cuenta deshabilitada pierde sus sesiones.
+- Aceptación: tras cerrar sesión el token devuelve 401; deshabilitar la cuenta invalida el token en el plazo de NFR-SEC-002; la base de datos no contiene tokens en claro.
+- Ref: ADR-0036 §3.
+
+#### FR-CON-011 · MUST · F15 — Correo y código fuera de los registros
+- Descripción: ni el correo ni el código aparecen en logs, métricas, trazas ni errores; en los logs el correo solo figura como hash truncado.
+- Aceptación: la suite de privacidad captura todos los registros durante el registro y el inicio de sesión y no encuentra el correo ni el código.
+- Ref: ADR-0036 §4; `10` §8.2.
+
+#### FR-CON-012 · MUST · F15 — Gestión de API keys desde la consola
+- Descripción: un `OWNER` o `ADMIN` crea proyectos y crea, lista (sin secretos), rota y revoca API keys; la key en claro se muestra una sola vez; usa el mismo servicio que la CLI.
+- Aceptación: una key creada en la consola autentica contra `/v1/tokens`; tras revocarla deja de autenticar en el plazo de NFR-SEC-002; la consola nunca vuelve a mostrarla.
+- Ref: ADR-0036 §5; FR-CON-004.
 
 #### FR-CON-008 · MUST · F15 — Auditoría de la consola
 - Descripción: crear o borrar organizaciones y proyectos, cambiar roles y crear, rotar o revocar keys queda auditado con la cuenta de consola como actor.
@@ -588,10 +608,8 @@ Cada requisito tiene el formato:
 - Aceptación: la key no aparece en el almacenamiento del navegador ni en la URL; el proxy responde 404 a cualquier ruta o método fuera de la lista de solo lectura y 401 sin key; el mapa muestra las posiciones del snapshot y su antigüedad.
 - Ref: ADR-0034 §4; ADR-0035.
 
-#### FR-PRT-005 · SHOULD · F15 — Demo con datos simulados
-- Descripción: cualquier visitante ve un mapa en vivo con repartidores simulados, marcados como simulados, sin cuenta.
-- Aceptación: la interfaz etiqueta los datos como simulados y la demo no contiene ubicaciones de personas reales.
-- Ref: ADR-0034 §5.
+#### FR-PRT-005 · RETIRADO · F15 — Demo con datos simulados
+- Descripción: retirado por el propietario el 2026-11-01 (DR-20261101-02): el mapa del portal muestra solo posiciones reales, sin simulaciones ni demostraciones.
 
 #### FR-PRT-006 · COULD · F15 — Mapa en vivo con reglas del usuario
 - Descripción: el usuario ve en el mapa sus sesiones, quién está cerca y las reglas y límites que configuró (geocercas).

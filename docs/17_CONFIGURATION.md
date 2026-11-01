@@ -203,7 +203,7 @@ local; la calidad de trayectoria y el map-matching usan la geodésica.
 
 ### 2.12 Consola de desarrolladores (F15, ADR-0033)
 
-Solo se leen cuando el proceso tiene el rol `console`. Sin `GS_CONSOLE_OIDC_ISSUER` el rol no arranca.
+Solo se leen cuando el proceso tiene el rol `console`. El rol exige `GS_CONSOLE_PUBLIC_URL`, `GS_CONSOLE_OTP_HMAC_KEY` y el proveedor de correo; las variables `GS_CONSOLE_OIDC_*` solo se usan con el método «Entrar con Gravital» (T-F15-20, ADR-0036 §6).
 
 | Variable | Tipo | Default | Rango | Efecto |
 |---|---|---|---|---|
@@ -213,6 +213,17 @@ Solo se leen cuando el proceso tiene el rol `console`. Sin `GS_CONSOLE_OIDC_ISSU
 | `GS_CONSOLE_OIDC_JWKS_CACHE_TTL_S` | dur_s | 600 | 60..=86400 | Vida del JWKS en caché |
 | `GS_CONSOLE_OIDC_JWKS_MIN_REFRESH_S` | dur_s | 30 | 5..=3600 | Intervalo mínimo entre recargas del JWKS por `kid` desconocido |
 | `GS_CONSOLE_PUBLIC_URL` | url | — | `https://` en `prod` | Origen del portal: única entrada CORS de `/v1/console/*` y base de la `redirect_uri` |
+| `GS_CONSOLE_OTP_LENGTH` | int | 6 | 6..=10 | Dígitos del código de un solo uso |
+| `GS_CONSOLE_OTP_TTL_S` | dur_s | 600 | 60..=1800 | Vida de un código |
+| `GS_CONSOLE_OTP_MAX_ATTEMPTS` | int | 5 | 3..=10 | Intentos por código antes de invalidarlo |
+| `GS_CONSOLE_OTP_COOLDOWN_S` | dur_s | 60 | 10..=600 | Espera mínima entre dos códigos para el mismo correo |
+| `GS_CONSOLE_OTP_HMAC_KEY` | base64 (**secreto**) | — | 32 bytes; obligatorio con el rol `console` | Clave con la que se guarda el HMAC de los códigos |
+| `GS_CONSOLE_SESSION_TTL_S` | dur_s | 43200 | 900..=604800 | Vida absoluta de una sesión de consola |
+| `GS_CONSOLE_EMAIL_PROVIDER` | enum | `resend` | `resend`, `file` | `file` solo en `dev` y `test` |
+| `GS_CONSOLE_EMAIL_API_KEY` | string (**secreto**) | — | obligatorio con `resend` | Clave del proveedor de correo |
+| `GS_CONSOLE_EMAIL_FROM` | string | — | dirección de correo; obligatorio | Remitente de los códigos |
+| `GS_CONSOLE_EMAIL_DAILY_CAP` | int | 500 | 1..=100000 | Correos que el servicio puede enviar por día (UTC) |
+| `GS_CONSOLE_EMAIL_DIR` | string | — | solo con `file` | Directorio donde `file` escribe los mensajes |
 | `GS_CONSOLE_MAX_ORGS_PER_ACCOUNT` | int | 3 | 1..=100 | Organizaciones que una cuenta puede crear por autoservicio |
 | `GS_CONSOLE_SIGNUP_RPM_PER_IP` | int | 10 | 1..=600 | Altas de cuenta y de organización por minuto e IP |
 
