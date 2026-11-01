@@ -35,6 +35,53 @@ const TRACK_STATE_TTL: Duration = Duration::from_secs(600);
 pub struct IngestState {
     /// Shared authentication/rate-limit state.
     pub sessions: SessionApiState,
+    /// `GS_LOCATION_MAX_EVENT_AGE_MS`: older samples are `IGNORED_STALE` (`09` §3.2).
+    pub max_event_age_ms: i64,
+    /// `GS_LOCATION_MAX_FUTURE_SKEW_MS`: tolerance for `captured_at` in the future (`09` §3.2).
+    pub max_future_skew_ms: i64,
+}
+
+/// Defaults of `17` §2 for `GS_LOCATION_MAX_EVENT_AGE_MS` and `GS_LOCATION_MAX_FUTURE_SKEW_MS`.
+pub const DEFAULT_MAX_EVENT_AGE_MS: i64 = 120_000;
+/// See [`DEFAULT_MAX_EVENT_AGE_MS`].
+pub const DEFAULT_MAX_FUTURE_SKEW_MS: i64 = 5_000;
+
+impl IngestState {
+    /// State with the documented default limits.
+    pub fn with_defaults(sessions: SessionApiState) -> Self {
+        Self {
+            sessions,
+            max_event_age_ms: DEFAULT_MAX_EVENT_AGE_MS,
+            max_future_skew_ms: DEFAULT_MAX_FUTURE_SKEW_MS,
+        }
+    }
+}
+
+/// The OpenAPI documents the enums by their short names (`MEASURED`, `GNSS`, `AUTOMOTIVE`); the
+/// Protobuf JSON mapping wants the full ones (`LOCATION_KIND_MEASURED`…). A client typed against the
+/// contract must work, so the short names are accepted and expanded before decoding. The full names
+/// still work.
+fn expand_enum_aliases(body: &mut serde_json::Value) {
+    const FIELDS: [(&str, &str); 3] = [
+        ("source", "LOCATION_SOURCE_"),
+        ("kind", "LOCATION_KIND_"),
+        ("motion", "MOTION_ACTIVITY_"),
+    ];
+    let Some(samples) = body.get_mut("samples").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    for sample in samples {
+        let Some(quality) = sample.get_mut("quality").and_then(|v| v.as_object_mut()) else {
+            continue;
+        };
+        for (field, prefix) in FIELDS {
+            if let Some(serde_json::Value::String(name)) = quality.get_mut(field)
+                && !name.starts_with(prefix)
+            {
+                *name = format!("{prefix}{name}");
+            }
+        }
+    }
 }
 
 /// Mounts `/v1/ingest/*`.
@@ -63,7 +110,7 @@ pub struct IngestResponse {
 async fn ingest_locations_handler(
     State(state): State<IngestState>,
     headers: HeaderMap,
-    body: Result<Json<IngestRequest>, axum::extract::rejection::JsonRejection>,
+    body: Result<Json<serde_json::Value>, axum::extract::rejection::JsonRejection>,
 ) -> Response {
     let request_id = request_id_from(&headers);
     let caller = match authenticate_caller(&state.sessions, &headers, &request_id).await {
@@ -90,9 +137,16 @@ async fn ingest_locations_handler(
         }
     };
 
-    let body = match body {
-        Ok(Json(b)) => b,
-        Err(_) => {
+    let body = match body
+        .ok()
+        .map(|Json(mut raw)| {
+            expand_enum_aliases(&mut raw);
+            serde_json::from_value::<IngestRequest>(raw)
+        })
+        .and_then(Result::ok)
+    {
+        Some(b) => b,
+        None => {
             return problem(
                 ErrorCode::ValidationFailed,
                 &request_id,
@@ -132,8 +186,8 @@ async fn ingest_locations_handler(
         reject_null_island: policy.reject_null_island,
         reject_mock_samples: policy.reject_mock_samples,
         reject_network_only: policy.reject_network_only,
-        max_future_skew_ms: 0,
-        max_event_age_ms: 0,
+        max_future_skew_ms: state.max_future_skew_ms,
+        max_event_age_ms: state.max_event_age_ms,
         // The HTTP path accepts the batch limit of `max_samples_per_publish_http`.
         max_samples_per_publish: policy.max_samples_per_publish_http,
     };

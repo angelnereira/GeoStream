@@ -37,7 +37,9 @@ pub use analytics::{AnalyticsState, analytics_router};
 pub use console::{ConsoleApiState, console_router};
 pub use edge::{EdgeState, edge_router};
 pub use history::{HistoryState, history_router};
-pub use ingest::{IngestState, ingest_router};
+pub use ingest::{
+    DEFAULT_MAX_EVENT_AGE_MS, DEFAULT_MAX_FUTURE_SKEW_MS, IngestState, ingest_router,
+};
 pub use invitations::invitations_routes;
 pub use members::members_router;
 pub use pagination::{PaginationQuery, PaginationQueryError, parse_pagination_query};
