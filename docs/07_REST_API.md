@@ -213,6 +213,18 @@ Ver `25_EDGE_DEVICES.md`. Todas exigen `edge_enabled` en la política del tenant
 
 `POST /v1/edge/reports/lookup` responde `429 RATE_LIMITED` con el bucket por (dueño, `hashed_eid`), porque es una operación cara y susceptible de abuso de descubrimiento (`FR-EDGE-005`).
 
+### 9.13 Consola de desarrolladores (F15)
+
+Contrato: `contracts/openapi/geostream.v1.yaml`, etiqueta `Console` (15 operaciones bajo `/v1/console`). Decisión: ADR-0033 §3–§4 y ADR-0036. Autorización: `06` §8.6.
+
+- **Registro e inicio de sesión son una sola ceremonia.** `POST /v1/console/auth/code` responde siempre `202 {"accepted": true}` con el mismo cuerpo exista o no la cuenta; `POST /v1/console/auth/verify` canjea el código, crea la cuenta si hace falta (con `accept_terms: true`) y devuelve el token. Todo fallo de verificación es `401 UNAUTHENTICATED`, sin distinguir la causa.
+- **Sesión**: token opaco `gcs_…` en `Authorization: Bearer`; sin cookies. Cierra con `POST /v1/console/auth/logout`.
+- **Organización = tenant; proyecto = aplicación.** Crear una organización (`201`) crea el tenant con la política por defecto y hace `OWNER` a la cuenta; el límite es `GS_CONSOLE_MAX_ORGS_PER_ACCOUNT` (429 al superarlo).
+- **API keys**: `createConsoleApiKey` devuelve `secret` una sola vez (`Cache-Control: no-store`); la lista y el resto de operaciones solo muestran el `prefix`. No hay valor por defecto de `scopes`.
+- **Idempotencia**: las operaciones que crean (`createConsoleOrganization`, `createConsoleProject`, `createConsoleApiKey`) aceptan `Idempotency-Key` (`§6`).
+- Los errores usan `Problem Details` (`§5`) y el catálogo de `09` §6; no se añade ningún código.
+
+
 ## 10. Webhooks
 
 ### 10.1 Modelo

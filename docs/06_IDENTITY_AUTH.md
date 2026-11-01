@@ -255,6 +255,21 @@ Leyenda: ✗ = principal no permitido (403 `PERMISSION_DENIED`); — = sin requi
 
 `ingestLpwan` no usa scopes: se autentica con la **firma HMAC de la integración** sobre el cuerpo bruto (`X-Gs-Lpwan-Signature`, `X-Gs-Lpwan-Timestamp`), con el secreto cuyo hash guarda `edge_lpwan_integrations`. La columna de aplicación es `—` (sin scope adicional), no una credencial de tenant: la integración es de red, no un backend.
 | `healthLive`, `healthReady` | sin autenticación | sin autenticación | — |
+| `requestConsoleCode` | — | — | — |
+| `verifyConsoleCode` | — | — | — |
+| `logoutConsole` | ✗ | ✗ | — |
+| `getConsoleAccount` | ✗ | ✗ | — |
+| `deleteConsoleAccount` | ✗ | ✗ | — |
+| `listConsoleOrganizations` | ✗ | ✗ | — |
+| `createConsoleOrganization` | ✗ | ✗ | — |
+| `getConsoleOrganization` | ✗ | ✗ | — |
+| `listConsoleProjects` | ✗ | ✗ | — |
+| `createConsoleProject` | ✗ | ✗ | — |
+| `getConsoleProject` | ✗ | ✗ | — |
+| `updateConsoleProject` | ✗ | ✗ | — |
+| `listConsoleApiKeys` | ✗ | ✗ | — |
+| `createConsoleApiKey` | ✗ | ✗ | — |
+| `revokeConsoleApiKey` | ✗ | ✗ | — |
 
 ### 8.3 Matriz de mensajes de stream
 
@@ -270,6 +285,21 @@ Leyenda: ✗ = principal no permitido (403 `PERMISSION_DENIED`); — = sin requi
 **Orden de entrega garantizado.** Cuando un mensaje produce **dos** efectos —un `StreamError` y un cierre, como `AuthRefresh` con el token de otro dispositivo— la respuesta correlacionada se escribe **antes** del close frame, siempre. No es una preferencia: sin ese orden, un cliente que recibe solo el 4403 no puede distinguir «te rechazé el token» de «la sesión expiró». La escritura de la conexión drena la cola de control antes de emitir el cierre (`08` §4 y §8).
 
 **Minimización en `MemberStatus`:** `availability` y `attributes` de sesiones `POOL` solo se proyectan a principales de aplicación. Para una conexión de dispositivo se omiten siempre (INV-PRS-2), aunque la membresía tenga `read`.
+
+### 8.6 Matriz de la consola
+
+Las operaciones de la consola (`/v1/console/*`) no aceptan API keys ni tokens de dispositivo (`✗` en §8.2): solo una **sesión de consola** (`consoleSession`, `gcs_…`, ADR-0036). La cuenta de consola es un tercer tipo de principal, separado de los usuarios finales y sin acceso a ninguna ruta de datos (FR-CON-002). La fuente canónica es la extensión `x-gs-console` del OpenAPI.
+
+Jerarquía de roles dentro de una organización: `OWNER` ⊃ `ADMIN` ⊃ `VIEWER`. Una cuenta que no pertenece a la organización recibe 404, nunca 403 (no se revela su existencia).
+
+| Operación | Requisito |
+|---|---|
+| `requestConsoleCode`, `verifyConsoleCode` | sin sesión |
+| `logoutConsole`, `getConsoleAccount`, `deleteConsoleAccount`, `listConsoleOrganizations`, `createConsoleOrganization` | cualquier sesión de consola |
+| `getConsoleOrganization`, `listConsoleProjects`, `getConsoleProject`, `listConsoleApiKeys` | `VIEWER` o superior en la organización |
+| `createConsoleProject`, `updateConsoleProject`, `createConsoleApiKey`, `revokeConsoleApiKey` | `ADMIN` o superior |
+
+Una cuenta no puede conceder en una API key más scopes de los que `06` §3.4 define, y `locations:read` y los de la pista E exigen pedirse expresamente (no hay valor por defecto).
 
 ## 9. Protección de autenticación
 - Fallos de autenticación por IP: límite `GS_AUTH_FAILURE_RPM_PER_IP`; al excederse, 429 durante el resto de la ventana.
