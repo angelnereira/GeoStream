@@ -26,6 +26,7 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 | T-E1-04 — `gs-ffi` | completada | — |
 | T-E1-05 — CI multiarch | parcialmente (workflow añadido) | wasm + musl |
 | T-E1-06 — propiedades | completada | 4 propiedades |
+| **T-F6-03 — degradación** | **en curso** (parte 1 hecha: readiness) | Falta la degradación de `04` §7.6 y su prueba de caída/recuperación |
 | **T-F15-01 — adopción de la consola** | completada (documental) | DR-20261031-05, ADR-0033, FR-CON-*, T-32 a T-37, `17` §2.12. Siguiente: T-F15-02 (externa, Plenty-Pay) y T-F15-03 (contrato) |
 | **T-F6-02 — instancias** | hecha en local; cierre pendiente de CI | Prueba de dos instancias sobre Redis. Siguiente en F6: T-F6-03 y T-F6-06 |
 | **T-F6-01 — Redis/Valkey** | **hecha en local; cierre pendiente de CI** (Angel Nereira con agente, 2026-10-31) | Backends, suites y cableado en `serve`. No se puede cerrar según `19` §1.3 mientras GitHub Actions no ejecute (ver bloqueos). Siguiente en F6: T-F6-02 (desplazamiento entre instancias) y T-F6-03 (degradación) |
@@ -97,6 +98,13 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 
 Formato de cada entrada (más reciente arriba):
 
+### 2026-11-01 — T-F6-03 (parte 1) — Readiness con el almacén efímero y el bus
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: parte 1 completada. La tarea sigue **en curso**: faltan la degradación de `04` §7.6 (`ServerNotice DEGRADED`/`RECOVERED`, `PublishAck` con `TEMPORARILY_UNAVAILABLE`, `StreamError` en suscripciones nuevas, vaciado de la caché de autorización al recuperarse) y su prueba de caída y recuperación.
+- Requisitos: FR-OPS-002 (sigue cumplido; ahora cubre `16` §4.1 completo salvo «no drenando», que es T-F6-04). NFR-RES-002 sigue `pendiente`.
+- Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
+- Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
+- Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
 ### 2026-11-01 — T-F15-11 — CORS por aplicación: bloqueado por decisión; el portal no lo necesita
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: tarea **no implementada** a propósito; alternativa documentada en ADR-0035.
