@@ -186,7 +186,15 @@ intensivo en producción (`13` §2).
   caliente.
 
 **Medido** (esta máquina, 12 CPU y 30 GB, red doméstica, 2026-11-01; no es una cifra de Railway):
-construcción completa 23 min 11 s, de ellos unos 9 min descargando los datos auxiliares (Natural Earth 434 MB,
-polígonos de agua 932 MB, lagos 80 MB y el extracto de 36 MB); resultado `panama.mbtiles` de 58 MB; el montón de la JVM
-de Planetiler (límite por defecto de 1,9 GB) llegó a 1,3 GB en la lectura de OSM y la construcción terminó sin errores;
-la tesela más grande ocupa 320 kB (199 kB comprimida). Lo que necesite el constructor de Railway no está medido.
+
+| Qué | Valor |
+|---|---|
+| Descarga de datos (capa propia, cacheable) | 9 a 23 min según el momento: Natural Earth 434 MB, polígonos de agua 932 MB, lagos 80 MB, extracto 36 MB; los servidores de terceros llegaron a ~200 kB/s |
+| Generación de las teselas (con la descarga ya en caché) | 2 min 30 s; Planetiler pide 49 MB de montón para la lectura de OSM con `sparsearray` y recibe 3,2 GB |
+| `panama.mbtiles` | 58 MB; tesela máxima 320 kB (199 kB comprimida) |
+| Imagen final | 963 MB, de los cuales 853 MB son la imagen base de Martin |
+
+**Un error que costó una prueba:** `--nodemap-type=array` hace que Planetiler pida 112 GB de montón para Panamá y se
+niegue a empezar («Insufficient resources for read phase»). Una ejecución anterior lo ocultaba porque llevaba
+`--force`, que se salta esa comprobación. El Dockerfile usa el valor por defecto (`sparsearray`) y nunca `--force`.
+Lo que necesite el constructor de Railway no está medido.

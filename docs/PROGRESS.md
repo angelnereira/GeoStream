@@ -105,6 +105,13 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-01 — T-F15-10 (corrección) — La imagen de `deploy/tiles` ahora se construye y arranca
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: la verificación que quedó pendiente en la entrada anterior se hizo y **encontró un error**: el segundo paso del Dockerfile fallaba con «Insufficient resources for read phase» porque `--nodemap-type=array` pide 112 GB de montón para Panamá. La ejecución directa de Planetiler que se había dado por buena llevaba `--force`, que se salta esa comprobación y ocultó el problema.
+- Corrección: se usa el valor por defecto (`sparsearray`, 49 MB de montón), sin `--force`; la imagen corre como usuario 65532.
+- Verificación: `docker build` completo OK (generación 2 min 30 s con la descarga cacheada, imagen de 963 MB); el contenedor sirve `/panama` (16 capas, z0–z14), teselas z12 y z14, los glifos Regular, Bold e Italic y `/catalog`, todos con 200.
+- Sigue pendiente: crear el servicio `tiles` en Railway y medir su construcción allí.
+
 ### 2026-11-01 — T-F15-12 — Acceso con API key y mapa en vivo en el portal
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada y verificada de punta a punta en local y en un Pixel 8 Pro; **sin verificar en producción** (el servicio `tiles` aún no existe en Railway).
@@ -117,7 +124,7 @@ Formato de cada entrada (más reciente arriba):
 
 ### 2026-11-01 — T-F15-10 — Mapa propio con teselas de OpenStreetMap
 - Autor/agente: Angel Nereira (con agente de código).
-- Resultado: servicio y estilo completos y verificados con la ejecución real de Planetiler y Martin; **la imagen Docker de `deploy/tiles` está pendiente de verificar de principio a fin** (ver abajo). Sin desplegar.
+- Resultado: servicio y estilo completos y verificados con la ejecución real de Planetiler y Martin; la imagen Docker de `deploy/tiles` se verificó después y falló (ver la corrección más arriba). Sin desplegar.
 - Requisitos: FR-MAP-007 `en curso` (falta que el portal use el estilo, T-F15-12, y desplegar el servicio).
 - Qué: `deploy/tiles/Dockerfile` (Planetiler y Martin fijados por digest, Noto Sans), `deploy/tiles/style.json`, `geostream-tools tiles-style` con 5 pruebas, sección «Mapa propio» en `deploy/README.md`.
 - **Medido** (esta máquina, 12 CPU y 30 GB; no es Railway): construcción completa 23 min 11 s con ~9 min de descarga; `panama.mbtiles` de 58 MB; montón de la JVM hasta 1,3 GB de 1,9 GB en la lectura de OSM; tesela máxima 320 kB (199 kB comprimida). La descarga varió mucho entre ejecuciones (los polígonos de agua de 932 MB llegaron a ~200 kB/s desde un servidor de terceros, más de 25 min solo en descargar), así que el tiempo de construcción en Railway es un riesgo no medido.
