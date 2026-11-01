@@ -26,6 +26,7 @@ Ninguna. La fase E0 está completa y a la espera de revisión del propietario.
 | T-E1-04 — `gs-ffi` | completada | — |
 | T-E1-05 — CI multiarch | parcialmente (workflow añadido) | wasm + musl |
 | T-E1-06 — propiedades | completada | 4 propiedades |
+| **T-F15-01 — adopción de la consola** | completada (documental) | DR-20261031-05, ADR-0033, FR-CON-*, T-32 a T-37, `17` §2.12. Siguiente: T-F15-02 (externa, Plenty-Pay) y T-F15-03 (contrato) |
 | **T-F6-01 — Redis/Valkey** | **hecha en local; cierre pendiente de CI** (Angel Nereira con agente, 2026-10-31) | Backends, suites y cableado en `serve`. No se puede cerrar según `19` §1.3 mientras GitHub Actions no ejecute (ver bloqueos). Siguiente en F6: T-F6-02 (desplazamiento entre instancias) y T-F6-03 (degradación) |
 
 
@@ -82,6 +83,7 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 | E7 | pendiente | | |
 | E8 | pendiente | | **Bloqueada por T-E8-06**: protección DULT completa antes de cualquier release |
 | E9 | pendiente | | |
+| F15 | **en curso** (activada 2026-10-31, DR-20261031-05) | | T-F15-01 completada: adopción documental de la consola de desarrolladores |
 | F6 | **en curso** (adelantada al cerrar F4) | | T-F6-01: backends Redis/Valkey con la suite compartida verde y `serve` usándolos |
 | F7 (M3) | pendiente | | |
 | F8 | pendiente | | |
@@ -93,6 +95,15 @@ Las cuatro decisiones que bloqueaban F4 están resueltas.
 ## Registro
 
 Formato de cada entrada (más reciente arriba):
+
+### 2026-10-31 — T-F15-01 — Adopción de la consola de desarrolladores (sin código)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada.
+- Origen: el propietario pide un portal web donde cualquier desarrollador entre con su cuenta de Gravital, obtenga API keys y use GeoStream como servicio, al estilo de Google Maps Platform. DR-20261031-01 había dejado esa consola «solo si GeoStream se ofrece a terceros»; ahora es el caso. Respuestas del propietario en DR-20261031-05.
+- Hallazgo que condiciona el plan: `identity` de Gravital (Plenty-Pay) firma con secretos simétricos, no publica JWKS ni OIDC y no tiene dominio público (Railway, 2026-10-31). La consola no puede abrirse hasta T-F15-02, que se hace en ese repositorio.
+- Qué: ADR-0033; FR-ADM-004 activado y FR-CON-001 a FR-CON-008; amenazas T-32 a T-37; `17` §2.12 y cuotas de §4; fase F15 en `21`.
+- Verificación: `cargo run -p geostream-tools -- all` (resultado en el PR).
+- Efecto en producción: ninguno (solo documentación). Despliegue de T-F6-01 comprobado en Railway: `SUCCESS`, log `state backend: redis` y `/health/ready` 200 en `geostream.gravitalcloud.com`.
 
 ### 2026-10-31 — T-F6-01 (parte 2) — `serve` usa el backend configurado
 - Autor/agente: Angel Nereira (con agente de código).

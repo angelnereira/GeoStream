@@ -88,7 +88,47 @@ Cada requisito tiene el formato:
 
 #### FR-ADM-004 · COULD · F15 — API HTTP de administración
 - Descripción: endpoints de administración para una consola SaaS.
-- Aceptación: requiere ADR y modelo de amenazas propio.
+- Aceptación: requiere ADR y modelo de amenazas propio. **Activado el 2026-10-31** por DR-20261031-05: ADR-0033 y las amenazas T-32 a T-37 de `10`; el detalle verificable está en FR-CON-001 a FR-CON-008.
+
+#### FR-CON-001 · MUST · F15 — Inicio de sesión de consola con Gravital (OIDC)
+- Descripción: la consola inicia sesión con la cuenta de Gravital mediante OIDC *Authorization Code* con PKCE; la API de consola acepta solo access tokens de `GS_CONSOLE_OIDC_ISSUER` firmados con clave asimétrica.
+- Aceptación: pruebas negativas rechazan con 401 un token con `alg` `none` o HS*, `iss` o `aud` distintos, caducado, firmado con una clave fuera del JWKS o con `kid` desconocido tras recargar el JWKS.
+- Ref: ADR-0033 §2; `17` §2.12.
+
+#### FR-CON-002 · MUST · F15 — Cuenta de consola separada de los usuarios finales
+- Descripción: la identidad de consola es el par `(iss, sub)` del token; una cuenta de consola nunca es un subject ni un dispositivo y no puede publicar, suscribirse ni leer ubicaciones.
+- Aceptación: un token de consola presentado en `/v1/sessions`, `/v1/stream/tickets` o `/v1/ingest/*` devuelve 401; el email nunca se usa como identidad.
+- Ref: ADR-0033 §2–§3; `06` §2.
+
+#### FR-CON-003 · MUST · F15 — Organizaciones y roles
+- Descripción: una organización es un tenant; una cuenta pertenece a organizaciones con rol `OWNER`, `ADMIN` o `VIEWER`, y cada operación de consola comprueba el rol en esa organización.
+- Aceptación: matriz de autorización de consola probada para los tres roles y para una cuenta de otra organización (404, sin revelar existencia).
+- Ref: ADR-0033 §3.
+
+#### FR-CON-004 · MUST · F15 — Proyectos y API keys por autoservicio
+- Descripción: un `OWNER` o `ADMIN` crea, deshabilita y borra proyectos (aplicaciones) y crea, rota y revoca sus API keys; la key en claro se muestra una sola vez.
+- Aceptación: tras crear una key, ninguna respuesta posterior la contiene; una key revocada desde la consola falla en REST dentro del plazo de NFR-SEC-002.
+- Ref: ADR-0033 §3; FR-AUTH-001; FR-ADM-003.
+
+#### FR-CON-005 · MUST · F15 — Registro público con límites anti-abuso
+- Descripción: cualquier cuenta Gravital puede registrarse y crear organizaciones dentro de `GS_CONSOLE_MAX_ORGS_PER_ACCOUNT` y `GS_CONSOLE_SIGNUP_RPM_PER_IP`; la organización nace con la política por defecto y las capacidades opcionales apagadas.
+- Aceptación: superar cualquiera de los dos límites devuelve 429; una organización nueva tiene todas las claves `*_allowed` de `17` §4.1 en `false`.
+- Ref: ADR-0033 §4.
+
+#### FR-CON-006 · MUST · F15 — Cuotas gratuitas por proyecto
+- Descripción: cada aplicación respeta `quota_monthly_location_samples`, `quota_monthly_rest_requests` y `quota_concurrent_stream_connections`; al superarlas el servidor responde con el código de cuota definido en T-F15-03.
+- Aceptación: pruebas que agotan cada cuota observan el rechazo y su fin al empezar el periodo siguiente.
+- Ref: ADR-0033 §4; `17` §4.
+
+#### FR-CON-007 · SHOULD · F15 — Panel de uso
+- Descripción: la consola muestra el uso del periodo por proyecto frente a sus cuotas, sin datos de usuarios finales.
+- Aceptación: el uso mostrado coincide con los contadores del servidor en una prueba con tráfico conocido.
+- Ref: ADR-0033 §4.
+
+#### FR-CON-008 · MUST · F15 — Auditoría de la consola
+- Descripción: crear o borrar organizaciones y proyectos, cambiar roles y crear, rotar o revocar keys queda auditado con la cuenta de consola como actor.
+- Aceptación: cada operación genera su evento de auditoría con actor, tenant y objetivo, sin la key en claro.
+- Ref: `10` §8.3; ADR-0033.
 
 ### 2.3 API general (API)
 

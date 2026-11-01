@@ -4,6 +4,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 ## [Unreleased]
 
+### Docs
+- Consola de desarrolladores (T-F15-01, activa la fase F15): DR-20261031-05 recoge la decisión del propietario (inicio de sesión con Gravital por OIDC, registro público con cuotas gratuitas, cobro posterior, portal en Flutter Web) y ADR-0033 fija el diseño: cliente público con PKCE, verificación de access tokens solo con claves asimétricas del JWKS de Gravital, cuentas de consola separadas de los usuarios finales, organización = tenant y proyecto = aplicación. Nuevos FR-CON-001 a FR-CON-008, amenazas T-32 a T-37 en `10`, claves `GS_CONSOLE_*` en `17` §2.12, cuotas y `max_applications_per_tenant` en `17` §4, y la fase F15 en `21` con sus ocho tareas. Sin código: la identidad de Gravital tiene que publicar OIDC con claves asimétricas antes (T-F15-02, repositorio Plenty-Pay).
+
 ### Added
 - `gs-ephemeral` y `gs-bus` (T-F6-01): backends Redis/Valkey de `ADR-0010`. `RedisEphemeralStore` implementa el keyspace de `11` §3 con scripts Lua versionados en `crates/gs-ephemeral/lua/` (`seq_cas`, `devseq_max`, `presence_release`, `track_cas`), TTL en todas las claves y timeout por comando (`GS_REDIS_COMMAND_TIMEOUT_MS`). `RedisBus` usa una conexión RESP3 por instancia con conteo de referencias por tema, colas acotadas por suscripción (`Lagged` si un suscriptor se atrasa) y resuscripción automática al reconectar. Ambos pasan la misma suite que el backend en memoria.
 - `serve` usa por fin `GS_STATE_BACKEND`: con `redis` conecta el almacén efímero y el bus a `GS_REDIS_URL` antes de abrir el listener y se niega a arrancar si no lo alcanza; con `memory` en `prod` avisa en el log de que solo admite una instancia (`17` §3). Hasta ahora creaba siempre los backends en memoria, de modo que el Redis del despliegue de Railway no se usaba. `EphemeralBackend` y `BusBackend` seleccionan el backend en tiempo de ejecución.
