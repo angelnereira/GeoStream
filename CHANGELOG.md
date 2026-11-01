@@ -4,7 +4,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 
 ## [Unreleased]
 
+### Fixed
+- `GET /health/ready` devolvía `{"ready":…,"dependencies":[…]}` y el contrato OpenAPI (`ReadinessStatus`) define `{"status":"ready|not_ready","checks":{"<nombre>":"ok|failing|draining|not_configured"}}`. El código se alinea con el contrato. Los códigos HTTP (200 y 503) no cambian, que es lo único que usan el healthcheck de Railway y `deploy/smoke.sh`. Se elimina además el campo `detail`: el texto de un error del controlador puede incluir datos de conexión (`10` §8.2).
+
 ### Added
+- Readiness con Redis/Valkey (T-F6-03, parte 1; `16` §4.1): con `GS_STATE_BACKEND=redis`, `/health/ready` comprueba de forma activa (`PING`, timeout de 1 s) el almacén efímero y el bus y responde 503 si alguno falla; con `memory` los reporta como `not_configured`. El bus tenía un defecto: su estado de conexión solo cambiaba cuando pasaba algún comando, así que una instancia ociosa seguía «no lista» tras volver Redis; ahora `RedisBus::ping` actualiza el estado y la instancia se recupera en ~1 s.
 - `gs-ephemeral` y `gs-bus` (T-F6-01): backends Redis/Valkey de `ADR-0010`. `RedisEphemeralStore` implementa el keyspace de `11` §3 con scripts Lua versionados en `crates/gs-ephemeral/lua/` (`seq_cas`, `devseq_max`, `presence_release`, `track_cas`), TTL en todas las claves y timeout por comando (`GS_REDIS_COMMAND_TIMEOUT_MS`). `RedisBus` usa una conexión RESP3 por instancia con conteo de referencias por tema, colas acotadas por suscripción (`Lagged` si un suscriptor se atrasa) y resuscripción automática al reconectar. Ambos pasan la misma suite que el backend en memoria.
 - `serve` usa por fin `GS_STATE_BACKEND`: con `redis` conecta el almacén efímero y el bus a `GS_REDIS_URL` antes de abrir el listener y se niega a arrancar si no lo alcanza; con `memory` en `prod` avisa en el log de que solo admite una instancia (`17` §3). Hasta ahora creaba siempre los backends en memoria, de modo que el Redis del despliegue de Railway no se usaba. `EphemeralBackend` y `BusBackend` seleccionan el backend en tiempo de ejecución.
 - CI: la etapa 4 levanta PostgreSQL 16 y Valkey 7.2 como servicios, que las pruebas de integración ya necesitaban.

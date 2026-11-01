@@ -185,3 +185,11 @@ async fn test_unreachable_server_is_reported_and_does_not_echo_the_url() {
     let rendered = format!("{error} {error:?}");
     assert!(!rendered.contains("s3cr3t-password"), "{rendered}");
 }
+
+#[tokio::test]
+async fn test_ping_checks_the_server_actively_and_keeps_the_flag_in_sync() {
+    // covers: FR-OPS-002, docs/16 §4.1 (readiness cannot depend on traffic to notice a recovery)
+    let bus = connect().await;
+    bus.ping().await.expect("ping a reachable server");
+    assert!(bus.is_connected());
+}

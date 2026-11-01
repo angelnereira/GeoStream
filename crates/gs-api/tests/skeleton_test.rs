@@ -63,7 +63,8 @@ async fn test_health_live_and_ready_are_served_with_the_request_id() {
         .expect("ready");
     assert!(ready.status().is_success());
     let body: Value = serde_json::from_str(&ready.text().await.expect("text")).expect("json");
-    assert_eq!(body["ready"], json!(true));
+    assert_eq!(body["status"], json!("ready"));
+    assert_eq!(body["checks"], json!({}));
 
     server.abort();
 }
@@ -72,11 +73,11 @@ async fn test_health_live_and_ready_are_served_with_the_request_id() {
 async fn test_health_ready_reports_a_failed_dependency_as_503() {
     // covers: FR-OPS-002, docs/16 §4.1
     let probe = ReadinessProbe::new(|| async {
-        vec![DependencyStatus {
-            name: "postgresql".to_string(),
-            ok: false,
-            detail: Some("connection refused".to_string()),
-        }]
+        vec![
+            DependencyStatus::failing("postgresql"),
+            DependencyStatus::ok("ephemeral"),
+            DependencyStatus::not_configured("bus"),
+        ]
     });
     let app = http_router_with_readiness(gs_api::DEFAULT_MAX_BODY_BYTES, probe);
     let (address, server) = spawn(app).await;
@@ -88,9 +89,12 @@ async fn test_health_ready_reports_a_failed_dependency_as_503() {
         .expect("ready");
     assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
     let body: Value = serde_json::from_str(&response.text().await.expect("text")).expect("json");
-    assert_eq!(body["ready"], json!(false));
-    assert_eq!(body["dependencies"][0]["name"], json!("postgresql"));
-    assert_eq!(body["dependencies"][0]["ok"], json!(false));
+    // The body is the `ReadinessStatus` schema of the contract, with no error text.
+    assert_eq!(body["status"], json!("not_ready"));
+    assert_eq!(
+        body["checks"],
+        json!({"postgresql": "failing", "ephemeral": "ok", "bus": "not_configured"})
+    );
 
     server.abort();
 }
@@ -180,13 +184,7 @@ async fn test_admin_ready_handler_reflects_the_probe() {
     // covers: FR-OPS-002, docs/16 §4.1
     let state = AdminState::new(
         PrometheusRenderer::install().expect("install renderer"),
-        ReadinessProbe::new(|| async {
-            vec![DependencyStatus {
-                name: "postgresql".to_string(),
-                ok: true,
-                detail: None,
-            }]
-        }),
+        ReadinessProbe::new(|| async { vec![DependencyStatus::ok("postgresql")] }),
     );
 
     let response = admin_ready_handler(axum::extract::State(state)).await;

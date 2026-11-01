@@ -135,7 +135,7 @@ Reglas:
 | FR-LRN-003 | SHOULD | E7 | Map-matching integrado sobre grafo propio | `crates/gs-mobility/tests/road_graph_map_matching_test.rs` (núcleo; falta lector PBF y parámetros, DR-20261031-04) | en curso |
 | FR-LRN-004 | COULD | E7 | Ruta sobre grafo propio | — | pendiente |
 | FR-OPS-001 | MUST | F0 | Binario único con roles | `apps/geostream/tests/cli_test.rs` | cumplido |
-| FR-OPS-002 | MUST | F2 | Salud y métricas | `crates/gs-api/tests/skeleton_test.rs`, `apps/geostream/tests/cli_test.rs` | cumplido |
+| FR-OPS-002 | MUST | F2 | Salud y métricas | `crates/gs-api/tests/skeleton_test.rs`, `apps/geostream/tests/cli_test.rs`, `apps/geostream/src/main.rs` (`readiness_tests`), `crates/gs-bus/tests/redis_bus_test.rs` | cumplido |
 | FR-OPS-003 | MUST | F1 | Configuración validada | `crates/gs-config/tests/server_config_test.rs` | cumplido |
 | FR-OPS-004 | MUST | F2 | Migraciones versionadas | `migrations/0001_init.sql`, `apps/geostream/tests/cli_test.rs`, `crates/gs-store/tests/constraints_test.rs` | cumplido |
 | FR-OPS-005 | MUST | F6 | Imagen y compose | — | pendiente |
