@@ -32,6 +32,22 @@ impl EphemeralBackend {
         Arc::new(Self::Memory(store))
     }
 
+    /// Actively checks that the backend answers: `PING` for Redis/Valkey, always `Ok` in memory.
+    ///
+    /// Readiness uses this instead of [`EphemeralStore::is_ready`], which only changes when some
+    /// other command fails: an idle instance would report ready with a dead Redis.
+    pub async fn ping(&self) -> Result<(), EphemeralError> {
+        match self {
+            Self::Memory(_) => Ok(()),
+            Self::Redis(store) => store.ping().await,
+        }
+    }
+
+    /// Whether this backend is shared with other instances (`GS_STATE_BACKEND=redis`).
+    pub fn is_shared(&self) -> bool {
+        matches!(self, Self::Redis(_))
+    }
+
     /// Wraps a connected Redis/Valkey store.
     pub fn from_redis(store: RedisEphemeralStore) -> Arc<Self> {
         Arc::new(Self::Redis(Arc::new(store)))

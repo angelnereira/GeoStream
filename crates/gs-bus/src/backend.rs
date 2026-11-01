@@ -28,6 +28,19 @@ impl BusBackend {
         Arc::new(Self::Memory(bus))
     }
 
+    /// Actively checks that the backend answers: `PING` for Redis/Valkey, always `Ok` in memory.
+    pub async fn ping(&self) -> Result<(), BusError> {
+        match self {
+            Self::Memory(_) => Ok(()),
+            Self::Redis(bus) => bus.ping().await,
+        }
+    }
+
+    /// Whether this backend reaches other instances (`GS_STATE_BACKEND=redis`).
+    pub fn is_shared(&self) -> bool {
+        matches!(self, Self::Redis(_))
+    }
+
     /// Wraps a connected Redis/Valkey bus.
     pub fn from_redis(bus: RedisBus) -> Arc<Self> {
         Arc::new(Self::Redis(Arc::new(bus)))

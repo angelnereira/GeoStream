@@ -51,10 +51,10 @@ pub use rate_limit::{
     record_auth_failure_and_check,
 };
 pub use router::{
-    AdminState, DEFAULT_MAX_BODY_BYTES, DependencyStatus, PrometheusRenderer, READINESS_TIMEOUT,
-    REQUEST_ID_HEADER, ReadinessProbe, ReadinessStatus, admin_ready_handler, admin_router,
-    health_live_handler, health_ready_handler, http_router, http_router_with_readiness,
-    metrics_handler, redact_header_value, request_id_header,
+    AdminState, CheckState, DEFAULT_MAX_BODY_BYTES, DependencyStatus, PrometheusRenderer,
+    READINESS_TIMEOUT, REQUEST_ID_HEADER, ReadinessProbe, ReadinessStatus, admin_ready_handler,
+    admin_router, health_live_handler, health_ready_handler, http_router,
+    http_router_with_readiness, metrics_handler, redact_header_value, request_id_header,
 };
 pub use security::{
     CredentialKind, Principal, PrincipalError, extract_principal, principal_from_header,

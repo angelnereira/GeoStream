@@ -118,40 +118,108 @@ pub async fn health_live_handler() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
+/// State of one readiness check: the enum of the `ReadinessStatus` schema of the OpenAPI
+/// contract (docs/16 §4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckState {
+    /// The dependency answered in time.
+    Ok,
+    /// The dependency did not answer, or answered with an error.
+    Failing,
+    /// The instance is draining and must leave the balancer (docs/08 §6.8).
+    Draining,
+    /// The dependency is not used by this configuration (e.g. Redis with `memory`).
+    NotConfigured,
+}
+
+impl CheckState {
+    /// Whether this state still lets the instance receive traffic.
+    pub fn allows_traffic(self) -> bool {
+        matches!(self, Self::Ok | Self::NotConfigured)
+    }
+}
+
 /// Readiness of one dependency (docs/16 §4.1).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+///
+/// Carries no error text: a driver error can echo connection details (docs/10 §8.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DependencyStatus {
     /// Dependency name.
     pub name: String,
-    /// Whether it answered in time.
-    pub ok: bool,
-    /// Optional detail, never sensitive.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
+    /// Result of its check.
+    pub state: CheckState,
 }
 
-/// Body of `/health/ready` (docs/16 §4.1).
+impl DependencyStatus {
+    /// A dependency that answered.
+    pub fn ok(name: impl Into<String>) -> Self {
+        Self::with_state(name, CheckState::Ok)
+    }
+
+    /// A dependency that did not answer.
+    pub fn failing(name: impl Into<String>) -> Self {
+        Self::with_state(name, CheckState::Failing)
+    }
+
+    /// A dependency this configuration does not use.
+    pub fn not_configured(name: impl Into<String>) -> Self {
+        Self::with_state(name, CheckState::NotConfigured)
+    }
+
+    /// A dependency in an explicit state.
+    pub fn with_state(name: impl Into<String>, state: CheckState) -> Self {
+        Self {
+            name: name.into(),
+            state,
+        }
+    }
+}
+
+/// Overall state of `ReadinessStatus.status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadyState {
+    /// Every check allows traffic.
+    Ready,
+    /// At least one check does not.
+    NotReady,
+}
+
+/// Body of `/health/ready`: the `ReadinessStatus` schema of the OpenAPI contract.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ReadinessStatus {
     /// Whether the instance may receive traffic.
-    pub ready: bool,
-    /// State of each checked dependency.
-    pub dependencies: Vec<DependencyStatus>,
+    pub status: ReadyState,
+    /// State of each checked dependency, by name.
+    pub checks: std::collections::BTreeMap<String, CheckState>,
 }
 
 impl ReadinessStatus {
     /// Builds a readiness status from the checked dependencies.
     pub fn new(dependencies: Vec<DependencyStatus>) -> Self {
-        let ready = dependencies.iter().all(|dependency| dependency.ok);
+        let status = if dependencies.iter().all(|d| d.state.allows_traffic()) {
+            ReadyState::Ready
+        } else {
+            ReadyState::NotReady
+        };
         Self {
-            ready,
-            dependencies,
+            status,
+            checks: dependencies
+                .into_iter()
+                .map(|dependency| (dependency.name, dependency.state))
+                .collect(),
         }
+    }
+
+    /// Whether the instance may receive traffic.
+    pub fn is_ready(&self) -> bool {
+        self.status == ReadyState::Ready
     }
 
     /// Converts the status into an HTTP response.
     pub fn into_response(&self) -> Response {
-        let status = if self.ready {
+        let status = if self.is_ready() {
             StatusCode::OK
         } else {
             StatusCode::SERVICE_UNAVAILABLE
@@ -289,23 +357,13 @@ mod tests {
     #[tokio::test]
     async fn test_health_ready_reflects_the_probe() {
         // covers: FR-OPS-002, docs/16 §4.1
-        let ready_probe = ReadinessProbe::new(|| async {
-            vec![DependencyStatus {
-                name: "postgresql".to_string(),
-                ok: true,
-                detail: None,
-            }]
-        });
+        let ready_probe =
+            ReadinessProbe::new(|| async { vec![DependencyStatus::ok("postgresql")] });
         let response = health_ready_handler(State(ready_probe)).await;
         assert_eq!(response.status(), StatusCode::OK);
 
-        let degraded_probe = ReadinessProbe::new(|| async {
-            vec![DependencyStatus {
-                name: "postgresql".to_string(),
-                ok: false,
-                detail: Some("connection refused".to_string()),
-            }]
-        });
+        let degraded_probe =
+            ReadinessProbe::new(|| async { vec![DependencyStatus::failing("postgresql")] });
         let response = health_ready_handler(State(degraded_probe)).await;
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
