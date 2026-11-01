@@ -129,6 +129,32 @@ impl ApplicationRepository {
         Ok(res.rows_affected() > 0)
     }
 
+    /// Renames an application.
+    pub async fn update_name(
+        pool: &PgPool,
+        tenant_id: TenantId,
+        app_id: ApplicationId,
+        name: &str,
+        now: OffsetDateTime,
+    ) -> Result<bool, StoreError> {
+        let res = sqlx::query(
+            r#"
+            UPDATE applications
+            SET name = $3, updated_at = $4
+            WHERE id = $1 AND tenant_id = $2;
+            "#,
+        )
+        .bind(app_id.into_uuid())
+        .bind(tenant_id.into_uuid())
+        .bind(name)
+        .bind(now)
+        .execute(pool)
+        .await
+        .map_err(StoreError::Database)?;
+
+        Ok(res.rows_affected() > 0)
+    }
+
     /// Updates application scopes and origins configuration.
     pub async fn update_scopes_and_origins(
         pool: &PgPool,

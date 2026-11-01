@@ -320,7 +320,7 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                 signing_keys: keyset_arc.clone(),
                 issuer: cfg.jwt_issuer.clone(),
                 leeway_seconds: cfg.jwt_leeway_s,
-                crypto_rotator,
+                crypto_rotator: crypto_rotator.clone(),
                 idempotency_retention: Duration::from_secs(
                     u64::from(cfg.retention_idempotency_h) * 3600,
                 ),
@@ -355,6 +355,23 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                     cfg.jwt_active_kid.clone(),
                 ),
             };
+
+            // The console (registration, sign-in, organizations, projects and API keys) lives in
+            // the API role and exists only when `GS_CONSOLE_OTP_HMAC_KEY` is set (ADR-0036).
+            if let Some(console) = &cfg.console {
+                let console_state = build_console_state(
+                    console,
+                    &pool,
+                    &ephemeral,
+                    &bus,
+                    &prefix,
+                    crypto_rotator.clone(),
+                    Duration::from_secs(u64::from(cfg.retention_idempotency_h) * 3600),
+                    session_state.rate_limit_config,
+                )?;
+                app = app.merge(gs_api::console_router(console_state));
+                info!("console routes enabled");
+            }
 
             app = app
                 .merge(gs_api::sessions_router(session_state.clone()))
@@ -619,6 +636,45 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
+}
+
+/// Builds the state of the console routes from its configuration (ADR-0036).
+#[allow(clippy::too_many_arguments)]
+fn build_console_state(
+    console: &gs_config::ConsoleConfig,
+    pool: &gs_api::migrate::PgPool,
+    ephemeral: &Arc<gs_api::gs_service::EphemeralBackend>,
+    bus: &Arc<gs_api::gs_service::BusBackend>,
+    key_prefix: &str,
+    crypto_rotator: Option<Arc<gs_api::gs_service::gs_auth::crypto::CryptoRotator>>,
+    idempotency_retention: Duration,
+    rate_limit_config: gs_api::RateLimitConfig,
+) -> Result<gs_api::ConsoleApiState> {
+    use gs_api::gs_service::console::{ConsoleAuth, ConsoleSettings, EmailBackend};
+    use gs_api::gs_service::gs_auth::ConsoleKeys;
+
+    let keys = ConsoleKeys::new(console.otp_hmac_key.as_bytes())
+        .context("GS_CONSOLE_OTP_HMAC_KEY is not a usable key")?;
+    let mailer = EmailBackend::from_config(&console.email)
+        .context("the console e-mail provider could not be set up")?;
+    let auth = ConsoleAuth::new(
+        pool.clone(),
+        keys,
+        ConsoleSettings::from_config(console),
+        Arc::new(mailer),
+    );
+    Ok(gs_api::ConsoleApiState {
+        pool: pool.clone(),
+        auth: Arc::new(auth),
+        ephemeral: Arc::clone(ephemeral),
+        bus: Arc::clone(bus),
+        redis_key_prefix: key_prefix.to_string(),
+        signup_rpm_per_ip: u32::try_from(console.signup_rpm_per_ip).unwrap_or(10),
+        max_orgs_per_account: u32::try_from(console.max_orgs_per_account).unwrap_or(3),
+        crypto_rotator,
+        idempotency_retention,
+        rate_limit_config,
+    })
 }
 
 #[cfg(test)]

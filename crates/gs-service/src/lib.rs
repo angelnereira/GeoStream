@@ -6,6 +6,7 @@ pub mod audit;
 pub mod auth;
 pub mod authz;
 pub mod console;
+pub mod console_workspace;
 pub mod control;
 pub mod idempotency;
 pub mod invitations;
