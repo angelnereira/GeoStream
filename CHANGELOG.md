@@ -5,6 +5,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versionado
 ## [Unreleased]
 
 ### Added
+- Pruebas de dos instancias (T-F6-02): `gs-stream/tests/connection_test.rs` arranca una segunda réplica sobre la misma base de datos, clave de firma, prefijo, almacén efímero y bus de Redis/Valkey. Verifican que un dispositivo que se reconecta por otra instancia cierra la conexión anterior con 4409 a través del bus, que el ticket emitido por una instancia se canjea en la otra, que la presencia apunta a la instancia nueva y que el cierre de la conexión vieja no borra la presencia de la nueva. Sin cambios de comportamiento: el código ya publicaba `Supersede`; faltaba una prueba que lo demostrara entre instancias. Quitar la publicación al bus hace fallar la prueba.
+
+### Added
 - `gs-ephemeral` y `gs-bus` (T-F6-01): backends Redis/Valkey de `ADR-0010`. `RedisEphemeralStore` implementa el keyspace de `11` §3 con scripts Lua versionados en `crates/gs-ephemeral/lua/` (`seq_cas`, `devseq_max`, `presence_release`, `track_cas`), TTL en todas las claves y timeout por comando (`GS_REDIS_COMMAND_TIMEOUT_MS`). `RedisBus` usa una conexión RESP3 por instancia con conteo de referencias por tema, colas acotadas por suscripción (`Lagged` si un suscriptor se atrasa) y resuscripción automática al reconectar. Ambos pasan la misma suite que el backend en memoria.
 - `serve` usa por fin `GS_STATE_BACKEND`: con `redis` conecta el almacén efímero y el bus a `GS_REDIS_URL` antes de abrir el listener y se niega a arrancar si no lo alcanza; con `memory` en `prod` avisa en el log de que solo admite una instancia (`17` §3). Hasta ahora creaba siempre los backends en memoria, de modo que el Redis del despliegue de Railway no se usaba. `EphemeralBackend` y `BusBackend` seleccionan el backend en tiempo de ejecución.
 - CI: la etapa 4 levanta PostgreSQL 16 y Valkey 7.2 como servicios, que las pruebas de integración ya necesitaban.
