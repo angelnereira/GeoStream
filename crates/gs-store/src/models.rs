@@ -7,7 +7,8 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use gs_domain::ids::{
-    ApiKeyId, ApplicationId, AuditId, DeviceId, InstallationId, RequestId, SubjectId, TenantId,
+    AccountId, ApiKeyId, ApplicationId, AuditId, DeviceId, InstallationId, RequestId, SubjectId,
+    TenantId,
 };
 
 /// Status of a tenant (docs/05 §3.1).
@@ -425,4 +426,103 @@ pub struct AuditEvent {
     pub outcome: AuditOutcome,
     pub request_id: Option<RequestId>,
     pub details: serde_json::Value,
+}
+
+/// Status of a console account (docs/11 §2.0.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum AccountStatus {
+    #[serde(rename = "ACTIVE")]
+    Active,
+    #[serde(rename = "DISABLED")]
+    Disabled,
+}
+
+impl AccountStatus {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "ACTIVE",
+            Self::Disabled => "DISABLED",
+        }
+    }
+}
+
+impl FromStr for AccountStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ACTIVE" => Ok(Self::Active),
+            "DISABLED" => Ok(Self::Disabled),
+            other => Err(format!("unknown account status '{other}'")),
+        }
+    }
+}
+
+/// Role of a console account inside an organization (docs/06 §8.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ConsoleRole {
+    #[serde(rename = "VIEWER")]
+    Viewer,
+    #[serde(rename = "ADMIN")]
+    Admin,
+    #[serde(rename = "OWNER")]
+    Owner,
+}
+
+impl ConsoleRole {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Viewer => "VIEWER",
+            Self::Admin => "ADMIN",
+            Self::Owner => "OWNER",
+        }
+    }
+
+    /// Whether this role satisfies a minimum role (`OWNER` ⊃ `ADMIN` ⊃ `VIEWER`).
+    pub const fn at_least(&self, minimum: ConsoleRole) -> bool {
+        self.rank() >= minimum.rank()
+    }
+
+    const fn rank(&self) -> u8 {
+        match self {
+            Self::Viewer => 0,
+            Self::Admin => 1,
+            Self::Owner => 2,
+        }
+    }
+}
+
+impl FromStr for ConsoleRole {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "VIEWER" => Ok(Self::Viewer),
+            "ADMIN" => Ok(Self::Admin),
+            "OWNER" => Ok(Self::Owner),
+            other => Err(format!("unknown console role '{other}'")),
+        }
+    }
+}
+
+/// Console account (`console_accounts`). Personal data: never log `email` (docs/10 §8.2).
+#[derive(Clone, PartialEq, Eq)]
+pub struct ConsoleAccount {
+    pub id: AccountId,
+    pub email: String,
+    pub status: AccountStatus,
+    pub terms_accepted_at: OffsetDateTime,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+impl fmt::Debug for ConsoleAccount {
+    // The e-mail is personal data and must not reach logs through `{:?}` (docs/10 §8.2).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConsoleAccount")
+            .field("id", &self.id)
+            .field("email", &"<redacted>")
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
 }

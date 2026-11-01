@@ -105,6 +105,16 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-01 — T-F15-16 — Almacén de la consola (migración y repositorios)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada. Sin rutas ni correo todavía (T-F15-17 y T-F15-05).
+- Requisitos: FR-CON-001, FR-CON-003, FR-CON-005, FR-CON-009 y FR-CON-010 ganan su capa de persistencia; siguen `pendiente` hasta tener las rutas.
+- Qué: `migrations/0006_console_accounts.sql`, `ConsoleRepository` (códigos, cuentas, sesiones, organizaciones, presupuesto de correo, purga), `ConsoleRole`/`AccountStatus`/`ConsoleAccount`; `docs/11` §2.0.1 con el contador diario.
+- Decisiones de diseño: cada límite que debe resistir la concurrencia es una sentencia SQL atómica (`INSERT … ON CONFLICT … WHERE`, `UPDATE … WHERE attempts < N RETURNING`), y el intento se cuenta **antes** de comparar el código; el límite de organizaciones usa un bloqueo consultivo por cuenta; una organización ajena es indistinguible de una inexistente.
+- Verificación: `cargo test -p gs-store` 17 pruebas nuevas OK contra PostgreSQL 16; clippy y fmt limpios; `cargo test --workspace --all-features --no-fail-fast` 707 pruebas, 0 fallos.
+- Lección del entorno: `GS_OPENAPI_JSON`, que uso para las pruebas de `gs-api`, hace fallar a `serve` si está exportada en el shell, porque `17` rechaza las claves `GS_*` desconocidas. En CI no existe; el JSON se deja en `target/openapi/geostream.v1.json`.
+- Tiempos medidos en Railway (revisión programada): el despliegue de `tiles` pasó a `SUCCESS` en unos 2 min 40 s desde su creación (incluida la descarga de datos), mucho menos que en mi máquina; el del portal, unos 25 s con la capa de Flutter en caché.
+
 ### 2026-11-01 — T-F15-03 — Contrato de la consola (único PR sobre `contracts/`)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada. Solo contrato y documentación; las rutas se implementan después (T-F15-05, T-F15-17).

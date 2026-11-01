@@ -197,4 +197,6 @@ intensivo en producción (`13` §2).
 **Un error que costó una prueba:** `--nodemap-type=array` hace que Planetiler pida 112 GB de montón para Panamá y se
 niegue a empezar («Insufficient resources for read phase»). Una ejecución anterior lo ocultaba porque llevaba
 `--force`, que se salta esa comprobación. El Dockerfile usa el valor por defecto (`sparsearray`) y nunca `--force`.
-Lo que necesite el constructor de Railway no está medido.
+**En Railway** (revisión del 2026-11-01): el despliegue de `tiles` pasó a `SUCCESS` unos 2 min 40 s después de crear el
+servicio, descarga de datos incluida (red de centro de datos, mucho más rápida que la doméstica); el consumo de memoria
+del constructor no está medido.
