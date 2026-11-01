@@ -445,6 +445,7 @@ Aditiva. Ninguna tabla existente cambia. Todas las claves primarias son UUID (`a
 | `console_sessions` | `id`, `account_id`, `token_sha256` (único), `expires_at`, `revoked_at`, `created_at` | Solo SHA-256 del token; nunca el token |
 | `console_identities` | `account_id`, `issuer`, `subject` (único por par) | Reservada para «Entrar con Gravital» (T-F15-20) |
 | `tenant_memberships` | `account_id`, `tenant_id`, `role` (`OWNER`/`ADMIN`/`VIEWER`), `created_at` | Clave `(account_id, tenant_id)`; todo acceso a un tenant se filtra por ella |
+| `console_email_counters` | `day` (UTC), `sent` | Tope diario global de correos (`GS_CONSOLE_EMAIL_DAILY_CAP`), incrementado de forma atómica |
 
 Contadores de uso y cuotas (`17` §4) llegan con T-F15-06 en su propia migración.
 
