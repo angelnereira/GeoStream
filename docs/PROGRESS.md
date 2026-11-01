@@ -112,7 +112,7 @@ Formato de cada entrada (más reciente arriba):
 - Qué: `migrations/0006_console_accounts.sql`, `ConsoleRepository` (códigos, cuentas, sesiones, organizaciones, presupuesto de correo, purga), `ConsoleRole`/`AccountStatus`/`ConsoleAccount`; `docs/11` §2.0.1 con el contador diario.
 - Decisiones de diseño: cada límite que debe resistir la concurrencia es una sentencia SQL atómica (`INSERT … ON CONFLICT … WHERE`, `UPDATE … WHERE attempts < N RETURNING`), y el intento se cuenta **antes** de comparar el código; el límite de organizaciones usa un bloqueo consultivo por cuenta; una organización ajena es indistinguible de una inexistente.
 - Verificación: `cargo test -p gs-store` 17 pruebas nuevas OK contra PostgreSQL 16; clippy y fmt limpios; `cargo test --workspace --all-features --no-fail-fast` 707 pruebas, 0 fallos.
-- Lección del entorno: `GS_OPENAPI_JSON`, que uso para las pruebas de `gs-api`, hace fallar a `serve` si está exportada en el shell, porque `17` rechaza las claves `GS_*` desconocidas. En CI no existe; el JSON se deja en `target/openapi/geostream.v1.json`.
+- Lección del entorno: la variable de las pruebas de `gs-api` que apunta al OpenAPI empaquetado empieza por `GS_`; exportada en el shell hace fallar a `serve` (dos pruebas de `apps/geostream`), porque `17` rechaza las claves `GS_*` desconocidas. En CI no existe: el JSON se deja en `target/openapi/geostream.v1.json`, su ruta por defecto.
 - Tiempos medidos en Railway (revisión programada): el despliegue de `tiles` pasó a `SUCCESS` en unos 2 min 40 s desde su creación (incluida la descarga de datos), mucho menos que en mi máquina; el del portal, unos 25 s con la capa de Flutter en caché.
 
 ### 2026-11-01 — T-F15-03 — Contrato de la consola (único PR sobre `contracts/`)
