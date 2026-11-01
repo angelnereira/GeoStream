@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod api_key;
+pub mod console;
 pub mod crypto;
 pub mod jwt;
 pub mod scopes;
@@ -11,6 +12,11 @@ pub mod ticket;
 pub use api_key::{
     ApiKeyError, CREDENTIAL_PREFIX, KEY_ID_HEX_LEN, SECRET_BYTES, SECRET_LEN, format_credential,
     generate_secret, hash_secret, parse_credential, verify_credential,
+};
+pub use console::{
+    ConsoleAuthError, ConsoleKeys, EmailAddress, OTP_MAX_LENGTH, OTP_MIN_LENGTH,
+    SESSION_TOKEN_PREFIX, generate_code, generate_session_token, hash_session_token,
+    is_code_shaped, is_session_token_shaped,
 };
 pub use crypto::{
     CryptoError, CryptoRotator, DataCipher, ENVELOPE_VERSION, NONCE_LEN, cipher_from_config_key,
@@ -40,3 +46,4 @@ pub use ticket::{
 // They are re-exported here so the service layer can read and validate tenant policy.
 pub use gs_config::error::PolicyError;
 pub use gs_config::policy::{POLICY_KEYS, TenantPolicy};
+pub use gs_config::{ConsoleConfig, EmailConfig, SecretString};

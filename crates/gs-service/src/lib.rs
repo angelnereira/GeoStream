@@ -5,6 +5,7 @@ pub mod admin;
 pub mod audit;
 pub mod auth;
 pub mod authz;
+pub mod console;
 pub mod control;
 pub mod idempotency;
 pub mod invitations;

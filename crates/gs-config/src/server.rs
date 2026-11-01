@@ -6,6 +6,10 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+
+use crate::console::{ConsoleConfig, ConsoleHmacKey, EmailConfig};
 use crate::env::{Environment, LogFormat, StateBackend};
 use crate::error::ConfigError;
 use crate::secret::{DataEncryptionKey, SecretString};
@@ -73,6 +77,22 @@ pub const KNOWN_SERVER_ENV_KEYS: &[&str] = &[
     "GS_STREAM_AUTH_EXPIRING_LEAD_S",
     "GS_STREAM_APP_MAX_CONNECTION_AGE_S",
     "GS_STREAM_UPGRADE_RPM_PER_IP",
+    "GS_CONSOLE_PUBLIC_URL",
+    "GS_CONSOLE_MAX_ORGS_PER_ACCOUNT",
+    "GS_CONSOLE_SIGNUP_RPM_PER_IP",
+    "GS_CONSOLE_OTP_LENGTH",
+    "GS_CONSOLE_OTP_TTL_S",
+    "GS_CONSOLE_OTP_MAX_ATTEMPTS",
+    "GS_CONSOLE_OTP_COOLDOWN_S",
+    "GS_CONSOLE_OTP_HMAC_KEY",
+    "GS_CONSOLE_OTP_HMAC_KEY_FILE",
+    "GS_CONSOLE_SESSION_TTL_S",
+    "GS_CONSOLE_EMAIL_PROVIDER",
+    "GS_CONSOLE_EMAIL_API_KEY",
+    "GS_CONSOLE_EMAIL_API_KEY_FILE",
+    "GS_CONSOLE_EMAIL_FROM",
+    "GS_CONSOLE_EMAIL_DAILY_CAP",
+    "GS_CONSOLE_EMAIL_DIR",
     "GS_STREAM_MAX_INBOUND_MSGS_PER_S",
     "GS_STREAM_ABUSE_WINDOW_S",
     "GS_STREAM_MAX_PROTOCOL_ERRORS",
@@ -153,6 +173,8 @@ pub struct ServerConfig {
     pub stream_pending_events_max: usize,
     pub stream_offline_grace_ms: u64,
     pub stream_auth_expiring_lead_s: u64,
+    /// The developer console; `None` unless `GS_CONSOLE_OTP_HMAC_KEY` is set (docs/17 §2.12).
+    pub console: Option<ConsoleConfig>,
     pub stream_app_max_connection_age_s: u64,
     pub stream_upgrade_rpm_per_ip: u32,
     pub stream_max_inbound_msgs_per_s: u32,
@@ -616,6 +638,112 @@ impl ServerConfig {
         let stream_pending_events_max = get_usize("GS_STREAM_PENDING_EVENTS_MAX", 256, 16, 4096)?;
         let stream_offline_grace_ms = get_u64("GS_STREAM_OFFLINE_GRACE_MS", 10000, 0, 120000)?;
         let stream_auth_expiring_lead_s = get_u64("GS_STREAM_AUTH_EXPIRING_LEAD_S", 60, 10, 600)?;
+
+        // Developer console (ADR-0036). Enabled only by its HMAC key; any other console setting
+        // without it is a configuration mistake, not something to ignore.
+        let console_hmac_key = get_str("GS_CONSOLE_OTP_HMAC_KEY")?;
+        let any_console_key = env_map.keys().any(|k| {
+            k.starts_with("GS_CONSOLE_")
+                && k != "GS_CONSOLE_OTP_HMAC_KEY"
+                && k != "GS_CONSOLE_OTP_HMAC_KEY_FILE"
+        });
+        let console = match console_hmac_key {
+            None if any_console_key => {
+                return Err(ConfigError::MissingKey(
+                    "GS_CONSOLE_OTP_HMAC_KEY".to_string(),
+                ));
+            }
+            None => None,
+            Some(key_b64) => {
+                let key_bytes = BASE64_STANDARD.decode(key_b64.trim()).map_err(|e| {
+                    ConfigError::InvalidValue {
+                        key: "GS_CONSOLE_OTP_HMAC_KEY".to_string(),
+                        message: format!("invalid base64 encoding: {e}"),
+                    }
+                })?;
+                if key_bytes.len() != 32 {
+                    return Err(ConfigError::InvalidValue {
+                        key: "GS_CONSOLE_OTP_HMAC_KEY".to_string(),
+                        message: format!("expected exactly 32 bytes, got {}", key_bytes.len()),
+                    });
+                }
+                let public_url = get_str("GS_CONSOLE_PUBLIC_URL")?
+                    .ok_or_else(|| ConfigError::MissingKey("GS_CONSOLE_PUBLIC_URL".to_string()))?;
+                if env == Environment::Prod && !public_url.starts_with("https://") {
+                    return Err(ConfigError::EnvironmentRestriction {
+                        key: "GS_CONSOLE_PUBLIC_URL".to_string(),
+                        env: "prod".to_string(),
+                        message: "the console origin must use https:// in production".to_string(),
+                    });
+                }
+                if !(public_url.starts_with("https://") || public_url.starts_with("http://")) {
+                    return Err(ConfigError::InvalidValue {
+                        key: "GS_CONSOLE_PUBLIC_URL".to_string(),
+                        message: "expected an http(s) URL".to_string(),
+                    });
+                }
+                let from = get_str("GS_CONSOLE_EMAIL_FROM")?
+                    .ok_or_else(|| ConfigError::MissingKey("GS_CONSOLE_EMAIL_FROM".to_string()))?;
+                if from.is_empty() || from.len() > 254 || from.chars().any(char::is_control) {
+                    return Err(ConfigError::InvalidValue {
+                        key: "GS_CONSOLE_EMAIL_FROM".to_string(),
+                        message: "expected a sender address without control characters".to_string(),
+                    });
+                }
+                let email = match get_str("GS_CONSOLE_EMAIL_PROVIDER")?
+                    .unwrap_or_else(|| "resend".to_string())
+                    .as_str()
+                {
+                    "resend" => EmailConfig::Resend {
+                        api_key: SecretString::new(
+                            get_str("GS_CONSOLE_EMAIL_API_KEY")?.ok_or_else(|| {
+                                ConfigError::MissingKey("GS_CONSOLE_EMAIL_API_KEY".to_string())
+                            })?,
+                        ),
+                        from,
+                    },
+                    "file" => {
+                        if env == Environment::Prod {
+                            return Err(ConfigError::EnvironmentRestriction {
+                                key: "GS_CONSOLE_EMAIL_PROVIDER".to_string(),
+                                env: "prod".to_string(),
+                                message:
+                                    "the 'file' e-mail provider is only allowed in dev and test"
+                                        .to_string(),
+                            });
+                        }
+                        let dir = get_str("GS_CONSOLE_EMAIL_DIR")?.ok_or_else(|| {
+                            ConfigError::MissingKey("GS_CONSOLE_EMAIL_DIR".to_string())
+                        })?;
+                        EmailConfig::File {
+                            dir: PathBuf::from(dir),
+                            from,
+                        }
+                    }
+                    other => {
+                        return Err(ConfigError::InvalidValue {
+                            key: "GS_CONSOLE_EMAIL_PROVIDER".to_string(),
+                            message: format!(
+                                "unknown provider '{other}', expected 'resend' or 'file'"
+                            ),
+                        });
+                    }
+                };
+                Some(ConsoleConfig {
+                    public_url,
+                    otp_length: get_u64("GS_CONSOLE_OTP_LENGTH", 6, 6, 10)?,
+                    otp_ttl_s: get_u64("GS_CONSOLE_OTP_TTL_S", 600, 60, 1800)?,
+                    otp_max_attempts: get_u64("GS_CONSOLE_OTP_MAX_ATTEMPTS", 5, 3, 10)?,
+                    otp_cooldown_s: get_u64("GS_CONSOLE_OTP_COOLDOWN_S", 60, 10, 600)?,
+                    otp_hmac_key: ConsoleHmacKey::new(key_bytes),
+                    session_ttl_s: get_u64("GS_CONSOLE_SESSION_TTL_S", 43_200, 900, 604_800)?,
+                    email,
+                    email_daily_cap: get_u64("GS_CONSOLE_EMAIL_DAILY_CAP", 500, 1, 100_000)?,
+                    max_orgs_per_account: get_u64("GS_CONSOLE_MAX_ORGS_PER_ACCOUNT", 3, 1, 100)?,
+                    signup_rpm_per_ip: get_u64("GS_CONSOLE_SIGNUP_RPM_PER_IP", 10, 1, 600)?,
+                })
+            }
+        };
         let stream_app_max_connection_age_s =
             get_u64("GS_STREAM_APP_MAX_CONNECTION_AGE_S", 3600, 300, 86400)?;
         let stream_upgrade_rpm_per_ip = get_u32("GS_STREAM_UPGRADE_RPM_PER_IP", 120, 1, 100000)?;
@@ -726,6 +854,7 @@ impl ServerConfig {
             stream_pending_events_max,
             stream_offline_grace_ms,
             stream_auth_expiring_lead_s,
+            console,
             stream_app_max_connection_age_s,
             stream_upgrade_rpm_per_ip,
             stream_max_inbound_msgs_per_s,

@@ -1681,6 +1681,7 @@ dependencies = [
  "getrandom 0.4.3",
  "gs-config",
  "gs-domain",
+ "hmac",
  "jsonwebtoken",
  "rand 0.10.3",
  "serde",
@@ -1883,6 +1884,7 @@ dependencies = [
 name = "gs-service"
 version = "0.0.0"
 dependencies = [
+ "axum",
  "base64 0.23.1",
  "dashmap",
  "gs-auth",
@@ -1895,6 +1897,7 @@ dependencies = [
  "metrics",
  "pbjson-types",
  "prost",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
@@ -1903,6 +1906,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "uuid",
  "zeroize",
 ]

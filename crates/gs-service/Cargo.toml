@@ -28,11 +28,14 @@ tracing.workspace = true
 metrics.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+reqwest.workspace = true
 
 # Test-only: the admin use-case suite verifies audit records and that the api key secret is
 # never persisted in plaintext. `crates/check_crate_deps` only inspects normal dependencies,
 # and no production path in this crate reaches PostgreSQL directly (docs/04 §4.1).
 [dev-dependencies]
+axum.workspace = true
+tracing-subscriber.workspace = true
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres", "uuid", "time", "json", "migrate"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 time = { workspace = true, features = ["formatting"] }
