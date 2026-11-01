@@ -9,6 +9,7 @@ info:
     - Semántica: docs/07_REST_API.md. Validación: docs/09_VALIDATION_ERRORS.md. Autorización: docs/06_IDENTITY_AUTH.md.
     - Extensiones propias:
       - `x-gs-phase`: fase del roadmap en la que la operación debe existir.
+      - `x-gs-console`: rol mínimo en la organización para las operaciones de la consola (`none`, `session`, `VIEWER`, `ADMIN`, `OWNER`);
       - `x-gs-auth.application` / `x-gs-auth.device`: scope requerido para ese principal;
         `none` = permitido sin scope adicional; `forbidden` = principal no permitido.
       - `x-gs-capability`: capacidad requerida en la sesión cuando el principal es un dispositivo.
@@ -48,6 +49,8 @@ tags:
     description: Agregados k-anónimos y lugares aprendidos (E6/E7).
   - name: Edge
     description: Tags BLE, reportes cifrados e ingesta LPWAN (E8).
+  - name: Console
+    description: 'Consola de desarrolladores: cuentas, organizaciones, proyectos y API keys (F15, ADR-0036). Solo con sesión de consola.'
   - name: Health
     description: Liveness y readiness.
 paths:
@@ -2147,6 +2150,372 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # ---------- Consola de desarrolladores (F15, ADR-0033 §3, ADR-0036) ----------
+  /v1/console/auth/code:
+    post:
+      operationId: requestConsoleCode
+      tags: [Console]
+      summary: Pedir un código de un solo uso por correo.
+      description: 'Registro e inicio de sesión son la misma ceremonia (ADR-0036 §2). Responde siempre 202 con el mismo cuerpo, exista o no la cuenta: no revela qué correos están registrados. Si se pidió otro código hace menos de `GS_CONSOLE_OTP_COOLDOWN_S`, no se envía correo y la respuesta es la misma.'
+      x-gs-phase: F15
+      x-gs-auth: { application: none, device: none }
+      x-gs-console: none
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsoleCodeRequest' }
+      responses:
+        '202':
+          description: Aceptado; si el correo es válido recibirá un código.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleCodeAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/auth/verify:
+    post:
+      operationId: verifyConsoleCode
+      tags: [Console]
+      summary: Canjear el código y abrir sesión.
+      description: 'Si la cuenta no existe se crea (exige `accept_terms: true`). Todo fallo —código incorrecto, caducado, ya usado o con intentos agotados— responde igual: 401 `UNAUTHENTICATED`.'
+      x-gs-phase: F15
+      x-gs-auth: { application: none, device: none }
+      x-gs-console: none
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsoleVerifyRequest' }
+      responses:
+        '200':
+          description: Sesión abierta.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/auth/logout:
+    post:
+      operationId: logoutConsole
+      tags: [Console]
+      summary: Cerrar la sesión de consola.
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: session
+      security:
+        - consoleSession: []
+      responses:
+        '204':
+          description: Sesión revocada.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/me:
+    get:
+      operationId: getConsoleAccount
+      tags: [Console]
+      summary: Cuenta de la sesión.
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: session
+      security:
+        - consoleSession: []
+      responses:
+        '200':
+          description: Cuenta.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleAccount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      operationId: deleteConsoleAccount
+      tags: [Console]
+      summary: Borrar la cuenta y sus datos personales.
+      description: 'Elimina el correo y las sesiones. Rechaza con 409 si la cuenta es la única `OWNER` de una organización con proyectos activos: hay que transferir o deshabilitar antes.'
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: session
+      security:
+        - consoleSession: []
+      responses:
+        '204':
+          description: Cuenta borrada.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/organizations:
+    get:
+      operationId: listConsoleOrganizations
+      tags: [Console]
+      summary: Organizaciones de la cuenta.
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: session
+      security:
+        - consoleSession: []
+      responses:
+        '200':
+          description: Organizaciones.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleOrganizationList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createConsoleOrganization
+      tags: [Console]
+      summary: Crear una organización.
+      description: 'Crea un tenant con la política por defecto (capacidades opcionales apagadas) y hace `OWNER` a la cuenta. Limitado por `GS_CONSOLE_MAX_ORGS_PER_ACCOUNT`: al superarlo responde 429.'
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: session
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConsoleOrganizationRequest' }
+      responses:
+        '201':
+          description: Organización creada.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleOrganization' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/organizations/{organization_id}:
+    get:
+      operationId: getConsoleOrganization
+      tags: [Console]
+      summary: Una organización.
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: VIEWER
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIdPath'
+      responses:
+        '200':
+          description: Organización.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleOrganization' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/organizations/{organization_id}/projects:
+    get:
+      operationId: listConsoleProjects
+      tags: [Console]
+      summary: Proyectos de una organización.
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: VIEWER
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIdPath'
+      responses:
+        '200':
+          description: Proyectos.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleProjectList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createConsoleProject
+      tags: [Console]
+      summary: Crear un proyecto.
+      description: 'Un proyecto es una aplicación del tenant. Los scopes de dispositivo que se le permiten acotan los que sus tokens podrán pedir.'
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: ADMIN
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConsoleProjectRequest' }
+      responses:
+        '201':
+          description: Proyecto creado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleProject' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/organizations/{organization_id}/projects/{project_id}:
+    get:
+      operationId: getConsoleProject
+      tags: [Console]
+      summary: Un proyecto.
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: VIEWER
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIdPath'
+        - $ref: '#/components/parameters/ProjectIdPath'
+      responses:
+        '200':
+          description: Proyecto.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleProject' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      operationId: updateConsoleProject
+      tags: [Console]
+      summary: Cambiar nombre, estado, orígenes o scopes de dispositivo.
+      description: 'Deshabilitar un proyecto bloquea su REST y cierra sus conexiones de stream (FR-ADM-003).'
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: ADMIN
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIdPath'
+        - $ref: '#/components/parameters/ProjectIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateConsoleProjectRequest' }
+      responses:
+        '200':
+          description: Proyecto actualizado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleProject' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/organizations/{organization_id}/projects/{project_id}/keys:
+    get:
+      operationId: listConsoleApiKeys
+      tags: [Console]
+      summary: API keys de un proyecto (sin secretos).
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: VIEWER
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIdPath'
+        - $ref: '#/components/parameters/ProjectIdPath'
+      responses:
+        '200':
+          description: API keys.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleApiKeyList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createConsoleApiKey
+      tags: [Console]
+      summary: Crear una API key.
+      description: 'La key en claro (`secret`) se devuelve **una sola vez**, solo en esta respuesta: no se guarda y ninguna otra operación vuelve a mostrarla. Sin `scopes` explícitos no se crea la key: se concede un scope a uno (`06` §3.4). `locations:read` y los de la pista E exigen pedirse expresamente.'
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: ADMIN
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIdPath'
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConsoleApiKeyRequest' }
+      responses:
+        '201':
+          description: API key creada.
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleApiKeyCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/organizations/{organization_id}/projects/{project_id}/keys/{key_id}:
+    delete:
+      operationId: revokeConsoleApiKey
+      tags: [Console]
+      summary: Revocar una API key.
+      description: 'Deja de autenticar en el plazo de NFR-SEC-002.'
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: ADMIN
+      security:
+        - consoleSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationIdPath'
+        - $ref: '#/components/parameters/ProjectIdPath'
+        - $ref: '#/components/parameters/ConsoleKeyIdPath'
+      responses:
+        '204':
+          description: API key revocada.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
 webhooks:
   sessionEvent:
     post:
@@ -2292,6 +2661,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token de dispositivo EdDSA emitido por POST /v1/tokens.
+    consoleSession:
+      type: http
+      scheme: bearer
+      bearerFormat: 'gcs_<43 base64url>'
+      description: Sesión de consola (token opaco) emitida por POST /v1/console/auth/verify. No sirve para ninguna otra ruta.
 
   headers:
     RequestId:
@@ -2305,6 +2679,23 @@ components:
       schema: { type: integer, minimum: 1 }
 
   parameters:
+    OrganizationIdPath:
+      name: organization_id
+      in: path
+      required: true
+      description: Organización (tenant) de la consola.
+      schema: { $ref: '#/components/schemas/TenantId' }
+    ProjectIdPath:
+      name: project_id
+      in: path
+      required: true
+      description: Proyecto (aplicación) de la consola.
+      schema: { $ref: '#/components/schemas/ApplicationId' }
+    ConsoleKeyIdPath:
+      name: key_id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ApiKeyId' }
     SessionIdPath:
       name: session_id
       in: path
@@ -2482,6 +2873,8 @@ components:
   schemas:
     # ---------- Identificadores ----------
     TenantId: { type: string, pattern: '^ten_[0-9a-f]{32}$' }
+    AccountId: { type: string, pattern: '^acc_[0-9a-f]{32}$' }
+    ApiKeyId: { type: string, pattern: '^key_[0-9a-f]{32}$' }
     ApplicationId: { type: string, pattern: '^app_[0-9a-f]{32}$' }
     SubjectId: { type: string, pattern: '^sub_[0-9a-f]{32}$' }
     DeviceId: { type: string, pattern: '^dev_[0-9a-f]{32}$' }
@@ -3957,7 +4350,7 @@ components:
         finder_ephemeral_pub:
           type: string
           description: Punto P-256 comprimido del buscador (33 bytes SEC1, base64url).
-        payload_salt: { type: string, description: Sal de un solo uso, base64url. }
+        payload_salt: { type: string, description: 'Sal de un solo uso, base64url.' }
         ciphertext:
           type: string
           maxLength: 5464
@@ -4002,3 +4395,173 @@ components:
       properties:
         accepted: { type: integer, minimum: 0 }
         rejected: { type: integer, minimum: 0 }
+
+    # ---------- Consola (F15, ADR-0036) ----------
+    ApplicationScope:
+      type: string
+      description: Scopes de una API key de aplicación (docs/06 §3.4).
+      enum:
+        - 'tokens:mint'
+        - 'sessions:read'
+        - 'sessions:write'
+        - 'members:write'
+        - 'invitations:write'
+        - 'locations:read'
+        - 'stream:connect'
+        - 'subjects:manage'
+        - 'webhooks:manage'
+        - 'geofences:manage'
+    ConsoleRole:
+      type: string
+      enum: [OWNER, ADMIN, VIEWER]
+    ConsoleCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+    ConsoleCodeAccepted:
+      type: object
+      required: [accepted]
+      properties:
+        accepted: { type: boolean, enum: [true] }
+    ConsoleVerifyRequest:
+      type: object
+      additionalProperties: false
+      required: [email, code]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        code: { type: string, pattern: '^[0-9]{6,10}$' }
+        accept_terms:
+          type: boolean
+          description: Obligatorio como `true` cuando la cuenta aún no existe.
+    ConsoleAccount:
+      type: object
+      required: [id, email, status, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/AccountId' }
+        email: { type: string, format: email }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    ConsoleSession:
+      type: object
+      required: [token, expires_at, account, created]
+      properties:
+        token:
+          type: string
+          pattern: '^gcs_[A-Za-z0-9_-]{43}$'
+          description: Token opaco. Se guarda solo como SHA-256 en el servidor.
+        expires_at: { $ref: '#/components/schemas/Timestamp' }
+        account: { $ref: '#/components/schemas/ConsoleAccount' }
+        created: { type: boolean, description: '`true` si esta verificación creó la cuenta.' }
+    ConsoleOrganization:
+      type: object
+      required: [id, name, role, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/TenantId' }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        role: { $ref: '#/components/schemas/ConsoleRole' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    ConsoleOrganizationList:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ConsoleOrganization' } }
+    CreateConsoleOrganizationRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+    ConsoleProject:
+      type: object
+      required: [id, organization_id, name, status, allowed_device_scopes, allowed_origins, created_at, updated_at]
+      properties:
+        id: { $ref: '#/components/schemas/ApplicationId' }
+        organization_id: { $ref: '#/components/schemas/TenantId' }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        allowed_device_scopes:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/DeviceScope' }
+        allowed_origins:
+          type: array
+          maxItems: 20
+          items: { type: string, format: uri, maxLength: 200 }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+    ConsoleProjectList:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, maxItems: 1000, items: { $ref: '#/components/schemas/ConsoleProject' } }
+    CreateConsoleProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        allowed_device_scopes:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/DeviceScope' }
+        allowed_origins:
+          type: array
+          maxItems: 20
+          items: { type: string, format: uri, maxLength: 200 }
+    UpdateConsoleProjectRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        allowed_device_scopes:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/DeviceScope' }
+        allowed_origins:
+          type: array
+          maxItems: 20
+          items: { type: string, format: uri, maxLength: 200 }
+    ConsoleApiKey:
+      type: object
+      required: [id, label, prefix, scopes, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/ApiKeyId' }
+        label: { type: string, minLength: 1, maxLength: 64 }
+        prefix:
+          type: string
+          description: Primeros caracteres de la key, para reconocerla. No permite usarla.
+          maxLength: 16
+        scopes: { type: array, uniqueItems: true, items: { $ref: '#/components/schemas/ApplicationScope' } }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        expires_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+        revoked_at: { oneOf: [{ $ref: '#/components/schemas/Timestamp' }, { type: 'null' }] }
+    ConsoleApiKeyList:
+      type: object
+      required: [data]
+      properties:
+        data: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/ConsoleApiKey' } }
+    CreateConsoleApiKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [label, scopes]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 64 }
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/ApplicationScope' }
+        expires_in_days: { type: integer, minimum: 1, maximum: 365 }
+    ConsoleApiKeyCreated:
+      type: object
+      required: [key, secret]
+      properties:
+        key: { $ref: '#/components/schemas/ConsoleApiKey' }
+        secret:
+          type: string
+          pattern: '^gsk_[0-9a-f]{32}\.[A-Za-z0-9_-]{43}$'
+          description: La API key en claro. Se devuelve una sola vez; no se vuelve a mostrar.

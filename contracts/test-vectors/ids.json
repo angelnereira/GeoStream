@@ -41,6 +41,10 @@
     {
       "value": "lpw_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
       "type": "LpwanIntegrationId"
+    },
+    {
+      "value": "acc_0192b6c0a1e47c3f9d2a7b5e8f1c0d3a",
+      "type": "AccountId"
     }
   ],
   "invalid": [
@@ -103,6 +107,11 @@
       "value": "tag_0192B6C0A1E47C3F9D2A7B5E8F1C0D3A",
       "type": "TagId",
       "reason": "hex en mayúsculas"
+    },
+    {
+      "value": "acc_0192B6C0A1E47C3F9D2A7B5E8F1C0D3A",
+      "type": "AccountId",
+      "reason": "mayúsculas"
     }
   ],
   "external_subject_id": {
@@ -133,7 +142,7 @@
     ]
   },
   "notes": [
-    "Prefijos de docs/05_DOMAIN_MODEL.md §2: tag_, trp_, plc_, exp_, lpw_.",
+    "Prefijos de docs/05_DOMAIN_MODEL.md §2: tag_, trp_, plc_, exp_, lpw_, acc_.",
     "h3_cell NO es un ID público: es una celda entera opaca usada como clave de particionado y agregación, y se trata como coordenada a efectos de redacción (docs/10 §8.2)."
   ]
 }

@@ -33,7 +33,7 @@ Las entidades `Trip`, `LearnedPlace`, `LocationPoint` y `EdgeReport` se describe
 ## 2. Identificadores
 
 - Formato público: `<prefijo>_<32 hex minúscula>`, donde los 32 hex son un **UUIDv7** sin guiones (`Uuid::simple()`).
-- Regex general: `^(ten|app|key|sub|dev|ses|mem|inv|whk|evt|geo|con|req|aud|tag|trp|plc|exp|lpw)_[0-9a-f]{32}$`.
+- Regex general: `^(ten|app|key|sub|dev|ses|mem|inv|whk|evt|geo|con|req|aud|tag|trp|plc|exp|lpw|acc)_[0-9a-f]{32}$`.
 - En PostgreSQL se almacena el UUID (`uuid`); el prefijo se añade/valida en la frontera (`gs-domain::ids`), con un tipo newtype por entidad (`SessionId`, `MemberId`, …). Un ID con prefijo incorrecto es un error de validación, nunca se reinterpreta.
 - Los IDs no son secretos ni credenciales. UUIDv7 revela el instante de creación; se acepta (ADR-0011).
 - `external_subject_id` (del integrador): `^[A-Za-z0-9._:\-]{1,128}$`. El integrador DEBERÍA usar identificadores opacos, nunca correos ni teléfonos (por eso `@` y `+` no se admiten).
@@ -50,7 +50,7 @@ Las entidades `Trip`, `LearnedPlace`, `LocationPoint` y `EdgeReport` se describe
 | `mem_` | Membership | `aud_` | Registro de auditoría |
 | `tag_` | Tag BLE registrado (`25` §2.2) | `trp_` | Viaje (`24` §3) |
 | `plc_` | Lugar aprendido (`24` §3) | `exp_` | Exportación de historial (`24` §4) |
-| `lpw_` | Integración LPWAN (`25` §4) | | |
+| `lpw_` | Integración LPWAN (`25` §4) | `acc_` | Cuenta de consola (`06` §8.6, ADR-0036) |
 
 `h3_cell` **no** es un ID público: es una celda entera opaca usada como clave de particionado y de agregación, y se trata como coordenada a efectos de redacción (`10` §8.2).
 

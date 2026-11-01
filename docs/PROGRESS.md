@@ -105,6 +105,15 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-01 — T-F15-03 — Contrato de la consola (único PR sobre `contracts/`)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada. Solo contrato y documentación; las rutas se implementan después (T-F15-05, T-F15-17).
+- Requisitos: ninguno pasa a cumplido; FR-CON-001..012 siguen `pendiente` hasta su implementación.
+- Qué: 15 operaciones `/v1/console/*` y 14 esquemas en el OpenAPI, esquema de seguridad `consoleSession`, `x-gs-console`, `acc_`/`AccountId` (también en `gs-domain` y en los vectores de IDs), y las enmiendas de `05`, `06` (§8.2 y §8.6), `07` (§9.13) y `11` (§2.0.1). Sin código de error ni cambio de Protobuf nuevos (los límites usan `RATE_LIMITED`; las cuotas llegan con T-F15-06).
+- Defecto encontrado: el OpenAPI no pasaba Redocly en `main` por una descripción sin entrecomillar en `EdgeReportRequest.payload_salt`. Corregido aquí.
+- Verificación: `redocly lint` limpio; `geostream-tools all` OK (95 operaciones, 17 esquemas de ID); `cargo test -p gs-api -p gs-domain -p gs-testkit` OK con el JSON empaquetado del contrato; clippy limpio.
+- Revisión de Railway (programada): `tiles` y `portal` en `SUCCESS`; el portal público responde 200 en todas sus rutas, el proxy de la API rechaza `POST` y `/v1/tokens` con 404 y `/status/ready` devuelve el cuerpo del contrato con Redis `ok`; `/tiles/…` se sirve por red privada con caché (`x-tile-cache: HIT`).
+
 ### 2026-11-01 — T-F15-15 — Adopción documental de las cuentas propias de la consola
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada (sin código).

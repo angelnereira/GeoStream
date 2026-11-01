@@ -210,6 +210,7 @@ define_prefixed_id!(TripId, "trp", "Trip");
 define_prefixed_id!(PlaceId, "plc", "Place");
 define_prefixed_id!(ExportId, "exp", "Export");
 define_prefixed_id!(LpwanIntegrationId, "lpw", "LPWAN Integration");
+define_prefixed_id!(AccountId, "acc", "Console Account");
 
 /// Integrator-defined external subject identifier (`external_subject_id`).
 /// Regex: `^[A-Za-z0-9._:\-]{1,128}$`.

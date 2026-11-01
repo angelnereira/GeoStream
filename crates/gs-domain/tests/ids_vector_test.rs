@@ -114,6 +114,10 @@ fn test_valid_prefixed_ids_vectors() {
                     .expect("valid LpwanIntegrationId failed to parse");
                 assert_eq!(id.to_string(), v.value);
             }
+            "AccountId" => {
+                let id = AccountId::from_str(&v.value).expect("valid AccountId failed to parse");
+                assert_eq!(id.to_string(), v.value);
+            }
             other => panic!("unknown type {other} in valid vectors"),
         }
     }
@@ -143,6 +147,12 @@ fn test_invalid_prefixed_ids_vectors() {
                 assert!(
                     LpwanIntegrationId::from_str(&v.value).is_err(),
                     "expected invalid LpwanIntegrationId"
+                );
+            }
+            "AccountId" => {
+                assert!(
+                    AccountId::from_str(&v.value).is_err(),
+                    "expected invalid AccountId"
                 );
             }
             other => panic!("unknown type {other} in invalid vectors"),
@@ -221,6 +231,8 @@ fn test_all_entity_id_prefixes() {
     assert!(tag.to_string().starts_with("tag_"));
     let lpw = LpwanIntegrationId::new();
     assert!(lpw.to_string().starts_with("lpw_"));
+    let acc = AccountId::new();
+    assert!(acc.to_string().starts_with("acc_"));
 
     // Verify roundtrip for each
     assert_eq!(TenantId::from_str(&ten.to_string()).unwrap(), ten);
@@ -239,6 +251,7 @@ fn test_all_entity_id_prefixes() {
     assert_eq!(AuditId::from_str(&aud.to_string()).unwrap(), aud);
     assert_eq!(TagId::from_str(&tag.to_string()).unwrap(), tag);
     assert_eq!(LpwanIntegrationId::from_str(&lpw.to_string()).unwrap(), lpw);
+    assert_eq!(AccountId::from_str(&acc.to_string()).unwrap(), acc);
 
     // Cross-prefix rejection
     assert!(SessionId::from_str(&ten.to_string()).is_err());
