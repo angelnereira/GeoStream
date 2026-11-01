@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
 import 'src/api/api_client.dart';
+import 'src/console/console_api.dart';
 import 'src/status/status_client.dart';
 import 'src/ui/console_page.dart';
 import 'src/ui/landing_page.dart';
@@ -25,6 +26,10 @@ void main() {
         base: Uri.base.resolve('/api/'),
         apiKey: apiKey,
       ),
+      console: ConsoleApi(
+        client: http.Client(),
+        base: Uri.base.resolve('/api/'),
+      ),
       status: StatusClient(
         client: http.Client(),
         // Mismo origen: el servidor del portal hace de proxy del estado (ADR-0034 §3).
@@ -37,10 +42,18 @@ void main() {
 /// Aplicación del portal público de GeoStream.
 class PortalApp extends StatelessWidget {
   /// Crea la aplicación.
-  const PortalApp({super.key, required this.status, this.createClient});
+  const PortalApp({
+    super.key,
+    required this.status,
+    this.createClient,
+    this.console,
+  });
 
   /// Origen del estado en vivo.
   final StatusClient status;
+
+  /// Cliente de la consola de desarrolladores (registro y API keys).
+  final ConsoleApi? console;
 
   /// Cliente de la API para el acceso con API key.
   final ApiClientFactory? createClient;
@@ -59,7 +72,11 @@ class PortalApp extends StatelessWidget {
         brightness: Brightness.dark,
         colorSchemeSeed: const Color(0xFF0B6E4F),
       ),
-      home: LandingPage(status: status, createClient: createClient),
+      home: LandingPage(
+        status: status,
+        createClient: createClient,
+        console: console,
+      ),
     );
   }
 }

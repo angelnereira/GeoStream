@@ -23,10 +23,10 @@ Reglas:
 | FR-ADM-002 | MUST | F2 | Políticas por tenant | `crates/gs-config/tests/policy_test.rs`, `crates/gs-service/tests/admin_test.rs`, `apps/geostream/tests/admin_test.rs` | cumplido |
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs`, `crates/gs-service/tests/tokens_test.rs`, `crates/gs-api/tests/account_disabled_test.rs` | cumplido |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | en curso |
-| FR-CON-001 | MUST | F15 | Registro e inicio de sesión con correo y código | `crates/gs-service/tests/console_test.rs`, `crates/gs-api/tests/console_test.rs` | en curso |
+| FR-CON-001 | MUST | F15 | Registro e inicio de sesión con correo y código | `crates/gs-service/tests/console_test.rs`, `crates/gs-api/tests/console_test.rs`, `apps/portal/test/developer_console_test.dart` | en curso |
 | FR-CON-002 | MUST | F15 | Cuenta de consola separada de los usuarios finales | — | pendiente |
 | FR-CON-003 | MUST | F15 | Organizaciones y roles | `crates/gs-api/tests/console_test.rs`, `crates/gs-service/tests/console_workspace_test.rs` | en curso |
-| FR-CON-004 | MUST | F15 | Proyectos y API keys por autoservicio | `crates/gs-api/tests/console_test.rs`, `crates/gs-service/tests/console_workspace_test.rs` | en curso |
+| FR-CON-004 | MUST | F15 | Proyectos y API keys por autoservicio | `crates/gs-api/tests/console_test.rs`, `crates/gs-service/tests/console_workspace_test.rs`, `apps/portal/test/developer_console_test.dart` | en curso |
 | FR-CON-005 | MUST | F15 | Registro público con límites anti-abuso | `crates/gs-api/tests/console_test.rs` | en curso |
 | FR-CON-006 | MUST | F15 | Cuotas gratuitas por proyecto | — | pendiente |
 | FR-CON-007 | SHOULD | F15 | Panel de uso | — | pendiente |
@@ -34,7 +34,7 @@ Reglas:
 | FR-CON-009 | MUST | F15 | Sin enumeración de cuentas ni abuso del correo | `crates/gs-service/tests/console_test.rs`, `crates/gs-api/tests/console_test.rs` | en curso |
 | FR-CON-010 | MUST | F15 | Sesiones de consola revocables | `crates/gs-service/tests/console_test.rs`, `crates/gs-api/tests/console_test.rs` | en curso |
 | FR-CON-011 | MUST | F15 | Correo y código fuera de los registros | `crates/gs-service/tests/console_test.rs` | en curso |
-| FR-CON-012 | MUST | F15 | Gestión de API keys desde la consola | `crates/gs-api/tests/console_test.rs` | en curso |
+| FR-CON-012 | MUST | F15 | Gestión de API keys desde la consola | `crates/gs-api/tests/console_test.rs`, `apps/portal/test/developer_console_test.dart` | en curso |
 | FR-PRT-001 | MUST | F15 | Landing con contratos publicados | `tools/src/portal_docs.rs`, `apps/portal/test/landing_page_test.dart` | en curso |
 | FR-PRT-002 | MUST | F15 | Estado en vivo | `apps/portal/test/status_client_test.dart`, `apps/portal/test/landing_page_test.dart` | cumplido |
 | FR-PRT-003 | MUST | F15 | Documentación sin internos de seguridad | `tools/src/portal_docs.rs` | cumplido |

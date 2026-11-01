@@ -6,6 +6,14 @@ limit_req_zone $binary_remote_addr zone=portal_tiles:10m rate=60r/s;
 # Caché de teselas: las teselas son públicas y cambian solo al reconstruir el servicio.
 proxy_cache_path /var/cache/nginx/tiles levels=1:2 keys_zone=portal_tiles_cache:10m max_size=512m inactive=7d use_temp_path=off;
 
+# IP del cliente tal como la vio el borde de Railway: la última entrada de X-Forwarded-For (la añade el
+# borde; las anteriores las escribe el cliente y se pueden falsear). La API limita el registro por esa IP.
+map $http_x_forwarded_for $console_client_ip {
+    default $remote_addr;
+    "~(?<last>[^,\s]+)\s*$" $last;
+}
+limit_req_zone $binary_remote_addr zone=portal_console:10m rate=5r/s;
+
 server {
     listen ${PORT};
     # Los destinos se resuelven en cada petición: el portal arranca aunque el servicio de teselas aún no exista.
@@ -50,6 +58,28 @@ server {
         proxy_connect_timeout 3s;
         proxy_read_timeout 10s;
         proxy_hide_header Set-Cookie;
+        include /etc/nginx/security-headers.conf;
+        add_header Cache-Control "no-store" always;
+        add_header Content-Security-Policy "default-src 'none'" always;
+    }
+    # Consola de desarrolladores (FR-CON-001..012): registro, inicio de sesión, organizaciones, proyectos y
+    # API keys. Solo `/v1/console/…` y solo los métodos del contrato; el resto de `/api/` sigue siendo de lectura.
+    # Sin caché, sin registro de cabeceras ni de cuerpos: llevan el token de sesión, el código y el secreto.
+    location ~ "^/api/v1/console/(auth/(code|verify|logout)|me|organizations(/ten_[0-9a-f]{32}(/projects(/app_[0-9a-f]{32}(/keys(/key_[0-9a-f]{32})?)?)?)?)?)$" {
+        if ($request_method !~ ^(GET|POST|PATCH|DELETE)$) { return 404; }
+        access_log off;
+        limit_req zone=portal_console burst=20 nodelay;
+        client_max_body_size 8k;
+        set $api_upstream ${PORTAL_API_UPSTREAM};
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass $api_upstream;
+        proxy_ssl_server_name on;
+        proxy_set_header X-Forwarded-For $console_client_ip;
+        proxy_set_header X-Real-IP $console_client_ip;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 15s;
+        proxy_hide_header Set-Cookie;
+        proxy_no_cache 1;
         include /etc/nginx/security-headers.conf;
         add_header Cache-Control "no-store" always;
         add_header Content-Security-Policy "default-src 'none'" always;

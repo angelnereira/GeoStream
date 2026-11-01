@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../platform/link_opener.dart';
+import '../console/console_api.dart';
 import 'console_page.dart';
+import 'developer_console.dart';
 import '../status/status_client.dart';
 import 'status_card.dart';
 
@@ -68,12 +70,12 @@ const List<({String name, bool today, String note})> _capabilities = [
   (
     name: 'Consola con registro e inicio de sesión',
     today: false,
-    note: 'Depende de que Gravital ofrezca OpenID Connect.',
+    note: 'La pantalla y el servidor están listos; se activa en cuanto se configura el envío de correos con el código.',
   ),
   (
-    name: 'Mapa en vivo y demo con datos simulados',
-    today: false,
-    note: 'Con mapa propio basado en OpenStreetMap.',
+    name: 'Mapa en vivo con datos reales',
+    today: true,
+    note: 'Con tu API key de lectura, sobre un mapa propio basado en OpenStreetMap. Sin datos simulados.',
   ),
   (
     name: 'Geocercas en el servidor y webhooks',
@@ -85,13 +87,21 @@ const List<({String name, bool today, String note})> _capabilities = [
 /// Página única: presentación, estado, documentación y cómo empezar.
 class LandingPage extends StatelessWidget {
   /// Crea la página.
-  const LandingPage({super.key, required this.status, this.createClient});
+  const LandingPage({
+    super.key,
+    required this.status,
+    this.createClient,
+    this.console,
+  });
 
   /// Origen del estado en vivo.
   final StatusClient status;
 
   /// Crea el cliente de la API para el acceso con API key; sin él no se ofrece el acceso.
   final ApiClientFactory? createClient;
+
+  /// Cliente de la consola de desarrolladores; sin él no se ofrece el registro.
+  final ConsoleApi? console;
 
   @override
   Widget build(BuildContext context) {
@@ -109,9 +119,21 @@ class LandingPage extends StatelessWidget {
                     const _Header(),
                     const SizedBox(height: 32),
                     const _Hero(),
-                    if (createClient != null) ...[
+                    if (console != null) ...[
                       const SizedBox(height: 16),
                       FilledButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => DeveloperConsole(api: console!),
+                          ),
+                        ),
+                        icon: const Icon(Icons.vpn_key_outlined),
+                        label: const Text('Crear cuenta y obtener una API key'),
+                      ),
+                    ],
+                    if (createClient != null) ...[
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
                         onPressed: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) =>
@@ -295,7 +317,7 @@ class _Steps extends StatelessWidget {
       (
         '1',
         'Pide acceso',
-        'Hoy el alta de cada proyecto la hace el operador y te entrega una API key. El registro por autoservicio llega con la consola.',
+        'Crea tu cuenta con tu correo en la consola (sin contraseñas), crea una organización y un proyecto, y genera tu API key. Mientras la consola no esté activa, el alta la hace el operador.',
       ),
       (
         '2',
