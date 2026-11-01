@@ -11,6 +11,20 @@ No es un crate: queda fuera del workspace de Cargo y de la imagen del servidor.
 imagen. `cargo run -p geostream-tools -- portal-docs` falla si aparece un documento fuera de la lista permitida (nunca
 `10`, `16`, `17` ni `docs/decisions/`) o si falta algún contrato (FR-PRT-001, FR-PRT-003).
 
+## Rutas estables
+
+Estas rutas son archivos reales generados en el build a partir de `docs-manifest.txt`; una ruta inexistente de estos dos árboles devuelve 404. Quien enlace al portal desde fuera (por ejemplo, la landing de Gravital) puede enlazar **solo** estas:
+
+| Ruta | Contenido |
+|---|---|
+| `/` | Landing, estado y consola (la consola es una pantalla de la app, sin ruta propia) |
+| `/docs/api.html` | Referencia de la API REST |
+| `/docs/<guía>.html` | `07_REST_API`, `08_STREAM_PROTOCOL`, `09_VALIDATION_ERRORS`, `12_FLUTTER_SDK`, `13_MAPS_PROVIDERS`, `15_INTEGRATION_GUIDE` |
+| `/contracts/geostream.v1.yaml` | OpenAPI (hoy `1.0.0-draft.2`, un borrador) |
+| `/contracts/{common,location,session,stream}.proto` | Protobuf |
+
+Compromiso: ninguna de estas rutas desaparece ni cambia de nombre sin anunciarlo en `CHANGELOG.md`; añadir rutas nuevas no lo requiere. **No son rutas del portal** `/changelog`, `/sdk`, `/downloads` y similares: la app devuelve su HTML genérico con 200 para cualquier ruta que no sea un archivo, así que un 200 allí no prueba que exista nada. `/status/ready` es el proxy del estado de la API y su cuerpo lleva los nombres de las comprobaciones internas: no es para publicarlo en páginas de terceros.
+
 ## Desarrollo
 
 ```sh
