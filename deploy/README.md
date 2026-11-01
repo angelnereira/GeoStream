@@ -163,3 +163,30 @@ para dibujar la ruta del repartidor al cliente (`GET /route/v1/driving/{lon},{la
 Datos ODbL: la app muestra «© OpenStreetMap contributors». Para refrescar el mapa, redesplegar (vuelve a descargar el extracto).
 
 La configuración de cada servicio (Dockerfile, healthcheck, reinicio, rutas vigiladas) vive en los ajustes del servicio en Railway, no en un `railway.toml`: Railway aplicaría un `railway.toml` de la raíz a todos los servicios del repositorio.
+
+## Mapa propio (servicio `tiles`)
+
+Teselas vectoriales derivadas del extracto de OpenStreetMap de Panamá (Geofabrik) con el esquema OpenMapTiles,
+servidas por Martin (ADR-0034 §6, FR-MAP-007). Sustituye a `tile.openstreetmap.org`, cuya política no admite uso
+intensivo en producción (`13` §2).
+
+| Archivo | Qué es |
+|---|---|
+| `deploy/tiles/Dockerfile` | Construye las teselas con Planetiler al construir la imagen y las sirve con Martin. Imágenes fijadas por digest |
+| `deploy/tiles/style.json` | Estilo MapLibre propio. Rutas relativas al origen: `/tiles/panama/{z}/{x}/{y}` y `/tiles/font/{fontstack}/{range}` |
+
+- Servicio nuevo en Railway, origen este repositorio, `Dockerfile` en `deploy/tiles/Dockerfile`, directorio raíz
+  `deploy/tiles`, sin dominio público: el portal lo expone como `/tiles/` (T-F15-12). Rutas vigiladas: `deploy/tiles/**`.
+- Sirve `/panama` (TileJSON), `/panama/{z}/{x}/{y}` y `/font/{fontstack}/{range}` (glifos generados de Noto Sans).
+- **El cliente debe hacer absolutas las rutas del estilo con su origen** antes de dárselo a MapLibre: sus workers no
+  resuelven URLs relativas (`/tiles/…` falla con «Failed to parse URL»).
+- Atribución obligatoria y ya incluida en el estilo: «© OpenStreetMap contributors» (ODbL) y «© OpenMapTiles»
+  (CC-BY 4.0). `geostream-tools tiles-style` falla si falta o si el estilo apunta a servidores comunitarios.
+- Actualizar los datos = reconstruir la imagen (Geofabrik publica el extracto a diario). No hay actualización en
+  caliente.
+
+**Medido** (esta máquina, 12 CPU y 30 GB, red doméstica, 2026-11-01; no es una cifra de Railway):
+construcción completa 23 min 11 s, de ellos unos 9 min descargando los datos auxiliares (Natural Earth 434 MB,
+polígonos de agua 932 MB, lagos 80 MB y el extracto de 36 MB); resultado `panama.mbtiles` de 58 MB; el montón de la JVM
+de Planetiler (límite por defecto de 1,9 GB) llegó a 1,3 GB en la lectura de OSM y la construcción terminó sin errores;
+la tesela más grande ocupa 320 kB (199 kB comprimida). Lo que necesite el constructor de Railway no está medido.

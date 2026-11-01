@@ -37,7 +37,7 @@ Reglas:
 | FR-PRT-004 | SHOULD | F15 | Acceso con API key de solo lectura | — | pendiente |
 | FR-PRT-005 | SHOULD | F15 | Demo con datos simulados | — | pendiente |
 | FR-PRT-006 | COULD | F15 | Mapa en vivo con reglas del usuario | — | pendiente |
-| FR-MAP-007 | SHOULD | F15 | Mapa propio con teselas de OpenStreetMap | — | pendiente |
+| FR-MAP-007 | SHOULD | F15 | Mapa propio con teselas de OpenStreetMap | `tools/src/tiles_style.rs` | en curso |
 | FR-API-001 | MUST | F3 | Errores Problem Details | `crates/gs-domain/tests/error_mapping_test.rs`, `crates/gs-api/tests/skeleton_test.rs`, `crates/gs-api/tests/conformance_test.rs` | cumplido |
 | FR-API-002 | MUST | F3 | Idempotencia | `crates/gs-service/tests/idempotency_test.rs`, `crates/gs-auth/tests/crypto_test.rs` | cumplido |
 | FR-API-003 | MUST | F3 | Paginación por cursor | `crates/gs-domain/src/pagination.rs`, `crates/gs-api/src/pagination.rs` | cumplido |

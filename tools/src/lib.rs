@@ -12,3 +12,4 @@ pub mod markdown_links;
 pub mod phases;
 pub mod portal_docs;
 pub mod requirements;
+pub mod tiles_style;
