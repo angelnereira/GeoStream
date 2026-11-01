@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod analytics;
+pub mod console;
 pub mod edge;
 pub mod history;
 pub mod ingest;
@@ -33,6 +34,7 @@ pub use gs_service::admin;
 pub use gs_service::migrate;
 
 pub use analytics::{AnalyticsState, analytics_router};
+pub use console::{ConsoleApiState, console_router};
 pub use edge::{EdgeState, edge_router};
 pub use history::{HistoryState, history_router};
 pub use ingest::{IngestState, ingest_router};
