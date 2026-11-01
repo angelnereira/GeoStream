@@ -32,7 +32,7 @@ docker run --rm -p 8080:8080 geostream-portal
 | Variable | Default | Efecto |
 |---|---|---|
 | `PORT` | `8080` | Puerto de nginx (Railway lo define) |
-| `GS_API_UPSTREAM` | `https://geostream.gravitalcloud.com` | API cuyo `/health/ready` expone `/status/ready` |
+| `PORTAL_API_UPSTREAM` | `https://geostream.gravitalcloud.com` | API cuyo `/health/ready` expone `/status/ready` |
 
 Rutas: `/` (aplicación), `/status/ready` (proxy del estado), `/docs/…` (guías y referencia de la API con Redoc
 alojado en el propio portal, sin CDN) y `/contracts/…` (OpenAPI y `.proto`).

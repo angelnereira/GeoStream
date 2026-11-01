@@ -34,8 +34,8 @@ RUN flutter build web --release --no-web-resources-cdn
 # --- 3. nginx ---------------------------------------------------------------------------------
 FROM nginx:1.27-alpine
 ENV PORT=8080 \
-    GS_API_UPSTREAM=https://geostream.gravitalcloud.com \
-    NGINX_ENVSUBST_FILTER='^(PORT|GS_API_UPSTREAM)$'
+    PORTAL_API_UPSTREAM=https://geostream.gravitalcloud.com \
+    NGINX_ENVSUBST_FILTER='^(PORT|PORTAL_API_UPSTREAM)$'
 COPY apps/portal/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY apps/portal/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=flutter /app/build/web /usr/share/nginx/html

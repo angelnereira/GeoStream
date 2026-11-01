@@ -16,7 +16,7 @@ server {
 
     # Estado en vivo: proxy del `/health/ready` público de la API (mismo origen, sin CORS).
     location = /status/ready {
-        proxy_pass ${GS_API_UPSTREAM}/health/ready;
+        proxy_pass ${PORTAL_API_UPSTREAM}/health/ready;
         proxy_ssl_server_name on;
         proxy_connect_timeout 2s;
         proxy_read_timeout 3s;

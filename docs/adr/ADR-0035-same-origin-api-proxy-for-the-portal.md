@@ -24,7 +24,7 @@ aparece un problema que `07` §12 no resuelve:
    exige una decisión de seguridad propia (unión en el preflight o nueva autenticación en capa).
 2. **Proxy del mismo origen en el portal.** nginx publica `/api/…` con solo las rutas de lectura que usa el portal y
    las reenvía a la API. El navegador solo habla con su propio origen: no hay CORS, ni preflight, ni unión de orígenes.
-3. **Un `GS_CORS_ALLOWED_ORIGINS` global.** Sencillo, pero no es por aplicación y contradice `07` §12.
+3. **Una lista global de orígenes en la configuración del servidor.** Sencillo, pero no es por aplicación y contradice `07` §12.
 
 ## Decisión
 
@@ -39,7 +39,7 @@ decisión de seguridad cuando se aborde.
   limita la tasa por IP.
 - El navegador conserva la key solo en memoria (ADR-0034 §4) y la envía a su propio origen; `connect-src 'self'`
   se mantiene.
-- El proxy es un destino fijo (`GS_API_UPSTREAM`): no reenvía a hosts que elija el cliente (sin SSRF).
+- El proxy es un destino fijo (`PORTAL_API_UPSTREAM`): no reenvía a hosts que elija el cliente (sin SSRF).
 
 ## Consecuencias
 
