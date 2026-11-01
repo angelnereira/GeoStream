@@ -105,6 +105,18 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-01 — T-F15-17 — Códigos de un solo uso, sesiones y correo de la consola
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completada la lógica; **sin rutas todavía** (T-F15-05 las monta) y **sin un envío real de correo** (falta una clave del proveedor).
+- Requisitos: FR-CON-001, FR-CON-009, FR-CON-010 y FR-CON-011 ganan su lógica y sus pruebas; siguen `pendiente` hasta exponerlos por HTTP.
+- Decisión de estructura: no hay crate `gs-console`. `04` §4.1 manda que los casos de uso vivan en `gs-service` y que `gs-auth` sea el único del cono que depende de `gs-config`; las primitivas puras van a `gs-auth` y `ConsoleConfig` se reexporta desde ahí. Corregido en `21` (T-F15-17).
+- Qué: `gs-auth::console` (12 pruebas), `gs-config::ConsoleConfig` (9 pruebas nuevas), `gs-service::console` (18 pruebas contra PostgreSQL, un stub del proveedor y captura de logs).
+- Decisiones de seguridad: el código se compara en tiempo constante y el intento se cuenta antes de comparar; el HMAC del código incluye el correo (el código de Alice no abre la sesión de Mallory); un error del proveedor descarta su cuerpo porque puede repetir la dirección; el mensaje no lleva enlaces; la plantilla del correo nunca se rellena con datos del solicitante.
+- **Defecto en mi propia prueba, encontrado por mutación:** la primera versión de la prueba de privacidad pasaba aunque inyectara el correo en un log, porque el aviso de «no se pudo entregar» solo se ejecuta cuando falla el envío y yo llamaba al adaptador roto directamente, sin pasar por el servicio. Se reescribió para provocar el fallo a través de `request_code`, exige que ese log exista y se repitió la mutación: ahora falla con «a secret reached the logs».
+- Otro hallazgo: el tope diario de correos es global; las pruebas que lo miden se serializan con un candado de lectura/escritura para no competir con las demás.
+- Verificación: `cargo clippy -p gs-auth -p gs-config -p gs-service -p geostream-tools --all-targets -- -D warnings` limpio; `geostream-tools crate-deps` OK; prueba manual del adaptador contra `api.resend.com` con una clave inválida: `Rejected(401)` (TLS, URL y Bearer correctos).
+- Sin implementar a propósito: el enfriamiento por IP (`GS_CONSOLE_SIGNUP_RPM_PER_IP`) pertenece a la capa HTTP (T-F15-05); el borrado periódico de códigos y sesiones vencidos (`purge_expired`) necesita el trabajador (`gs-worker`), que hoy es un esqueleto.
+
 ### 2026-11-01 — T-F15-16 — Almacén de la consola (migración y repositorios)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completada. Sin rutas ni correo todavía (T-F15-17 y T-F15-05).

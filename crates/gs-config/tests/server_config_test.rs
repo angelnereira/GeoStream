@@ -370,3 +370,172 @@ fn test_secret_file_variant_loading() {
         "postgres://from_file_user:secret@localhost:5432/from_file_db"
     );
 }
+
+// ---------- Developer console (ADR-0036, docs/17 §2.12) ----------
+
+fn console_env() -> HashMap<String, String> {
+    use base64::Engine as _;
+    let mut map = base_valid_env();
+    map.insert(
+        "GS_CONSOLE_OTP_HMAC_KEY".to_string(),
+        base64::engine::general_purpose::STANDARD.encode([7u8; 32]),
+    );
+    map.insert(
+        "GS_CONSOLE_PUBLIC_URL".to_string(),
+        "http://localhost:8088".to_string(),
+    );
+    map.insert(
+        "GS_CONSOLE_EMAIL_FROM".to_string(),
+        "GeoStream <no-reply@example.test>".to_string(),
+    );
+    map.insert(
+        "GS_CONSOLE_EMAIL_API_KEY".to_string(),
+        "re_test_key".to_string(),
+    );
+    map
+}
+
+#[test]
+fn test_fr_con_001_the_console_is_off_without_its_key() {
+    // covers: FR-CON-001
+    let config = ServerConfig::load_from_map(&base_valid_env()).expect("config");
+    assert!(config.console.is_none());
+}
+
+#[test]
+fn test_fr_con_001_console_defaults_match_the_documentation() {
+    // covers: FR-CON-001, docs/17 §2.12
+    let config = ServerConfig::load_from_map(&console_env()).expect("config");
+    let console = config.console.expect("console enabled");
+    assert_eq!(console.otp_length, 6);
+    assert_eq!(console.otp_ttl_s, 600);
+    assert_eq!(console.otp_max_attempts, 5);
+    assert_eq!(console.otp_cooldown_s, 60);
+    assert_eq!(console.session_ttl_s, 43_200);
+    assert_eq!(console.email_daily_cap, 500);
+    assert_eq!(console.max_orgs_per_account, 3);
+    assert_eq!(console.signup_rpm_per_ip, 10);
+    assert_eq!(console.otp_hmac_key.as_bytes(), &[7u8; 32]);
+    assert!(matches!(
+        console.email,
+        gs_config::EmailConfig::Resend { .. }
+    ));
+}
+
+#[test]
+fn test_fr_con_001_console_settings_without_the_key_are_an_error_not_ignored() {
+    // covers: FR-CON-001 (a half-configured console must not start silently disabled)
+    let mut env = console_env();
+    env.remove("GS_CONSOLE_OTP_HMAC_KEY");
+    assert_eq!(
+        ServerConfig::load_from_map(&env).unwrap_err(),
+        ConfigError::MissingKey("GS_CONSOLE_OTP_HMAC_KEY".to_string())
+    );
+}
+
+#[test]
+fn test_fr_con_001_the_hmac_key_must_be_32_bytes_of_base64() {
+    // covers: FR-CON-001, 10 T-41
+    for bad in ["no-es-base64!!", "AAAA", ""] {
+        let mut env = console_env();
+        env.insert("GS_CONSOLE_OTP_HMAC_KEY".to_string(), bad.to_string());
+        assert!(
+            matches!(
+                ServerConfig::load_from_map(&env),
+                Err(ConfigError::InvalidValue { ref key, .. }) if key == "GS_CONSOLE_OTP_HMAC_KEY"
+            ),
+            "{bad:?}"
+        );
+    }
+}
+
+#[test]
+fn test_fr_con_001_resend_needs_its_api_key_and_a_sender() {
+    // covers: FR-CON-001
+    let mut env = console_env();
+    env.remove("GS_CONSOLE_EMAIL_API_KEY");
+    assert_eq!(
+        ServerConfig::load_from_map(&env).unwrap_err(),
+        ConfigError::MissingKey("GS_CONSOLE_EMAIL_API_KEY".to_string())
+    );
+    let mut env = console_env();
+    env.remove("GS_CONSOLE_EMAIL_FROM");
+    assert_eq!(
+        ServerConfig::load_from_map(&env).unwrap_err(),
+        ConfigError::MissingKey("GS_CONSOLE_EMAIL_FROM".to_string())
+    );
+}
+
+#[test]
+fn test_fr_con_011_the_file_mail_provider_is_never_allowed_in_prod() {
+    // covers: FR-CON-011 (the file provider exists for dev and test only)
+    let mut env = console_env();
+    env.insert("GS_CONSOLE_EMAIL_PROVIDER".to_string(), "file".to_string());
+    env.insert("GS_CONSOLE_EMAIL_DIR".to_string(), "/tmp/mail".to_string());
+    let dev = ServerConfig::load_from_map(&env).expect("file provider in dev");
+    assert!(matches!(
+        dev.console.expect("console").email,
+        gs_config::EmailConfig::File { .. }
+    ));
+    env.insert("GS_ENV".to_string(), "prod".to_string());
+    env.insert(
+        "GS_PUBLIC_BASE_URL".to_string(),
+        "https://api.example.test".to_string(),
+    );
+    env.insert(
+        "GS_CONSOLE_PUBLIC_URL".to_string(),
+        "https://console.example.test".to_string(),
+    );
+    assert!(matches!(
+        ServerConfig::load_from_map(&env),
+        Err(ConfigError::EnvironmentRestriction { ref key, .. }) if key == "GS_CONSOLE_EMAIL_PROVIDER"
+    ));
+}
+
+#[test]
+fn test_fr_con_001_the_console_origin_must_be_https_in_prod() {
+    // covers: FR-CON-001, 10 T-33
+    let mut env = console_env();
+    env.insert("GS_ENV".to_string(), "prod".to_string());
+    env.insert(
+        "GS_PUBLIC_BASE_URL".to_string(),
+        "https://api.example.test".to_string(),
+    );
+    assert!(matches!(
+        ServerConfig::load_from_map(&env),
+        Err(ConfigError::EnvironmentRestriction { ref key, .. }) if key == "GS_CONSOLE_PUBLIC_URL"
+    ));
+}
+
+#[test]
+fn test_fr_con_001_console_ranges_are_enforced() {
+    // covers: FR-CON-001, FR-CON-009, docs/17 §2.12
+    for (key, bad) in [
+        ("GS_CONSOLE_OTP_LENGTH", "5"),
+        ("GS_CONSOLE_OTP_LENGTH", "11"),
+        ("GS_CONSOLE_OTP_TTL_S", "59"),
+        ("GS_CONSOLE_OTP_MAX_ATTEMPTS", "2"),
+        ("GS_CONSOLE_OTP_MAX_ATTEMPTS", "11"),
+        ("GS_CONSOLE_OTP_COOLDOWN_S", "9"),
+        ("GS_CONSOLE_SESSION_TTL_S", "899"),
+        ("GS_CONSOLE_EMAIL_DAILY_CAP", "0"),
+        ("GS_CONSOLE_MAX_ORGS_PER_ACCOUNT", "0"),
+        ("GS_CONSOLE_SIGNUP_RPM_PER_IP", "601"),
+    ] {
+        let mut env = console_env();
+        env.insert(key.to_string(), bad.to_string());
+        assert!(
+            ServerConfig::load_from_map(&env).is_err(),
+            "{key}={bad} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_fr_con_011_console_secrets_are_redacted_in_debug() {
+    // covers: FR-CON-011, docs/10 §8.2
+    let config = ServerConfig::load_from_map(&console_env()).expect("config");
+    let rendered = format!("{config:?}");
+    assert!(!rendered.contains("re_test_key"), "provider API key leaked");
+    assert!(!rendered.contains("[7, 7, 7"), "HMAC key leaked");
+}
