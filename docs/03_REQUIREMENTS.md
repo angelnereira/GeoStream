@@ -514,6 +514,11 @@ Cada requisito tiene el formato:
 - Descripción: documentar términos, cuotas, atribución y costos de cada proveedor soportado.
 - Aceptación: sección completa en `13` revisada en el PR del adaptador.
 
+#### FR-MAP-007 · SHOULD · F15 — Mapa propio con teselas de OpenStreetMap
+- Descripción: un servicio propio sirve teselas derivadas del extracto de OpenStreetMap de la región; el portal y la app de pruebas lo usan en lugar de los servidores comunitarios, con la atribución ODbL siempre visible.
+- Aceptación: el estilo del portal no referencia `tile.openstreetmap.org`; una prueba lo verifica y comprueba que la atribución está en el estilo.
+- Ref: ADR-0034 §6; `13` §2.
+
 ### 2.13 Webhooks (WHK)
 
 #### FR-WHK-001 · MUST · F8 — Registro de endpoints
@@ -560,6 +565,38 @@ Cada requisito tiene el formato:
 - Descripción: guía con patrones, flujo de tokens del backend y verificación de webhooks, con ejemplos ejecutables.
 - Aceptación: los ejemplos se ejecutan en CI contra el servidor.
 - Ref: `15`.
+
+### 2.14.1 Portal público (PRT)
+
+#### FR-PRT-001 · MUST · F15 — Landing con contratos publicados
+- Descripción: el portal publica el OpenAPI renderizado, los `.proto` y las guías de integración, generados desde el repositorio.
+- Aceptación: la imagen del portal contiene el HTML del OpenAPI y cada `.proto`; una prueba compara los archivos publicados con los de `contracts/`.
+- Ref: ADR-0034 §2.
+
+#### FR-PRT-002 · MUST · F15 — Estado en vivo
+- Descripción: el portal muestra el `ReadinessStatus` de la API con la hora de consulta y, si no obtiene respuesta, «sin datos» en lugar de «disponible».
+- Aceptación: con la API parada o con 503 el portal no muestra «disponible»; no se muestra ningún porcentaje de disponibilidad sin medición.
+- Ref: ADR-0034 §3.
+
+#### FR-PRT-003 · MUST · F15 — Documentación sin internos de seguridad
+- Descripción: solo se publican los documentos del manifiesto permitido; `10`, `16`, `17` y `docs/decisions/` no se publican nunca.
+- Aceptación: una prueba falla si el manifiesto contiene un documento fuera de la lista permitida.
+- Ref: ADR-0034 §2; `10` T-40.
+
+#### FR-PRT-004 · SHOULD · F15 — Acceso con API key de solo lectura
+- Descripción: el portal acepta una API key de solo lectura, la guarda solo en memoria y rechaza keys con scopes de escritura.
+- Aceptación: la key no aparece en `localStorage`, `sessionStorage` ni cookies tras usarla; una key con `sessions:write` es rechazada.
+- Ref: ADR-0034 §4; FR-INT-003.
+
+#### FR-PRT-005 · SHOULD · F15 — Demo con datos simulados
+- Descripción: cualquier visitante ve un mapa en vivo con repartidores simulados, marcados como simulados, sin cuenta.
+- Aceptación: la interfaz etiqueta los datos como simulados y la demo no contiene ubicaciones de personas reales.
+- Ref: ADR-0034 §5.
+
+#### FR-PRT-006 · COULD · F15 — Mapa en vivo con reglas del usuario
+- Descripción: el usuario ve en el mapa sus sesiones, quién está cerca y las reglas y límites que configuró (geocercas).
+- Aceptación: depende de F11 para evaluar geocercas en el servidor; hasta entonces se evalúan en el cliente y la interfaz lo declara.
+- Ref: ADR-0034; `14`.
 
 ### 2.15 Geocercas (GEO)
 

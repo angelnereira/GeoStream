@@ -39,5 +39,6 @@ Los ADR marcados **Aceptado (baseline v0.2.0)** forman parte del diseño inicial
 | [ADR-0031](ADR-0031-ffi-surface-and-language-bindings.md) | Herramientas de bindings por lenguaje y excepción de `unsafe` en `gs-ffi` | Aceptado |
 | [ADR-0032](ADR-0032-learned-map-layer-and-own-road-graph.md) | Grafo vial propio opcional (OSM/ODbL) y map-matching integrado | Aceptado |
 | [ADR-0033](ADR-0033-developer-console-and-gravital-oidc.md) | Consola de desarrolladores con inicio de sesión Gravital (OIDC), registro público y cuotas | Aceptado |
+| [ADR-0034](ADR-0034-public-portal-landing-docs-demo-and-own-tiles.md) | Portal público (landing, documentación, estado y demo) y mapa propio | Aceptado |
 
 Nota: ADR-0014 sustituyó el requisito FR-033 de la propuesta 0.1.0, y ADR-0025 reintroduce la cola `buffered` cifrada exclusivamente para sesiones con historial activo (`history_mode ≠ OFF`).

@@ -107,6 +107,9 @@ flowchart LR
 | T-35 | Elevation of privilege | Acceso a una organización ajena o escalada de `VIEWER` a `ADMIN` | Rol comprobado por organización en cada operación; 404 para organizaciones ajenas; la cuenta de consola nunca es subject ni dispositivo y no accede a rutas de datos | FR-CON-002, FR-CON-003 |
 | T-36 | Information disclosure | Fuga de API keys desde la consola | La key en claro se devuelve una sola vez al crearla y nunca se guarda (FR-AUTH-001); después solo su prefijo; auditoría de creación, rotación y revocación | FR-CON-004, FR-CON-008 |
 | T-37 | DoS | Un proyecto agota recursos compartidos | Cuotas por aplicación de `17` §4 además de los límites de tasa de `5.4`; contadores en el almacén efímero | FR-CON-006 |
+| T-38 | Information disclosure | API key de integrador expuesta en el navegador (XSS, extensiones, almacenamiento persistente) | Solo keys de solo lectura (`sessions:read`, `locations:read`) con vida corta; guardada solo en memoria; CSP estricta y `connect-src` acotado; el portal rechaza keys con scopes de escritura; CORS solo para los orígenes de la aplicación y `Allow-Credentials: false` | FR-PRT-004, FR-INT-003, ADR-0034 |
+| T-39 | DoS / abuso | Uso de la demo pública para saturar el servicio o scraping | Demo de solo lectura sobre datos simulados con límites propios de conexiones y de tasa por IP; sin ubicaciones reales | FR-PRT-005 |
+| T-40 | Information disclosure | Publicar por error documentación interna (modelo de amenazas, operaciones, configuración) | Manifiesto explícito de documentos permitidos y prueba que falla ante cualquier otro; `10`, `16`, `17` y `docs/decisions/` excluidos | FR-PRT-003 |
 
 ## 5. Controles transversales
 
