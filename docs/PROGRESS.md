@@ -105,6 +105,14 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-02 — Seguimiento de entregas: relevo del snapshot (DR-20261102-01, opción 1)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: decisión cerrada y patrón entregado. No cambia el servidor ni `contracts/`.
+- Qué: `examples/tracking-relay-node` (ejecutable, sin dependencias), `15` §3.2 y §6.3, DR movida a `accepted/`.
+- Verificación: ejecutado contra `geostream serve` real con una key creada por el CLI: `waiting` antes de compartir, `live` con lat/lon/rumbo tras publicar y mover, 404 con un token inventado y con el `session_id` usado como token, `finished` al cerrar la sesión. La respuesta no contiene `member_id`, otros miembros ni la API key.
+- Limitación conocida: la posición visible va hasta `CACHE_MS` por detrás (2 s por defecto); lo vimos en la prueba (una lectura inmediata tras publicar aún devolvía `waiting`).
+- Sin verificar: el relevo no tiene prueba automatizada (CI está detenido por facturación); se ejecutó a mano. El ejemplo guarda los pedidos en memoria: en producción deben ir a una base de datos.
+
 ### 2026-11-02 — Métricas del worker y decisión sobre el seguimiento del cliente final
 - Autor/agente: Angel Nereira (con agente de código).
 - Verificado en producción antes de empezar: el despliegue del PR #31 arrancó el worker (`worker started`, `batch_size=500`, `expiry_interval_s=15`) y los logs no muestran fallos de expiración ni de purga.
