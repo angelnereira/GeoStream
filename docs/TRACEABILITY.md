@@ -24,7 +24,7 @@ Reglas:
 | FR-ADM-003 | MUST | F3 | Deshabilitar tenant o aplicación | `apps/geostream/tests/admin_test.rs`, `crates/gs-service/tests/admin_test.rs`, `crates/gs-service/tests/tokens_test.rs`, `crates/gs-api/tests/account_disabled_test.rs` | cumplido |
 | FR-ADM-004 | COULD | F15 | API HTTP de administración | — | en curso |
 | FR-CON-001 | MUST | F15 | Registro e inicio de sesión con correo y código | `crates/gs-service/tests/console_test.rs`, `crates/gs-api/tests/console_test.rs`, `apps/portal/test/developer_console_test.dart` | en curso |
-| FR-CON-013 | MUST | F15 | Contraseña y acceso en dos pasos | `crates/gs-auth/src/password.rs` (vectores RFC 7914), `crates/gs-service/tests/console_test.rs`, `crates/gs-api/tests/console_test.rs`, `crates/gs-store/tests/console_test.rs` | en curso |
+| FR-CON-013 | MUST | F15 | Contraseña y acceso en dos pasos | `crates/gs-auth/src/password.rs` (vectores RFC 7914), `crates/gs-service/tests/console_test.rs`, `crates/gs-api/tests/console_test.rs`, `crates/gs-store/tests/console_test.rs`, `apps/portal/test/developer_console_test.dart` | en curso |
 | FR-CON-002 | MUST | F15 | Cuenta de consola separada de los usuarios finales | — | pendiente |
 | FR-CON-003 | MUST | F15 | Organizaciones y roles | `crates/gs-api/tests/console_test.rs`, `crates/gs-service/tests/console_workspace_test.rs` | en curso |
 | FR-CON-004 | MUST | F15 | Proyectos y API keys por autoservicio | `crates/gs-api/tests/console_test.rs`, `crates/gs-service/tests/console_workspace_test.rs`, `apps/portal/test/developer_console_test.dart` | en curso |

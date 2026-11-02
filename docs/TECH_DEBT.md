@@ -55,8 +55,6 @@ Sigue sin implementar:
 | 9 | Cuenta de consola separada de los usuarios finales (FR-CON-002) y reglas del usuario sobre su ubicación (FR-PRT-006) | | Sin tests ni implementación específica |
 
 ## 5. Verificaciones que no se han hecho
-- La imagen Docker completa del portal no se reconstruyó tras añadir la consola (sí se probó nginx real con la configuración renderizada).
-- La navegación landing → consola en un navegador real: solo cubierta por pruebas de widgets.
 - Un envío real de correo de punta a punta con una persona distinta del propietario.
 - Latencia de ingesta y snapshot frente al objetivo de p95 < 300 ms (NFR); no se ha medido.
 

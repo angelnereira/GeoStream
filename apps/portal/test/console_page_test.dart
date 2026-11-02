@@ -106,28 +106,51 @@ void main() {
     );
   });
 
-  // covers: FR-PRT-004 (la key nunca se guarda), 10 T-38
-  test('el código del portal no usa ningún almacenamiento del navegador', () {
-    const forbidden = [
-      'localStorage',
-      'sessionStorage',
-      'shared_preferences',
-      'document.cookie',
-      'indexedDB',
-      'window.name',
-    ];
-    final offenders = <String>[];
-    for (final file in Directory(
-      'lib',
-    ).listSync(recursive: true).whereType<File>()) {
-      if (!file.path.endsWith('.dart')) continue;
-      final text = file.readAsStringSync();
-      for (final word in forbidden) {
-        if (text.contains(word)) offenders.add('${file.path}: $word');
+  // covers: FR-PRT-004 (la API key nunca se guarda), FR-CON-013, 10 T-38, T-45, ADR-0037
+  test(
+    'solo el token de sesión de la consola se guarda, y solo en sessionStorage',
+    () {
+      const forbidden = [
+        'localStorage',
+        'sessionStorage',
+        'shared_preferences',
+        'document.cookie',
+        'indexedDB',
+        'window.name',
+      ];
+      // La única excepción: el almacén de la sesión de consola (ADR-0037) y solo `sessionStorage`.
+      const allowed = 'lib/src/platform/session_store_web.dart';
+      final offenders = <String>[];
+      final importers = <String>[];
+      for (final file in Directory(
+        'lib',
+      ).listSync(recursive: true).whereType<File>()) {
+        if (!file.path.endsWith('.dart')) continue;
+        final text = file.readAsStringSync();
+        for (final word in forbidden) {
+          final exempt = file.path == allowed && word == 'sessionStorage';
+          if (text.contains(word) && !exempt) {
+            offenders.add('${file.path}: $word');
+          }
+        }
+        if (text.contains('session_store') &&
+            !file.path.contains('/platform/')) {
+          importers.add(file.path);
+        }
       }
-    }
-    expect(offenders, isEmpty);
-  });
+      expect(offenders, isEmpty);
+      // Solo la consola recuerda su sesión: el acceso con API key y el mapa nunca tocan el almacén.
+      // Solo la consola y el botón de la portada (que solo mira si hay sesión para decir «Abrir mi consola»)
+      // tocan el almacén: el acceso con API key y el mapa nunca.
+      expect(
+        importers,
+        unorderedEquals([
+          'lib/src/ui/developer_console.dart',
+          'lib/src/ui/landing_page.dart',
+        ]),
+      );
+    },
+  );
 
   // covers: FR-MAP-007
   test('el estilo se hace absoluto con el origen y no apunta a servidores ajenos', () {
