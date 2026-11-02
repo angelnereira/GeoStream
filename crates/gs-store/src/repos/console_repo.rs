@@ -36,6 +36,15 @@ pub struct OtpAttempt {
     pub attempts: i32,
 }
 
+/// What a sign-in needs about an account: who it is, whether it is active and its password hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginRecord {
+    pub account_id: AccountId,
+    pub status: AccountStatus,
+    /// `None` until the account sets a password.
+    pub password_hash: Option<String>,
+}
+
 /// An organization of an account and the role the account has in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrganizationMembership {
@@ -163,7 +172,8 @@ impl ConsoleRepository {
     ) -> Result<Option<ConsoleAccount>, StoreError> {
         let row = sqlx::query(
             r#"
-            SELECT id, email_normalized, status, terms_accepted_at, created_at, updated_at
+            SELECT id, email_normalized, status, terms_accepted_at, created_at, updated_at,
+                   (password_hash IS NOT NULL) AS has_password
               FROM console_accounts
              WHERE email_normalized = $1;
             "#,
@@ -197,7 +207,8 @@ impl ConsoleRepository {
             INSERT INTO console_accounts (id, email_normalized, email_hash, status, terms_accepted_at)
             VALUES ($1, $2, $3, 'ACTIVE', now())
             ON CONFLICT (email_normalized) DO NOTHING
-            RETURNING id, email_normalized, status, terms_accepted_at, created_at, updated_at;
+            RETURNING id, email_normalized, status, terms_accepted_at, created_at, updated_at,
+                      (password_hash IS NOT NULL) AS has_password;
             "#,
         )
         .bind(AccountId::new().into_uuid())
@@ -289,7 +300,8 @@ impl ConsoleRepository {
     ) -> Result<Option<ConsoleAccount>, StoreError> {
         let row = sqlx::query(
             r#"
-            SELECT a.id, a.email_normalized, a.status, a.terms_accepted_at, a.created_at, a.updated_at
+            SELECT a.id, a.email_normalized, a.status, a.terms_accepted_at, a.created_at, a.updated_at,
+                   (a.password_hash IS NOT NULL) AS has_password
               FROM console_sessions s
               JOIN console_accounts a ON a.id = s.account_id
              WHERE s.token_sha256 = $1
@@ -469,6 +481,83 @@ impl ConsoleRepository {
             .collect()
     }
 
+    // ----- passwords ------------------------------------------------------------------------
+
+    /// The account and stored password hash of a normalized e-mail, for checking a sign-in. The hash is
+    /// `None` for an account that has not set a password yet.
+    pub async fn get_login_record(
+        pool: &PgPool,
+        email_normalized: &str,
+    ) -> Result<Option<LoginRecord>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, status, password_hash FROM console_accounts WHERE email_normalized = $1;",
+        )
+        .bind(email_normalized)
+        .fetch_optional(pool)
+        .await
+        .map_err(StoreError::Database)?;
+        row.map(|row| {
+            let status: String = row.get("status");
+            Ok(LoginRecord {
+                account_id: AccountId::from_uuid(row.get("id")),
+                status: status.parse().map_err(StoreError::DataMapping)?,
+                password_hash: row.get("password_hash"),
+            })
+        })
+        .transpose()
+    }
+
+    /// The stored password hash of an account, to check the current password before changing it.
+    pub async fn get_password_hash(
+        pool: &PgPool,
+        account_id: AccountId,
+    ) -> Result<Option<String>, StoreError> {
+        let hash: Option<Option<String>> =
+            sqlx::query_scalar("SELECT password_hash FROM console_accounts WHERE id = $1;")
+                .bind(account_id.into_uuid())
+                .fetch_optional(pool)
+                .await
+                .map_err(StoreError::Database)?;
+        Ok(hash.flatten())
+    }
+
+    /// Stores a new password hash. `false` if the account does not exist.
+    pub async fn set_password_hash(
+        pool: &PgPool,
+        account_id: AccountId,
+        password_hash: &str,
+    ) -> Result<bool, StoreError> {
+        let updated = sqlx::query(
+            "UPDATE console_accounts SET password_hash = $2, password_set_at = now(), updated_at = now() \
+             WHERE id = $1 RETURNING id;",
+        )
+        .bind(account_id.into_uuid())
+        .bind(password_hash)
+        .fetch_optional(pool)
+        .await
+        .map_err(StoreError::Database)?;
+        Ok(updated.is_some())
+    }
+
+    /// Revokes every session of the account except the one with `keep_token_sha256`. Used when the
+    /// password changes: whoever had the old password loses the sessions they opened with it.
+    pub async fn revoke_other_sessions(
+        pool: &PgPool,
+        account_id: AccountId,
+        keep_token_sha256: &[u8],
+    ) -> Result<u64, StoreError> {
+        let result = sqlx::query(
+            "UPDATE console_sessions SET revoked_at = now() \
+             WHERE account_id = $1 AND revoked_at IS NULL AND token_sha256 <> $2;",
+        )
+        .bind(account_id.into_uuid())
+        .bind(keep_token_sha256)
+        .execute(pool)
+        .await
+        .map_err(StoreError::Database)?;
+        Ok(result.rows_affected())
+    }
+
     // ----- housekeeping ---------------------------------------------------------------------
 
     /// Deletes what can no longer be used: codes and sessions expired or consumed more than a
@@ -499,5 +588,6 @@ fn map_account(row: sqlx::postgres::PgRow) -> Result<ConsoleAccount, StoreError>
         terms_accepted_at: row.get("terms_accepted_at"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        has_password: row.get("has_password"),
     })
 }

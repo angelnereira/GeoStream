@@ -577,6 +577,7 @@ fn test_fr_con_011_the_account_debug_output_hides_the_email() {
         terms_accepted_at: now,
         created_at: now,
         updated_at: now,
+        has_password: false,
     };
     let rendered = format!("{acc:?}");
     assert!(!rendered.contains("secret.person"), "{rendered}");
@@ -591,4 +592,100 @@ fn test_roles_form_a_hierarchy() {
     assert!(ConsoleRole::Viewer.at_least(ConsoleRole::Viewer));
     assert!(!ConsoleRole::Viewer.at_least(ConsoleRole::Admin));
     assert!(!ConsoleRole::Admin.at_least(ConsoleRole::Owner));
+}
+
+#[tokio::test]
+async fn test_fr_con_013_a_password_hash_is_stored_read_and_replaced() {
+    // covers: FR-CON-013, ADR-0037
+    let pool = setup_db().await;
+    let acc = account(&pool).await;
+    assert!(!acc.has_password, "a new account has no password yet");
+    let by_email = ConsoleRepository::get_login_record(&pool, &acc.email)
+        .await
+        .expect("record")
+        .expect("exists");
+    assert_eq!(by_email.account_id, acc.id);
+    assert_eq!(by_email.status, AccountStatus::Active);
+    assert_eq!(by_email.password_hash, None);
+
+    let first = format!("pbkdf2-sha256$600000${}${}", "A".repeat(22), "B".repeat(43));
+    assert!(
+        ConsoleRepository::set_password_hash(&pool, acc.id, &first)
+            .await
+            .expect("set")
+    );
+    assert_eq!(
+        ConsoleRepository::get_password_hash(&pool, acc.id)
+            .await
+            .expect("get"),
+        Some(first.clone())
+    );
+    let reloaded = ConsoleRepository::get_account_by_email(&pool, &acc.email)
+        .await
+        .expect("account")
+        .expect("exists");
+    assert!(reloaded.has_password);
+
+    let second = format!("pbkdf2-sha256$600000${}${}", "C".repeat(22), "D".repeat(43));
+    ConsoleRepository::set_password_hash(&pool, acc.id, &second)
+        .await
+        .expect("replace");
+    assert_eq!(
+        ConsoleRepository::get_password_hash(&pool, acc.id)
+            .await
+            .expect("get"),
+        Some(second)
+    );
+    assert!(
+        !ConsoleRepository::set_password_hash(&pool, AccountId::new(), &first)
+            .await
+            .expect("unknown account"),
+        "setting a password for an account that does not exist changes nothing"
+    );
+}
+
+#[tokio::test]
+async fn test_fr_con_013_changing_the_password_revokes_the_other_sessions_only() {
+    // covers: FR-CON-013, ADR-0037 (whoever had the old password loses their sessions)
+    let pool = setup_db().await;
+    let acc = account(&pool).await;
+    let (keep, other_a, other_b) = (digest(), digest(), digest());
+    for token in [&keep, &other_a, &other_b] {
+        ConsoleRepository::create_session(&pool, acc.id, token, 3600.0)
+            .await
+            .expect("session");
+    }
+    let revoked = ConsoleRepository::revoke_other_sessions(&pool, acc.id, &keep)
+        .await
+        .expect("revoke");
+    assert_eq!(revoked, 2);
+    assert!(
+        ConsoleRepository::find_active_session(&pool, &keep)
+            .await
+            .expect("find")
+            .is_some()
+    );
+    for token in [&other_a, &other_b] {
+        assert!(
+            ConsoleRepository::find_active_session(&pool, token)
+                .await
+                .expect("find")
+                .is_none()
+        );
+    }
+    // Another account's sessions are not touched.
+    let stranger = account(&pool).await;
+    let theirs = digest();
+    ConsoleRepository::create_session(&pool, stranger.id, &theirs, 3600.0)
+        .await
+        .expect("session");
+    ConsoleRepository::revoke_other_sessions(&pool, acc.id, &keep)
+        .await
+        .expect("revoke");
+    assert!(
+        ConsoleRepository::find_active_session(&pool, &theirs)
+            .await
+            .expect("find")
+            .is_some()
+    );
 }

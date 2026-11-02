@@ -105,6 +105,17 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-02 — Contraseña y acceso en dos pasos de la consola (parte servidor)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: servidor completo; **la interfaz del portal va en el PR siguiente**. Hasta que se despliegue, el portal anterior no puede registrarse (el registro ahora exige `password`).
+- Origen: el propietario probó la consola en producción y la describió como un asistente de una sola vez (correo, código, clave) sin cuenta a la que volver. Pidió contraseña, inicio de sesión, sesión persistente y un panel para administrar varias API keys, conservando el código «por seguridad».
+- Gobierno: no hay crate de hash de contraseñas aprobado (`19` §6.2). Añadirlo exige ADR; en su lugar PBKDF2-HMAC-SHA256 sobre `hmac` y `sha2` (aprobados), con el esquema en el propio hash para migrar a Argon2id sin romper nada. ADR-0037 y DR-20261102-02.
+- Qué: `gs_auth::password` (hash, política), claves de código por propósito en `ConsoleKeys`, migración `0007`, `LoginRecord` y funciones de contraseña en `ConsoleRepository`, `ConsoleAuth::{login, verify_login, change_password}` y `verify_code` con contraseña, tres rutas, contrato y documentos (`03`, `06`, `07`, `10`, `11`, `17`, `18`).
+- Verificación: clippy limpio y `cargo test --workspace` sin fallos. Pruebas nuevas: 8 del hash (vectores del RFC 7914 y de una implementación independiente), 8 de servicio, 4 HTTP validadas contra el OpenAPI, 2 de almacén, 1 de claves y la de los rangos de configuración. Mutación: inyectar un `warn!` con la contraseña en `login` hace fallar la prueba de privacidad.
+- Defectos propios corregidos: el trinquete de cobertura de operaciones (PR #35) me obligó a cubrir las tres operaciones nuevas; mis pruebas HTTP viejas usaban el cuerpo anterior sin `password`; y «short pass» tiene 10 caracteres, justo el mínimo, así que mi prueba de contraseña débil estaba mal.
+- Riesgos y límites conocidos (en `TECH_DEBT.md`): no hay bloqueo por cuenta, solo límite por IP; PBKDF2 resiste peor a una GPU que Argon2id; quien controla el buzón puede recuperar la cuenta; el hash cuesta ~0,2 s por intento de CPU.
+- Sin verificar: el coste real de 600 000 iteraciones en el servidor de Railway (en release); solo se probó con 1 000 en las pruebas.
+
 ### 2026-11-02 — Chequeo de cobertura de operaciones del OpenAPI (R-3)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completado el chequeo; la cobertura en sí sigue incompleta (44 operaciones en la lista de huecos).

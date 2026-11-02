@@ -514,6 +514,8 @@ pub struct ConsoleAccount {
     pub terms_accepted_at: OffsetDateTime,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
+    /// Whether the account has a password. The hash itself is never loaded with the account.
+    pub has_password: bool,
 }
 
 impl fmt::Debug for ConsoleAccount {

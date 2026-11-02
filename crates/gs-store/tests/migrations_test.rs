@@ -8,8 +8,8 @@ use gs_store::migrate::{MIGRATOR, expected_schema_version};
 
 #[test]
 fn schema_version_covers_the_e_track_and_the_console() {
-    // 0001 init, 0003 engine state, 0004 history, 0005 edge, 0006 console accounts.
-    assert_eq!(expected_schema_version(), 6);
+    // 0001 init, 0003 engine state, 0004 history, 0005 edge, 0006 console accounts, 0007 console passwords.
+    assert_eq!(expected_schema_version(), 7);
 }
 
 #[test]

@@ -415,6 +415,7 @@ fn test_fr_con_001_console_defaults_match_the_documentation() {
     assert_eq!(console.email_daily_cap, 500);
     assert_eq!(console.max_orgs_per_account, 3);
     assert_eq!(console.signup_rpm_per_ip, 10);
+    assert_eq!(console.password_iterations, 600_000);
     assert_eq!(console.otp_hmac_key.as_bytes(), &[7u8; 32]);
     assert!(matches!(
         console.email,
@@ -521,6 +522,8 @@ fn test_fr_con_001_console_ranges_are_enforced() {
         ("GS_CONSOLE_EMAIL_DAILY_CAP", "0"),
         ("GS_CONSOLE_MAX_ORGS_PER_ACCOUNT", "0"),
         ("GS_CONSOLE_SIGNUP_RPM_PER_IP", "601"),
+        ("GS_CONSOLE_PASSWORD_ITERATIONS", "99999"),
+        ("GS_CONSOLE_PASSWORD_ITERATIONS", "5000001"),
     ] {
         let mut env = console_env();
         env.insert(key.to_string(), bad.to_string());

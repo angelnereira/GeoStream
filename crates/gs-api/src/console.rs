@@ -77,8 +77,14 @@ pub fn console_router(state: ConsoleApiState) -> Router {
     Router::new()
         .route("/v1/console/auth/code", post(request_code))
         .route("/v1/console/auth/verify", post(verify_code))
+        .route("/v1/console/auth/login", post(login))
+        .route("/v1/console/auth/login/verify", post(verify_login))
         .route("/v1/console/auth/logout", post(logout))
         .route("/v1/console/me", get(get_me).delete(delete_me))
+        .route(
+            "/v1/console/me/password",
+            axum::routing::put(change_password),
+        )
         .route(
             "/v1/console/organizations",
             get(list_organizations).post(create_organization),
@@ -132,8 +138,30 @@ struct CodeRequest {
 struct VerifyRequest {
     email: String,
     code: String,
+    password: String,
     #[serde(default)]
     accept_terms: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoginRequest {
+    email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoginVerifyRequest {
+    email: String,
+    code: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChangePasswordRequest {
+    current_password: String,
+    new_password: String,
 }
 
 #[derive(Deserialize)]
@@ -172,6 +200,7 @@ struct AccountBody {
     id: String,
     email: String,
     status: &'static str,
+    has_password: bool,
     created_at: String,
 }
 
@@ -181,6 +210,7 @@ impl AccountBody {
             id: account.id.to_string(),
             email: account.email.clone(),
             status: account.status.as_str(),
+            has_password: account.has_password,
             created_at: rfc3339(account.created_at),
         }
     }
@@ -279,6 +309,21 @@ fn console_error(error: &ConsoleError, request_id: &str) -> Response {
     match error {
         ConsoleError::InvalidEmail => validation(request_id, "email"),
         ConsoleError::InvalidCodeFormat => validation(request_id, "code"),
+        ConsoleError::WeakPassword(policy) => {
+            let reason = match policy {
+                gs_service::gs_auth::PasswordPolicyError::Length => "out_of_range",
+                gs_service::gs_auth::PasswordPolicyError::TooWeak => "not_allowed",
+            };
+            ProblemResponse::new(
+                Problem::new(ErrorCode::ValidationFailed, request_id).with_errors(vec![
+                    FieldError {
+                        field: "password".to_string(),
+                        reason: reason.to_string(),
+                    },
+                ]),
+            )
+            .into_response()
+        }
         ConsoleError::TermsRequired => ProblemResponse::new(
             Problem::new(ErrorCode::ValidationFailed, request_id).with_errors(vec![FieldError {
                 field: "accept_terms".to_string(),
@@ -449,16 +494,100 @@ async fn verify_code(
     };
     let response = match state
         .auth
-        .verify_code(&request.email, &request.code, request.accept_terms)
+        .verify_code(
+            &request.email,
+            &request.code,
+            &request.password,
+            request.accept_terms,
+        )
         .await
     {
-        Ok(opened) => Json(serde_json::json!({
-            "token": opened.token.as_str(),
-            "expires_at": rfc3339(opened.expires_at),
-            "account": AccountBody::from(&opened.account),
-            "created": opened.created,
-        }))
-        .into_response(),
+        Ok(opened) => session_response(&opened),
+        Err(error) => console_error(&error, &request_id),
+    };
+    with_request_id(response, &request_id)
+}
+
+/// The `ConsoleSession` body: the only place a session token is ever serialized.
+fn session_response(opened: &gs_service::console::OpenedSession) -> Response {
+    Json(serde_json::json!({
+        "token": opened.token.as_str(),
+        "expires_at": rfc3339(opened.expires_at),
+        "account": AccountBody::from(&opened.account),
+        "created": opened.created,
+    }))
+    .into_response()
+}
+
+/// First step of a sign-in: the password. Answers `202` whatever the outcome, so it cannot be used to
+/// find out which accounts exist; the code is mailed only if the password was right.
+async fn login(
+    State(state): State<ConsoleApiState>,
+    headers: HeaderMap,
+    body: Result<Json<LoginRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    if let Some(limited) = limit_ip(&state, &headers, &request_id).await {
+        return limited;
+    }
+    let request = match json_body(body, &request_id) {
+        Ok(request) => request,
+        Err(response) => return *response,
+    };
+    let response = match state.auth.login(&request.email, &request.password).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({"accepted": true})),
+        )
+            .into_response(),
+        Err(error) => console_error(&error, &request_id),
+    };
+    with_request_id(response, &request_id)
+}
+
+/// Second step of a sign-in: the code mailed after a correct password.
+async fn verify_login(
+    State(state): State<ConsoleApiState>,
+    headers: HeaderMap,
+    body: Result<Json<LoginVerifyRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    if let Some(limited) = limit_ip(&state, &headers, &request_id).await {
+        return limited;
+    }
+    let request = match json_body(body, &request_id) {
+        Ok(request) => request,
+        Err(response) => return *response,
+    };
+    let response = match state.auth.verify_login(&request.email, &request.code).await {
+        Ok(opened) => session_response(&opened),
+        Err(error) => console_error(&error, &request_id),
+    };
+    with_request_id(response, &request_id)
+}
+
+async fn change_password(
+    State(state): State<ConsoleApiState>,
+    headers: HeaderMap,
+    body: Result<Json<ChangePasswordRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let request_id = request_id_from(&headers);
+    let caller = caller_or_return!(state, headers, request_id);
+    let request = match json_body(body, &request_id) {
+        Ok(request) => request,
+        Err(response) => return *response,
+    };
+    let response = match state
+        .auth
+        .change_password(
+            &caller.account,
+            &caller.token,
+            &request.current_password,
+            &request.new_password,
+        )
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => console_error(&error, &request_id),
     };
     with_request_id(response, &request_id)

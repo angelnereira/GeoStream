@@ -5,6 +5,7 @@ pub mod api_key;
 pub mod console;
 pub mod crypto;
 pub mod jwt;
+pub mod password;
 pub mod scopes;
 pub mod signing_key;
 pub mod ticket;
@@ -25,6 +26,11 @@ pub use crypto::{
 pub use jwt::{
     DeviceTokenClaims, IssuedDeviceToken, JwtError, SigningKey, SigningKeySet, TOKEN_AUDIENCE,
     issue_device_token, verify_device_token,
+};
+pub use password::{
+    DEFAULT_ITERATIONS as PASSWORD_DEFAULT_ITERATIONS, MAX_LENGTH as PASSWORD_MAX_LENGTH,
+    MIN_ITERATIONS as PASSWORD_MIN_ITERATIONS, MIN_LENGTH as PASSWORD_MIN_LENGTH, PasswordHasher,
+    PasswordPolicyError, validate_policy as validate_password_policy,
 };
 pub use scopes::{
     APPLICATION_SCOPES, DEFAULT_API_KEY_SCOPES, DEFAULT_DEVICE_TOKEN_SCOPES, DEVICE_SCOPES,

@@ -18,6 +18,9 @@ use reqwest::Method;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+/// A password that satisfies the policy. The harness uses 1 000 PBKDF2 rounds so the tests stay fast.
+const PASSWORD: &str = "a sturdy test password";
+
 fn test_database_url() -> String {
     std::env::var("GS_DATABASE_URL").unwrap_or_else(|_| {
         "postgres://geostream:geostream_dev_password@127.0.0.1:5432/geostream_test".to_string()
@@ -49,6 +52,7 @@ async fn harness_with(signup_rpm: u32, max_orgs: u32) -> Harness {
         session_ttl: Duration::from_secs(3600),
         email_daily_cap: 1_000_000,
         max_orgs_per_account: i64::from(max_orgs),
+        password_iterations: 1000,
     };
     let auth = ConsoleAuth::new(
         pool.clone(),
@@ -193,7 +197,7 @@ impl Harness {
                 Method::POST,
                 "/v1/console/auth/verify",
                 None,
-                Some(json!({"email": email, "code": code, "accept_terms": true})),
+                Some(json!({"email": email, "code": code, "password": PASSWORD, "accept_terms": true})),
                 &[],
             )
             .await;
@@ -359,7 +363,7 @@ async fn test_a_wrong_code_and_a_missing_session_are_the_same_unauthenticated() 
             Method::POST,
             "/v1/console/auth/verify",
             None,
-            Some(json!({"email": "x@example.test", "code": "000000", "accept_terms": true})),
+            Some(json!({"email": "x@example.test", "code": "000000", "password": PASSWORD, "accept_terms": true})),
             &[],
         )
         .await;
@@ -778,4 +782,279 @@ async fn test_deleting_the_account_ends_its_sessions() {
         )
         .await;
     assert_eq!(after.status, 401);
+}
+
+/// The code of the last mail sent to `email`.
+fn last_code(h: &Harness, email: &str) -> String {
+    let mail = h
+        .mailer
+        .sent()
+        .into_iter()
+        .rev()
+        .find(|m| m.to == email)
+        .expect("mail sent");
+    let start = mail.body.find("es: ").expect("marker") + 4;
+    mail.body[start..start + 6].to_string()
+}
+
+#[tokio::test]
+async fn test_fr_con_013_sign_in_is_password_then_code_and_the_session_works() {
+    // covers: FR-CON-013, ADR-0037
+    let h = harness().await;
+    let (first_token, email) = h.sign_up().await;
+    let me = h
+        .call(
+            "getConsoleAccount",
+            Method::GET,
+            "/v1/console/me",
+            Some(&first_token),
+            None,
+            &[],
+        )
+        .await;
+    assert_eq!(me.body["has_password"], json!(true));
+
+    let step1 = h
+        .call(
+            "requestConsoleLogin",
+            Method::POST,
+            "/v1/console/auth/login",
+            None,
+            Some(json!({"email": email, "password": PASSWORD})),
+            &[],
+        )
+        .await;
+    assert_eq!(step1.status, 202);
+    assert_eq!(step1.body, json!({"accepted": true}));
+    let step2 = h
+        .call(
+            "verifyConsoleLogin",
+            Method::POST,
+            "/v1/console/auth/login/verify",
+            None,
+            Some(json!({"email": email, "code": last_code(&h, &email)})),
+            &[],
+        )
+        .await;
+    assert_eq!(step2.status, 200, "{}", step2.body);
+    assert_eq!(step2.body["created"], json!(false));
+    let token = step2.body["token"].as_str().expect("token").to_string();
+    assert_ne!(token, first_token, "a sign-in opens a new session");
+    let orgs = h
+        .call(
+            "listConsoleOrganizations",
+            Method::GET,
+            "/v1/console/organizations",
+            Some(&token),
+            None,
+            &[],
+        )
+        .await;
+    assert_eq!(orgs.status, 200);
+}
+
+#[tokio::test]
+async fn test_fr_con_013_the_password_step_answers_alike_and_mails_nothing_when_it_is_wrong() {
+    // covers: FR-CON-013, FR-CON-009
+    let h = harness().await;
+    let (_, email) = h.sign_up().await;
+    let before = h.mailer.sent().len();
+    let mut answers = Vec::new();
+    for (who, password) in [
+        (email.clone(), "not the password at all"),
+        (
+            format!("nobody.{}@example.test", Uuid::new_v4().simple()),
+            PASSWORD,
+        ),
+    ] {
+        let reply = h
+            .call(
+                "requestConsoleLogin",
+                Method::POST,
+                "/v1/console/auth/login",
+                None,
+                Some(json!({"email": who, "password": password})),
+                &[],
+            )
+            .await;
+        answers.push((reply.status, reply.body));
+    }
+    assert_eq!(answers[0], answers[1]);
+    assert_eq!(answers[0].0, 202);
+    assert_eq!(
+        h.mailer.sent().len(),
+        before,
+        "no code without the password"
+    );
+
+    // And without a code mailed for sign-in, nothing signs in.
+    let reply = h
+        .call(
+            "verifyConsoleLogin",
+            Method::POST,
+            "/v1/console/auth/login/verify",
+            None,
+            Some(json!({"email": email, "code": "000000"})),
+            &[],
+        )
+        .await;
+    assert_eq!(reply.status, 401);
+    assert_eq!(reply.body["code"], json!("UNAUTHENTICATED"));
+}
+
+#[tokio::test]
+async fn test_fr_con_013_a_weak_or_missing_password_is_refused_at_registration() {
+    // covers: FR-CON-013 (policy checked before the code is spent)
+    let h = harness().await;
+    let email = format!("weak.{}@example.test", Uuid::new_v4().simple());
+    h.call(
+        "requestConsoleCode",
+        Method::POST,
+        "/v1/console/auth/code",
+        None,
+        Some(json!({"email": email})),
+        &[],
+    )
+    .await;
+    let code = last_code(&h, &email);
+    for password in ["short", "aaaaaaaaaaaa", "Password123"] {
+        let reply = h
+            .raw(
+                "verifyConsoleCode",
+                Method::POST,
+                "/v1/console/auth/verify",
+                None,
+                Some(json!({"email": email, "code": code, "password": password, "accept_terms": true})),
+                &[],
+            )
+            .await;
+        assert_eq!(reply.status, 422, "{password}: {}", reply.body);
+        assert_eq!(reply.body["errors"][0]["field"], json!("password"));
+    }
+    // The body of the contract requires the field.
+    let missing = h
+        .raw(
+            "verifyConsoleCode",
+            Method::POST,
+            "/v1/console/auth/verify",
+            None,
+            Some(json!({"email": email, "code": code, "accept_terms": true})),
+            &[],
+        )
+        .await;
+    assert_eq!(missing.status, 422);
+    // The same code still works with a good password.
+    let ok = h
+        .call(
+            "verifyConsoleCode",
+            Method::POST,
+            "/v1/console/auth/verify",
+            None,
+            Some(json!({"email": email, "code": code, "password": PASSWORD, "accept_terms": true})),
+            &[],
+        )
+        .await;
+    assert_eq!(ok.status, 200, "{}", ok.body);
+}
+
+#[tokio::test]
+async fn test_fr_con_013_changing_the_password_needs_the_current_one_and_closes_other_sessions() {
+    // covers: FR-CON-013, FR-CON-010
+    let h = harness().await;
+    let (first, email) = h.sign_up().await;
+    h.call(
+        "requestConsoleLogin",
+        Method::POST,
+        "/v1/console/auth/login",
+        None,
+        Some(json!({"email": email, "password": PASSWORD})),
+        &[],
+    )
+    .await;
+    let second = h
+        .call(
+            "verifyConsoleLogin",
+            Method::POST,
+            "/v1/console/auth/login/verify",
+            None,
+            Some(json!({"email": email, "code": last_code(&h, &email)})),
+            &[],
+        )
+        .await
+        .body["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    let wrong = h
+        .call(
+            "changeConsolePassword",
+            Method::PUT,
+            "/v1/console/me/password",
+            Some(&second),
+            Some(json!({"current_password": "not my password", "new_password": "the replacement password"})),
+            &[],
+        )
+        .await;
+    assert_eq!(wrong.status, 403);
+    assert_eq!(wrong.body["code"], json!("PERMISSION_DENIED"));
+
+    let weak = h
+        .raw(
+            "changeConsolePassword",
+            Method::PUT,
+            "/v1/console/me/password",
+            Some(&second),
+            Some(json!({"current_password": PASSWORD, "new_password": "too short"})),
+            &[],
+        )
+        .await;
+    assert_eq!(weak.status, 422);
+
+    let changed = h
+        .call(
+            "changeConsolePassword",
+            Method::PUT,
+            "/v1/console/me/password",
+            Some(&second),
+            Some(json!({"current_password": PASSWORD, "new_password": "the replacement password"})),
+            &[],
+        )
+        .await;
+    assert_eq!(changed.status, 204);
+    let still = h
+        .call(
+            "getConsoleAccount",
+            Method::GET,
+            "/v1/console/me",
+            Some(&second),
+            None,
+            &[],
+        )
+        .await;
+    assert_eq!(still.status, 200, "the session that changed it stays open");
+    let gone = h
+        .call(
+            "getConsoleAccount",
+            Method::GET,
+            "/v1/console/me",
+            Some(&first),
+            None,
+            &[],
+        )
+        .await;
+    assert_eq!(gone.status, 401, "the other session was closed");
+
+    // No session can change it either.
+    let anonymous = h
+        .call(
+            "changeConsolePassword",
+            Method::PUT,
+            "/v1/console/me/password",
+            None,
+            Some(json!({"current_password": "x", "new_password": "the replacement password"})),
+            &[],
+        )
+        .await;
+    assert_eq!(anonymous.status, 401);
 }

@@ -30,6 +30,7 @@ fn settings() -> ConsoleSettings {
         session_ttl: Duration::from_secs(3600),
         email_daily_cap: 10_000,
         max_orgs_per_account: 3,
+        password_iterations: 1000,
     }
 }
 
@@ -47,6 +48,9 @@ async fn service_with(settings: ConsoleSettings) -> (ConsoleAuth, Arc<EmailBacke
 async fn service() -> (ConsoleAuth, Arc<EmailBackend>) {
     service_with(settings()).await
 }
+
+/// A password that satisfies the policy; the tests use few iterations so they stay fast.
+const PASSWORD: &str = "a sturdy test password";
 
 fn address() -> String {
     format!("Person.{}@Example.Test", Uuid::new_v4().simple())
@@ -82,7 +86,10 @@ async fn test_fr_con_001_requesting_a_code_sends_one_mail_and_signs_a_new_accoun
     );
 
     let code = last_code(&mailer, &to);
-    let opened = auth.verify_code(&to, &code, true).await.expect("verify");
+    let opened = auth
+        .verify_code(&to, &code, PASSWORD, true)
+        .await
+        .expect("verify");
     assert!(opened.created, "first redemption creates the account");
     assert!(opened.token.starts_with("gcs_"));
     assert_eq!(opened.account.email, to.to_ascii_lowercase());
@@ -108,12 +115,12 @@ async fn test_fr_con_001_a_known_account_signs_in_without_creating_another() {
     let to = address();
     auth.request_code(&to).await.unwrap();
     let first = auth
-        .verify_code(&to, &last_code(&mailer, &to), true)
+        .verify_code(&to, &last_code(&mailer, &to), PASSWORD, true)
         .await
         .unwrap();
     auth.request_code(&to).await.unwrap();
     let second = auth
-        .verify_code(&to, &last_code(&mailer, &to), false)
+        .verify_code(&to, &last_code(&mailer, &to), PASSWORD, false)
         .await
         .expect("an existing account does not need the terms again");
     assert!(!second.created);
@@ -133,11 +140,13 @@ async fn test_fr_con_001_the_terms_are_required_for_a_new_account_but_the_code_s
     auth.request_code(&to).await.unwrap();
     let code = last_code(&mailer, &to);
     assert_eq!(
-        auth.verify_code(&to, &code, false).await.unwrap_err(),
+        auth.verify_code(&to, &code, PASSWORD, false)
+            .await
+            .unwrap_err(),
         ConsoleError::TermsRequired
     );
     // Same code, now with the terms accepted.
-    assert!(auth.verify_code(&to, &code, true).await.is_ok());
+    assert!(auth.verify_code(&to, &code, PASSWORD, true).await.is_ok());
 }
 
 #[tokio::test]
@@ -151,9 +160,12 @@ async fn test_fr_con_001_every_failure_of_the_code_is_the_same_unauthenticated()
     let wrong = if code == "000000" { "000001" } else { "000000" };
 
     // Wrong code for an address with a live code, and any code for an address with none.
-    let wrong_code = auth.verify_code(&to, wrong, true).await.unwrap_err();
+    let wrong_code = auth
+        .verify_code(&to, wrong, PASSWORD, true)
+        .await
+        .unwrap_err();
     let nobody = auth
-        .verify_code(&address(), "123456", true)
+        .verify_code(&address(), "123456", PASSWORD, true)
         .await
         .unwrap_err();
     assert_eq!(wrong_code, ConsoleError::Unauthenticated);
@@ -172,12 +184,16 @@ async fn test_fr_con_001_the_code_dies_after_the_attempt_limit_even_if_then_corr
     let wrong = if code == "000000" { "000001" } else { "000000" };
     for _ in 0..3 {
         assert_eq!(
-            auth.verify_code(&to, wrong, true).await.unwrap_err(),
+            auth.verify_code(&to, wrong, PASSWORD, true)
+                .await
+                .unwrap_err(),
             ConsoleError::Unauthenticated
         );
     }
     assert_eq!(
-        auth.verify_code(&to, &code, true).await.unwrap_err(),
+        auth.verify_code(&to, &code, PASSWORD, true)
+            .await
+            .unwrap_err(),
         ConsoleError::Unauthenticated,
         "the right code no longer works after three failures"
     );
@@ -191,9 +207,11 @@ async fn test_fr_con_001_a_code_cannot_be_used_twice() {
     let to = address();
     auth.request_code(&to).await.unwrap();
     let code = last_code(&mailer, &to);
-    assert!(auth.verify_code(&to, &code, true).await.is_ok());
+    assert!(auth.verify_code(&to, &code, PASSWORD, true).await.is_ok());
     assert_eq!(
-        auth.verify_code(&to, &code, true).await.unwrap_err(),
+        auth.verify_code(&to, &code, PASSWORD, true)
+            .await
+            .unwrap_err(),
         ConsoleError::Unauthenticated
     );
 }
@@ -208,7 +226,7 @@ async fn test_fr_con_001_a_code_only_works_for_its_own_address() {
     auth.request_code(&mallory).await.unwrap();
     let alices_code = last_code(&mailer, &alice);
     assert_eq!(
-        auth.verify_code(&mallory, &alices_code, true)
+        auth.verify_code(&mallory, &alices_code, PASSWORD, true)
             .await
             .unwrap_err(),
         ConsoleError::Unauthenticated,
@@ -237,7 +255,7 @@ async fn test_fr_con_009_the_answer_is_the_same_for_a_known_and_an_unknown_addre
     let (auth, mailer) = service_with(fast).await;
     let known = address();
     auth.request_code(&known).await.unwrap();
-    auth.verify_code(&known, &last_code(&mailer, &known), true)
+    auth.verify_code(&known, &last_code(&mailer, &known), PASSWORD, true)
         .await
         .unwrap();
 
@@ -266,7 +284,9 @@ async fn test_fr_con_009_malformed_addresses_are_rejected_before_any_work() {
     }
     assert!(mailer.sent().is_empty());
     assert_eq!(
-        auth.verify_code(&address(), "abc", true).await.unwrap_err(),
+        auth.verify_code(&address(), "abc", PASSWORD, true)
+            .await
+            .unwrap_err(),
         ConsoleError::InvalidCodeFormat
     );
 }
@@ -298,7 +318,7 @@ async fn test_fr_con_010_logout_revokes_the_session() {
     let to = address();
     auth.request_code(&to).await.unwrap();
     let opened = auth
-        .verify_code(&to, &last_code(&mailer, &to), true)
+        .verify_code(&to, &last_code(&mailer, &to), PASSWORD, true)
         .await
         .unwrap();
     auth.logout(&opened.token).await.unwrap();
@@ -327,7 +347,7 @@ async fn test_fr_con_010_the_database_holds_neither_the_code_nor_the_token() {
     let to = address();
     auth.request_code(&to).await.unwrap();
     let code = last_code(&mailer, &to);
-    let opened = auth.verify_code(&to, &code, true).await.unwrap();
+    let opened = auth.verify_code(&to, &code, PASSWORD, true).await.unwrap();
 
     let pool = connect_pool(&test_database_url()).await.unwrap();
     let stored_codes: Vec<Vec<u8>> = sqlx::query_scalar("SELECT code_hmac FROM console_otp_codes;")
@@ -359,7 +379,7 @@ async fn test_deleting_an_account_ends_its_sessions() {
     let to = address();
     auth.request_code(&to).await.unwrap();
     let opened = auth
-        .verify_code(&to, &last_code(&mailer, &to), true)
+        .verify_code(&to, &last_code(&mailer, &to), PASSWORD, true)
         .await
         .unwrap();
     auth.delete_account(opened.account.id).await.unwrap();
@@ -408,8 +428,8 @@ async fn test_fr_con_011_neither_the_email_nor_the_code_reaches_a_log() {
     auth.request_code(&to).await.unwrap();
     let code = last_code(&mailer, &to);
     let wrong = if code == "000000" { "000001" } else { "000000" };
-    let _ = auth.verify_code(&to, wrong, true).await;
-    let opened = auth.verify_code(&to, &code, true).await.unwrap();
+    let _ = auth.verify_code(&to, wrong, PASSWORD, true).await;
+    let opened = auth.verify_code(&to, &code, PASSWORD, true).await.unwrap();
     let _ = auth.authenticate(&opened.token).await;
     // A delivery failure logs too, and that is the path most likely to leak an address: drive it
     // through the service itself with a provider that cannot be reached.
@@ -573,4 +593,295 @@ async fn test_fr_con_011_the_file_provider_writes_the_message_to_its_directory_o
     assert!(text.contains("To: ana@example.test"));
     assert!(text.contains("654321"));
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+// ---------- passwords and the two-step sign-in (FR-CON-013, ADR-0037) ----------
+
+/// Registers an account with `PASSWORD` and returns its address and session.
+async fn registered(
+    auth: &ConsoleAuth,
+    mailer: &EmailBackend,
+) -> (String, gs_service::console::OpenedSession) {
+    let to = address();
+    auth.request_code(&to).await.unwrap();
+    let code = last_code(mailer, &to);
+    let opened = auth
+        .verify_code(&to, &code, PASSWORD, true)
+        .await
+        .expect("register");
+    (to, opened)
+}
+
+#[tokio::test]
+async fn test_fr_con_013_registration_sets_a_password_and_sign_in_needs_it_and_a_code() {
+    let _budget = BUDGET.read().await;
+    // covers: FR-CON-013, ADR-0037
+    let (auth, mailer) = service().await;
+    let (to, first) = registered(&auth, &mailer).await;
+    assert!(first.created && first.account.has_password);
+    let mails_after_registration = mailer.sent().len();
+
+    // Step 1: the right password mails a sign-in code. Step 2: the code opens the session.
+    assert_eq!(auth.login(&to, PASSWORD).await, Ok(()));
+    assert_eq!(mailer.sent().len(), mails_after_registration + 1);
+    let code = last_code(&mailer, &to);
+    let again = auth.verify_login(&to, &code).await.expect("sign in");
+    assert!(!again.created, "signing in again creates nothing");
+    assert_eq!(again.account.id, first.account.id);
+    assert!(auth.authenticate(&again.token).await.is_ok());
+    // The code is single use.
+    assert_eq!(
+        auth.verify_login(&to, &code).await.unwrap_err(),
+        ConsoleError::Unauthenticated
+    );
+}
+
+#[tokio::test]
+async fn test_fr_con_013_a_wrong_password_and_an_unknown_account_answer_alike_and_send_nothing() {
+    let _budget = BUDGET.read().await;
+    // covers: FR-CON-013, FR-CON-009 (no enumeration), ADR-0037
+    let (auth, mailer) = service().await;
+    let (to, _) = registered(&auth, &mailer).await;
+    let before = mailer.sent().len();
+
+    let wrong = auth.login(&to, "not the password at all").await;
+    let unknown = auth.login(&address(), PASSWORD).await;
+    assert_eq!(wrong, Ok(()));
+    assert_eq!(
+        wrong, unknown,
+        "the answer must not reveal which one it was"
+    );
+    assert_eq!(
+        mailer.sent().len(),
+        before,
+        "no code goes out without the password"
+    );
+
+    // Without a sign-in code nothing opens a session, whatever is guessed.
+    assert_eq!(
+        auth.verify_login(&to, "000000").await.unwrap_err(),
+        ConsoleError::Unauthenticated
+    );
+}
+
+#[tokio::test]
+async fn test_fr_con_013_the_two_kinds_of_code_are_not_interchangeable() {
+    let _budget = BUDGET.read().await;
+    // covers: FR-CON-013, ADR-0037 (asking for a registration code cannot stand in for a sign-in)
+    let (auth, mailer) = service().await;
+    let (to, _) = registered(&auth, &mailer).await;
+
+    // A registration code mailed to the mailbox does not sign in.
+    auth.request_code(&to).await.unwrap();
+    let registration_code = last_code(&mailer, &to);
+    assert_eq!(
+        auth.verify_login(&to, &registration_code)
+            .await
+            .unwrap_err(),
+        ConsoleError::Unauthenticated
+    );
+
+    // And a sign-in code does not recover or register.
+    assert_eq!(auth.login(&to, PASSWORD).await, Ok(()));
+    let sign_in_code = last_code(&mailer, &to);
+    assert_ne!(sign_in_code, registration_code);
+    let other_password = "another sturdy password";
+    assert_eq!(
+        auth.verify_code(&to, &sign_in_code, other_password, true)
+            .await
+            .map(|_| ())
+            .unwrap_err(),
+        ConsoleError::Unauthenticated,
+        "a sign-in code must not reset the password"
+    );
+}
+
+#[tokio::test]
+async fn test_fr_con_013_a_weak_password_is_refused_without_spending_the_code() {
+    let _budget = BUDGET.read().await;
+    // covers: FR-CON-013 (the person can fix the password and retry with the same code)
+    let (auth, mailer) = service().await;
+    let to = address();
+    auth.request_code(&to).await.unwrap();
+    let code = last_code(&mailer, &to);
+    for weak in ["short", "aaaaaaaaaaaa", "Password123"] {
+        assert!(matches!(
+            auth.verify_code(&to, &code, weak, true).await,
+            Err(ConsoleError::WeakPassword(_))
+        ));
+    }
+    assert!(auth.verify_code(&to, &code, PASSWORD, true).await.is_ok());
+}
+
+#[tokio::test]
+async fn test_fr_con_013_recovering_with_the_mailbox_code_replaces_the_password() {
+    let _budget = BUDGET.read().await;
+    // covers: FR-CON-013, ADR-0037 (account recovery by e-mail)
+    let (auth, mailer) = service().await;
+    let (to, _) = registered(&auth, &mailer).await;
+    let new_password = "a brand new password";
+
+    // The registration code was consumed, so a new request is a fresh code (no cooldown applies).
+    auth.request_code(&to).await.unwrap();
+    let code = last_code(&mailer, &to);
+    let opened = auth
+        .verify_code(&to, &code, new_password, false)
+        .await
+        .expect("recover");
+    assert!(!opened.created, "it is the same account");
+    let before = mailer.sent().len();
+    assert_eq!(auth.login(&to, PASSWORD).await, Ok(()));
+    assert_eq!(
+        mailer.sent().len(),
+        before,
+        "the old password no longer works"
+    );
+    assert_eq!(auth.login(&to, new_password).await, Ok(()));
+    assert_eq!(mailer.sent().len(), before + 1, "the new one does");
+}
+
+#[tokio::test]
+async fn test_fr_con_013_changing_the_password_needs_the_current_one_and_ends_other_sessions() {
+    let _budget = BUDGET.read().await;
+    // covers: FR-CON-013, FR-CON-010
+    let (auth, mailer) = service().await;
+    let (to, first) = registered(&auth, &mailer).await;
+    assert_eq!(auth.login(&to, PASSWORD).await, Ok(()));
+    let second = auth
+        .verify_login(&to, &last_code(&mailer, &to))
+        .await
+        .expect("second session");
+
+    let new_password = "the replacement password";
+    assert_eq!(
+        auth.change_password(
+            &second.account,
+            &second.token,
+            "wrong current one",
+            new_password
+        )
+        .await,
+        Err(ConsoleError::WrongPassword)
+    );
+    assert!(matches!(
+        auth.change_password(&second.account, &second.token, PASSWORD, "short")
+            .await,
+        Err(ConsoleError::WeakPassword(_))
+    ));
+    auth.change_password(&second.account, &second.token, PASSWORD, new_password)
+        .await
+        .expect("change");
+
+    assert!(
+        auth.authenticate(&second.token).await.is_ok(),
+        "the session that changed it stays"
+    );
+    assert_eq!(
+        auth.authenticate(&first.token).await.unwrap_err(),
+        ConsoleError::Unauthenticated,
+        "whoever had the old password loses their session"
+    );
+    let before = mailer.sent().len();
+    auth.login(&to, PASSWORD).await.unwrap();
+    assert_eq!(mailer.sent().len(), before, "the old password is dead");
+    auth.login(&to, new_password).await.unwrap();
+    assert_eq!(mailer.sent().len(), before + 1);
+}
+
+#[tokio::test]
+async fn test_fr_con_013_an_account_without_a_password_cannot_sign_in_and_a_hash_is_upgraded() {
+    let _budget = BUDGET.read().await;
+    // covers: FR-CON-013 (accounts from before passwords), ADR-0037 (iteration upgrade on sign-in)
+    let (auth, mailer) = service().await;
+    let pool = connect_pool(&test_database_url()).await.unwrap();
+    let to = address();
+    let email = EmailAddress::parse(&to).unwrap();
+    let keys = ConsoleKeys::new(&[42u8; 32]).unwrap();
+    let account = gs_store::ConsoleRepository::find_or_create_account(
+        &pool,
+        email.as_str(),
+        &keys.email_hash(&email),
+        true,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .0;
+    let before = mailer.sent().len();
+    assert_eq!(auth.login(&to, PASSWORD).await, Ok(()));
+    assert_eq!(
+        mailer.sent().len(),
+        before,
+        "no password set: nothing to sign in with"
+    );
+
+    // A hash made with fewer rounds still works and is replaced by one with the current count.
+    let weak_rounds = gs_auth::PasswordHasher::new(500).hash(PASSWORD);
+    gs_store::ConsoleRepository::set_password_hash(&pool, account.id, &weak_rounds)
+        .await
+        .unwrap();
+    assert_eq!(auth.login(&to, PASSWORD).await, Ok(()));
+    assert_eq!(mailer.sent().len(), before + 1, "the old hash verified");
+    let stored = gs_store::ConsoleRepository::get_password_hash(&pool, account.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        stored.starts_with("pbkdf2-sha256$1000$"),
+        "upgraded to the configured rounds: {stored}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn test_fr_con_013_no_password_or_hash_reaches_a_log() {
+    let _budget = BUDGET.read().await;
+    // covers: FR-CON-013, FR-CON-011, docs/10 §8.2
+    let capture = Capture::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(capture.clone())
+        .with_ansi(false)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let (auth, mailer) = service().await;
+    let (to, opened) = registered(&auth, &mailer).await;
+    let wrong = "a wrong password value";
+    auth.login(&to, wrong).await.unwrap();
+    auth.login(&to, PASSWORD).await.unwrap();
+    let new_password = "the replacement password";
+    auth.change_password(&opened.account, &opened.token, PASSWORD, new_password)
+        .await
+        .unwrap();
+    let _ = auth
+        .change_password(
+            &opened.account,
+            &opened.token,
+            "wrong current",
+            new_password,
+        )
+        .await;
+
+    let pool = connect_pool(&test_database_url()).await.unwrap();
+    let hash = gs_store::ConsoleRepository::get_password_hash(&pool, opened.account.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let logs = String::from_utf8(capture.0.lock().unwrap().clone()).expect("utf-8 logs");
+    for secret in [
+        PASSWORD,
+        wrong,
+        new_password,
+        "wrong current",
+        hash.as_str(),
+        "pbkdf2-sha256",
+    ] {
+        assert!(
+            !logs.contains(secret),
+            "a password or hash reached the logs: {secret}"
+        );
+    }
+    // The debug output of the session and the account must not carry them either.
+    let rendered = format!("{opened:?}");
+    assert!(!rendered.contains(PASSWORD) && !rendered.contains(&hash));
 }

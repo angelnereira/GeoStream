@@ -434,14 +434,14 @@ CREATE TABLE edge_lpwan_integrations (
 );
 ```
 
-### 2.0.1 Migración de la consola (F15, `0006_console_accounts.sql`)
+### 2.0.1 Migración de la consola (F15, `0006_console_accounts.sql`, `0007_console_passwords.sql`)
 
 Aditiva. Ninguna tabla existente cambia. Todas las claves primarias son UUID (`acc_…` se añade en la frontera, `05` §2). El correo es un dato personal (`10` §6.2).
 
 | Tabla | Columnas | Reglas |
 |---|---|---|
-| `console_accounts` | `id`, `email_normalized` (único), `email_hash` (HMAC, para logs), `status` (`ACTIVE`/`DISABLED`), `terms_accepted_at`, `created_at`, `updated_at` | Sin contraseña. Borrar la cuenta borra la fila y sus sesiones |
-| `console_otp_codes` | `id`, `email_hash`, `code_hmac`, `expires_at`, `attempts`, `consumed_at`, `created_at` | Solo HMAC del código; una fila viva por correo; se purga lo caducado |
+| `console_accounts` | `id`, `email_normalized` (único), `email_hash` (HMAC, para logs), `status` (`ACTIVE`/`DISABLED`), `terms_accepted_at`, `created_at`, `updated_at`, `password_hash`, `password_set_at` | `password_hash` (anulable): `pbkdf2-sha256$<iteraciones>$<sal>$<hash>`, nunca la contraseña; las cuentas anteriores a `0007` no la tienen hasta recuperar el acceso. Borrar la cuenta borra la fila y sus sesiones |
+| `console_otp_codes` | `id`, `email_hash`, `code_hmac`, `expires_at`, `attempts`, `consumed_at`, `created_at` | Solo HMAC del código; una fila viva por clave. `email_hash` guarda la clave de búsqueda: la del registro y la del acceso son distintas (dominios HMAC separados), así que un correo tiene como mucho una de cada; se purga lo caducado |
 | `console_sessions` | `id`, `account_id`, `token_sha256` (único), `expires_at`, `revoked_at`, `created_at` | Solo SHA-256 del token; nunca el token |
 | `console_identities` | `account_id`, `issuer`, `subject` (único por par) | Reservada para «Entrar con Gravital» (T-F15-20) |
 | `tenant_memberships` | `account_id`, `tenant_id`, `role` (`OWNER`/`ADMIN`/`VIEWER`), `created_at` | Clave `(account_id, tenant_id)`; todo acceso a un tenant se filtra por ella |
