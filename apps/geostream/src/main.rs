@@ -257,6 +257,8 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
         readiness_probe(database_url.as_deref(), Arc::clone(&state_cell)),
     );
 
+    let mut worker_task: Option<tokio::task::JoinHandle<()>> = None;
+
     if let Some(cfg) = &server_config {
         let db_url = cfg.database_url.expose_secret();
         let pool = gs_api::migrate::connect_pool(db_url)
@@ -400,6 +402,21 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                 }));
         }
 
+        if roles.contains(&Role::Worker) {
+            // Session expiry and the maintenance purges (`docs/11` §5). Every job is safe with
+            // several instances running at once.
+            worker_task = Some(tokio::spawn(gs_worker::run(
+                pool.clone(),
+                ephemeral.clone(),
+                bus.clone(),
+                prefix.clone(),
+                gs_worker::WorkerConfig {
+                    expiry_interval: Duration::from_secs(cfg.worker_expiry_interval_s),
+                    batch_size: cfg.worker_batch_size,
+                },
+            )));
+        }
+
         if roles.contains(&Role::Stream) {
             let stream_config = gs_stream::StreamConfig {
                 json_subprotocol_enabled: cfg.stream_json_enabled,
@@ -490,6 +507,9 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
         .await
         .context("server error while running HTTP listener")?;
 
+    if let Some(task) = worker_task {
+        task.abort();
+    }
     if let Some(dir) = ephemeral_key_dir {
         let _ = std::fs::remove_dir_all(dir);
     }

@@ -105,6 +105,15 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-01 — Worker real y hoja de ruta de deuda técnica
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completado. Sin tarea nueva del roadmap: corrige un defecto de producción y deja escrita la deuda (`docs/TECH_DEBT.md`).
+- Defecto: el rol `worker` no ejecutaba nada. `expiry_loop` no tenía ningún llamador, así que las sesiones no expiraban por tiempo y ninguna purga corría. `FR-SES-005` figuraba «cumplido» porque sus pruebas ejercitaban el caso de uso, no el servidor: corregido en `TRACEABILITY.md` citando la prueba del worker.
+- Qué: `gs_worker::{run, expire_sessions_once, run_maintenance_once}`, cableado en `serve` para el rol `worker` (por defecto activo, así que Railway lo ejecuta) y parada al apagar.
+- Verificación: clippy limpio, `cargo test --workspace` sin fallos, 2 pruebas nuevas (sesión vencida pasa a `EXPIRED` y una vigente no; la purga borra lo vencido y conserva lo vigente).
+- Sin implementar a propósito: retención de sesiones cerradas, invitaciones, auditoría y webhooks, y métricas de los jobs (ver `TECH_DEBT.md` §2–§3).
+- Efecto en producción al fusionar: las sesiones vencidas de antes empezarán a pasar a `EXPIRED` en el primer barrido (hasta `GS_WORKER_BATCH_SIZE` por pasada) y se publicará `SessionExpired` por el bus por cada una.
+
 ### 2026-11-01 — Ingesta HTTP y prueba de humo del consumidor
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: dos defectos corregidos en `POST /v1/ingest/locations` y un script de humo para proyectos consumidores. Sin tarea nueva del roadmap: es la comprobación de que Plenty-Pay puede consumir el servicio.

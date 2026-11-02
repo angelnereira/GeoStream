@@ -52,7 +52,7 @@ Reglas:
 | FR-SES-002 | MUST | F3 | Consultar y listar sesiones | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
 | FR-SES-003 | MUST | F3 | Actualizar sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
 | FR-SES-004 | MUST | F3 | Cerrar sesión | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
-| FR-SES-005 | MUST | F3 | Expiración automática | `crates/gs-service/tests/sessions_test.rs` | cumplido |
+| FR-SES-005 | MUST | F3 | Expiración automática | `crates/gs-service/tests/sessions_test.rs`, `crates/gs-worker/tests/worker_test.rs` | cumplido |
 | FR-SES-006 | MUST | F3 | Modos de sesión | `tests/invariants_test.rs`, `crates/gs-service/tests/sessions_test.rs`, `crates/gs-api/tests/sessions_test.rs` | cumplido |
 | FR-SES-007 | MUST | F3 | Salida del propietario | `tests/invariants_test.rs`, `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
 | FR-MEM-001 | MUST | F3 | Agregar miembros (aplicación) | `crates/gs-service/tests/members_test.rs`, `crates/gs-api/tests/members_test.rs` | cumplido |
@@ -79,7 +79,7 @@ Reglas:
 | FR-LOC-006 | MUST | F4 | Calidad y tipo de dato | `tests/location_vectors_test.rs`, `crates/gs-service/tests/publishing_test.rs` | cumplido |
 | FR-LOC-007 | MUST | F4 | Rate limit de publicación | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-LOC-008 | MUST | F4 | Sequence floor | `crates/gs-service/tests/publishing_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
-| FR-LOC-009 | MUST | F8 | Ingesta HTTP por lotes | — | pendiente |
+| FR-LOC-009 | MUST | F8 | Ingesta HTTP por lotes | `crates/gs-api/tests/ingest_test.rs` | en curso |
 | FR-STR-001 | MUST | F4 | Endpoint y handshake | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-api/src/stream.rs` | cumplido |
 | FR-STR-002 | MUST | F4 | Suscripción | `crates/gs-service/tests/subscriptions_test.rs`, `crates/gs-stream/tests/connection_test.rs` | cumplido |
 | FR-STR-003 | MUST | F4 | Distribución autorizada | `crates/gs-stream/tests/connection_test.rs`, `crates/gs-stream/src/fanout.rs` | cumplido |

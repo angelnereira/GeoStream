@@ -49,6 +49,7 @@ Corolarios obligatorios:
 | `26_CORE_AND_BINDINGS.md` | GS-CBN-001 | Núcleo Rust sans-IO compartido, FFI y SDKs por lenguaje | Trabajes en `gs-client-core`, `gs-ffi` o `sdks/*` |
 | `TRACEABILITY.md` | GS-TRC-001 | Requisito → pruebas → estado | Cierres una tarea |
 | `PROGRESS.md` | GS-PRG-001 | Bitácora de avance (la actualizan los agentes) | Cierres una tarea |
+| `TECH_DEBT.md` | — | Deuda técnica y pendientes verificados, por riesgo y por quién los mueve | Elijas qué hacer a continuación |
 | `adr/` | ADR-NNNN | Decisiones de arquitectura | Una decisión técnica esté en juego |
 | `../contracts/` | — | Contratos máquina: Protobuf, OpenAPI, vectores, escenarios | Implementes o pruebes contratos |
 
