@@ -105,6 +105,14 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-02 — Chequeo de cobertura de operaciones del OpenAPI (R-3)
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completado el chequeo; la cobertura en sí sigue incompleta (44 operaciones en la lista de huecos).
+- Qué: `tools/src/op_coverage.rs`, subcomando `op-coverage` incluido en `all`, `tools/op_coverage_baseline.txt`, `docs/18` §10.1.
+- Verificación: 6 pruebas unitarias; mutación en los dos sentidos (quitar un hueco de la lista falla con «named by no test»; añadir una operación ya cubierta falla con «remove it»); la prueba de ingesta valida `getSnapshot` contra el contrato y pasa (el snapshot ya cumplía su esquema).
+- Límite conocido: es una heurística (el literal `"operationId"` aparece en una prueba). No mide la calidad de la prueba; solo hace visible su ausencia.
+- Siguiente: ir vaciando la lista, empezando por las operaciones que Plenty-Pay usa (`getSnapshot` ya está; `closeSession`, `createSession`, `mintToken`, `setSharing` ya constan por otras suites) y por las de mayor riesgo.
+
 ### 2026-11-02 — Retención de sesiones cerradas e invitaciones
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completado el borrado de sesiones y de invitaciones de `11` §5. Auditoría y webhooks siguen sin retención (`TECH_DEBT.md` §3).
