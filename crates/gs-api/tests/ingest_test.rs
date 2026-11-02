@@ -222,7 +222,14 @@ async fn test_the_contract_shape_is_accepted_and_reaches_the_snapshot() {
         .await
         .expect("snapshot");
     assert_eq!(snapshot.status(), 200);
+    let content_type = snapshot
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let snapshot: Value = snapshot.json().await.expect("json");
+    common::spec::load_spec().check_response("getSnapshot", 200, &content_type, &snapshot);
     assert_eq!(snapshot["items"].as_array().map(Vec::len), Some(1));
     assert_eq!(
         snapshot["items"][0]["sample"]["position"]["latitude"],

@@ -166,6 +166,7 @@ Resultado en `docs/device-tests/AAAA-MM-DD-<release>.md`.
    - **todo `x-gs-phase` de OpenAPI corresponde a una fase declarada en `21_ROADMAP.md`**;
    - **todo scope usado en `x-gs-auth` está documentado en `06` §3.4 o §6**: un scope que solo existe en el contrato es una capacidad que nadie ha revisado;
    - **los prefijos de ID de `05` §2 coinciden con `contracts/test-vectors/ids.json` y con los `pattern:` del OpenAPI**.
+   - **todo `operationId` de `paths` aparece como literal en alguna prueba** (`geostream-tools op-coverage`), con un trinquete: `tools/op_coverage_baseline.txt` lista las operaciones que no tenían prueba al introducirlo; una operación nueva sin prueba falla, y una de la lista que reciba prueba debe salir de ella. Es una heurística: garantiza que *alguna* prueba nombra la operación, no que sea buena (nació porque `POST /v1/ingest/locations` salió roto contra su propio contrato sin que ninguna prueba HTTP lo nombrara).
 4. **Pruebas**: unitarias, propiedades, vectores, integración (PG + Valkey/Redis), contrato, escenarios rápidos, **conformidad FFI**, **redacción**.
 5. **Seguridad**: `cargo deny check` (advisories, licencias, orígenes), `cargo audit`, búsqueda de secretos en el diff.
 6. **Build**: binario de release, imagen de contenedor con SBOM, (SDK) build Android de la app de ejemplo; desde F7 build iOS; desde E9, build de los artefactos de todos los objetivos de `26` §2.

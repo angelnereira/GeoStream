@@ -37,6 +37,8 @@ enum Commands {
     Phases,
     /// Verify enum parity across Protobuf, OpenAPI and the normative docs
     Enums,
+    /// Verify every OpenAPI operation is named by a test (ratchet, docs/18 §5)
+    OpCoverage,
     /// Verify the documents the public portal publishes (ADR-0034 §2)
     PortalDocs,
     /// Verify the own-map style: own tiles, own fonts and ODbL attribution (FR-MAP-007)
@@ -123,6 +125,11 @@ fn run_all(root: &Path) -> bool {
     ) {
         all_ok = false;
     }
+    if !run_check("Operation Test Coverage (18 §5, ratchet)", || {
+        op_coverage::check_operation_coverage(root)
+    }) {
+        all_ok = false;
+    }
     if !run_check("Enum Parity (proto, OpenAPI, docs)", || {
         enums::check_enum_parity(root)
     }) {
@@ -188,6 +195,9 @@ fn main() -> ExitCode {
             "Phases, Scopes and ID Prefixes (21, 06, 05 vs contracts)",
             || phases::check_phases_and_scopes(&root),
         ),
+        Commands::OpCoverage => run_check("Operation Test Coverage (18 §5, ratchet)", || {
+            op_coverage::check_operation_coverage(&root)
+        }),
         Commands::Enums => run_check("Enum Parity (proto, OpenAPI, docs)", || {
             enums::check_enum_parity(&root)
         }),

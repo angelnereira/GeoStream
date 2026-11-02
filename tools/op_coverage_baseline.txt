@@ -1,0 +1,49 @@
+# Operaciones del OpenAPI que, al introducir el chequeo `op-coverage`, ninguna prueba nombraba.
+# Es una lista de huecos que SOLO puede encoger (`docs/TECH_DEBT.md` R-3): una operación nueva sin prueba
+# falla el chequeo, y una operación de esta lista que reciba prueba debe salir de ella.
+# Cada operación se cubre con una prueba HTTP que la valide contra el OpenAPI (`check_request` y
+# `check_response`, como `crates/gs-api/tests/ingest_test.rs`).
+assignBatch
+computeRoute
+createExport
+createGeofence
+createPool
+createTag
+createWebhook
+deleteGeofence
+deleteProvider
+deleteTag
+deleteWebhook
+eraseSubject
+estimateEta
+exportSubject
+getExport
+getGeofence
+getHeatmap
+getMobilityProfile
+getOdMatrix
+getPlaces
+getPool
+getPoolDensity
+getPoolNearby
+getPoolRings
+getProvider
+getSpeedProfile
+getTag
+getTrace
+getTrip
+getWebhook
+ingestHistory
+ingestLpwan
+listGeofences
+listTags
+listTrips
+listWebhooks
+lookupEdgeReports
+openStream
+postEdgeReport
+putProvider
+resetOdometer
+setOwnAvailability
+setPoolMemberAttributes
+testWebhook
