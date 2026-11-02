@@ -7,7 +7,7 @@ use gs_service::gs_domain::session::{Actor, SessionMode};
 use gs_service::migrate::{connect_pool, run_migrations};
 use gs_service::sessions::{CreateSessionRequest, SessionPolicy, create_session};
 use gs_service::{BusBackend, EphemeralBackend};
-use gs_worker::{expire_sessions_once, run_maintenance_once};
+use gs_worker::{WorkerConfig, expire_sessions_once, run_maintenance_once, run_retention_once};
 use sqlx::Row;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -98,9 +98,9 @@ async fn test_fr_ses_005_a_session_past_its_expiry_becomes_expired_on_its_own() 
 
     let ephemeral = EphemeralBackend::memory();
     let bus = BusBackend::memory();
-    let expired = expire_sessions_once(&pool, &ephemeral, &bus, "gs", 500).await;
+    // The sweep is global: another test of this file may expire the session first. The state is what counts.
+    expire_sessions_once(&pool, &ephemeral, &bus, "gs", 500).await;
 
-    assert!(expired >= 1, "at least the backdated session expired");
     assert_eq!(status_of(&pool, due).await, "EXPIRED");
     assert_eq!(status_of(&pool, live).await, "ACTIVE");
     // A second sweep finds nothing new for it.
@@ -164,9 +164,9 @@ async fn test_the_maintenance_purge_removes_only_what_can_no_longer_be_used() {
         .expect("otp row");
     }
 
-    let report = run_maintenance_once(&pool).await;
-    assert!(report.idempotency_records >= 1);
-    assert!(report.console_rows >= 1);
+    // The purges are global and the tests of this file run in parallel, so another test may remove
+    // these rows first: what is asserted is the state of the rows, not who deleted them.
+    run_maintenance_once(&pool).await;
 
     let remaining = |sql: &'static str, key: Vec<u8>| {
         let pool = pool.clone();
@@ -245,4 +245,112 @@ async fn test_the_jobs_report_duration_rows_and_never_an_identifier() {
         !text.contains(&due.to_string()) && !text.contains("ses_"),
         "a session id reached the metrics"
     );
+}
+
+async fn end_session(pool: &sqlx::PgPool, id: uuid::Uuid, status: &str, ended_days_ago: i64) {
+    sqlx::query(
+        "UPDATE sessions SET status = $1, closed_at = $2, \
+         closed_reason = CASE WHEN $1 = 'CLOSED' THEN 'CLOSED_BY_APPLICATION' END WHERE id = $3",
+    )
+    .bind(status)
+    .bind(OffsetDateTime::now_utc() - time::Duration::days(ended_days_ago))
+    .bind(id)
+    .execute(pool)
+    .await
+    .expect("end session");
+}
+
+async fn add_invitation(
+    pool: &sqlx::PgPool,
+    tenant: gs_service::gs_domain::ids::TenantId,
+    session: uuid::Uuid,
+    expired_days_ago: i64,
+    revoked: bool,
+) -> uuid::Uuid {
+    let id = Uuid::new_v4();
+    let at = OffsetDateTime::now_utc() - time::Duration::days(expired_days_ago);
+    sqlx::query(
+        "INSERT INTO invitations (id, tenant_id, session_id, code_sha256, grant_publish, grant_read, \
+         grant_invite, grant_manage, max_uses, expires_at, created_by_kind, created_by_id, revoked_at) \
+         VALUES ($1, $2, $3, $4, false, true, false, false, 1, $5, 'APPLICATION', $6, $7);",
+    )
+    .bind(id)
+    .bind(tenant.into_uuid())
+    .bind(session)
+    .bind(Uuid::new_v4().as_bytes().repeat(2))
+    .bind(at)
+    .bind(Uuid::new_v4())
+    .bind(revoked.then_some(at))
+    .execute(pool)
+    .await
+    .expect("invitation");
+    id
+}
+
+async fn exists(pool: &sqlx::PgPool, table: &'static str, id: uuid::Uuid) -> bool {
+    let sql = match table {
+        "sessions" => "SELECT count(*) FROM sessions WHERE id = $1",
+        _ => "SELECT count(*) FROM invitations WHERE id = $1",
+    };
+    sqlx::query(sql)
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .expect("count")
+        .get::<i64, _>(0)
+        > 0
+}
+
+#[tokio::test]
+async fn test_retention_deletes_what_outlived_its_window_in_batches_and_spares_the_rest() {
+    // covers: docs/10 §7.1, docs/11 §5 (GS_RETENTION_CLOSED_SESSIONS_D, GS_RETENTION_INVITATIONS_D)
+    let pool = pool().await;
+    let (old_closed, tenant) = new_session(&pool).await;
+    let (old_expired, _) = new_session(&pool).await;
+    let (recent_closed, _) = new_session(&pool).await;
+    let (old_but_active, _) = new_session(&pool).await;
+    end_session(&pool, old_closed, "CLOSED", 100).await;
+    end_session(&pool, old_expired, "EXPIRED", 95).await;
+    end_session(&pool, recent_closed, "CLOSED", 10).await;
+    // An active session is never retention material, however old its row is.
+    sqlx::query("UPDATE sessions SET created_at = $1 WHERE id = $2")
+        .bind(OffsetDateTime::now_utc() - time::Duration::days(400))
+        .bind(old_but_active)
+        .execute(&pool)
+        .await
+        .expect("age");
+
+    let cascades = add_invitation(&pool, tenant, old_closed, 1, false).await;
+    let spent = add_invitation(&pool, tenant, old_but_active, 45, false).await;
+    let revoked_long_ago = add_invitation(&pool, tenant, old_but_active, 45, true).await;
+    let fresh = add_invitation(&pool, tenant, old_but_active, -5, false).await;
+    let expired_recently = add_invitation(&pool, tenant, old_but_active, 3, false).await;
+
+    // A batch of one forces several rounds over the two purgeable sessions.
+    let config = WorkerConfig {
+        batch_size: 1,
+        ..WorkerConfig::default()
+    };
+    let report = run_retention_once(&pool, &config).await;
+    assert!(report.ended_sessions >= 2);
+    assert!(report.spent_invitations >= 2);
+
+    assert!(!exists(&pool, "sessions", old_closed).await);
+    assert!(!exists(&pool, "sessions", old_expired).await);
+    assert!(exists(&pool, "sessions", recent_closed).await);
+    assert!(exists(&pool, "sessions", old_but_active).await);
+
+    assert!(
+        !exists(&pool, "invitations", cascades).await,
+        "goes with its session"
+    );
+    assert!(!exists(&pool, "invitations", spent).await);
+    assert!(!exists(&pool, "invitations", revoked_long_ago).await);
+    assert!(exists(&pool, "invitations", fresh).await);
+    assert!(exists(&pool, "invitations", expired_recently).await);
+
+    // Running it again changes nothing.
+    let again = run_retention_once(&pool, &config).await;
+    assert!(exists(&pool, "sessions", recent_closed).await);
+    assert_eq!(again.ended_sessions + again.spent_invitations, 0);
 }

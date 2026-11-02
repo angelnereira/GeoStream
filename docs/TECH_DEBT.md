@@ -28,13 +28,14 @@
 | R-6 | El límite por IP del registro depende de `X-Forwarded-For` | nginx del portal lo sustituye por la última entrada; **una llamada directa a la API** con la cabecera falsificada lo evade | Abierto: ADR sobre qué proxies son de confianza |
 | R-7 | `Idempotency-Key` se ignora en silencio si no hay clave de cifrado de datos | Mismo comportamiento que `/v1/sessions` | Abierto: rechazar con error en lugar de ignorar |
 
-## 3. Retención y limpieza que `11` §5 promete y aún no existe
+## 3. Retención y limpieza que `11` §5 promete
 
-El worker ya hace expiración e idempotencia. Siguen sin implementar:
-- Borrado de sesiones cerradas o expiradas pasados `GS_RETENTION_CLOSED_SESSIONS_D` (90 d), con cascada a miembros e invitaciones.
-- Retención de invitaciones (`GS_RETENTION_INVITATIONS_D`), auditoría (`GS_RETENTION_AUDIT_D`) y entregas de webhooks.
+Ya hace el worker: expiración de sesiones, idempotencia, datos vencidos de la consola y, una vez al día desde `GS_WORKER_RETENTION_HOUR_UTC`, el borrado por lotes (`FOR UPDATE SKIP LOCKED`) de sesiones cerradas o expiradas pasados `GS_RETENTION_CLOSED_SESSIONS_D` (90 d, con cascada a miembros e invitaciones) y de invitaciones caducadas o revocadas pasados `GS_RETENTION_INVITATIONS_D` (30 d). Una sesión activa nunca se borra.
+
+Sigue sin implementar:
+- Auditoría (`GS_RETENTION_AUDIT_D`, 365 d) y entregas de webhooks (`GS_RETENTION_WEBHOOK_DELIVERIES_D`; los webhooks son F8).
 - Poda del índice de pools, expiración de reportes edge, particiones e historial (fase E6).
-- Lotes con `FOR UPDATE SKIP LOCKED` y `GS_WORKER_BATCH_SIZE` en los purgados (hoy son `DELETE` directos; correcto, pero sin límite de lote).
+- Los purgados de idempotencia y de la consola siguen siendo `DELETE` sin límite de lote (correctos, pero con tablas grandes conviene acotarlos).
 
 ## 4. Producto que falta
 

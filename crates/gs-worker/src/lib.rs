@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use gs_service::gs_store::repos::IdempotencyRepository;
+use gs_service::gs_store::repos::{IdempotencyRepository, RetentionRepository};
 use gs_service::gs_store::{ConsoleRepository, PgPool};
 use gs_service::{BusBackend, EphemeralBackend, expire_due_sessions_with_bus};
 use std::time::Instant;
@@ -36,6 +36,12 @@ pub struct WorkerConfig {
     pub expiry_interval: Duration,
     /// `GS_WORKER_BATCH_SIZE`.
     pub batch_size: u32,
+    /// `GS_WORKER_RETENTION_HOUR_UTC`: hour of the day (UTC) from which the daily retention runs.
+    pub retention_hour_utc: u8,
+    /// `GS_RETENTION_CLOSED_SESSIONS_D`.
+    pub retention_closed_sessions: Duration,
+    /// `GS_RETENTION_INVITATIONS_D`.
+    pub retention_invitations: Duration,
 }
 
 impl Default for WorkerConfig {
@@ -44,6 +50,9 @@ impl Default for WorkerConfig {
         Self {
             expiry_interval: Duration::from_secs(15),
             batch_size: 500,
+            retention_hour_utc: 3,
+            retention_closed_sessions: Duration::from_secs(90 * 86_400),
+            retention_invitations: Duration::from_secs(30 * 86_400),
         }
     }
 }
@@ -120,6 +129,83 @@ pub async fn run_maintenance_once(pool: &PgPool) -> MaintenanceReport {
     report
 }
 
+/// What one retention run removed. Counts only (`docs/10` §8.2).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionReport {
+    /// Closed or expired sessions past their retention (with their memberships and invitations).
+    pub ended_sessions: u64,
+    /// Expired or revoked invitations past their retention.
+    pub spent_invitations: u64,
+}
+
+/// Deletes, in batches of `config.batch_size`, the sessions that ended and the invitations that were
+/// spent longer ago than their retention (`docs/17` §2: 90 and 30 days by default). Active sessions
+/// are never deleted. Safe with several instances: every batch skips rows another one holds.
+pub async fn run_retention_once(pool: &PgPool, config: &WorkerConfig) -> RetentionReport {
+    let now = OffsetDateTime::now_utc();
+    let batch = i64::from(config.batch_size);
+    let mut report = RetentionReport::default();
+
+    let started = Instant::now();
+    let cutoff = now - config.retention_closed_sessions;
+    let mut failed = false;
+    loop {
+        match RetentionRepository::purge_ended_sessions(pool, cutoff, batch).await {
+            Ok(removed) => {
+                report.ended_sessions += removed;
+                if removed < batch as u64 {
+                    break;
+                }
+            }
+            Err(_) => {
+                warn!("ended sessions purge failed");
+                failed = true;
+                break;
+            }
+        }
+    }
+    record_job(
+        "ended_sessions_purge",
+        started,
+        report.ended_sessions,
+        failed,
+    );
+
+    let started = Instant::now();
+    let cutoff = now - config.retention_invitations;
+    let mut failed = false;
+    loop {
+        match RetentionRepository::purge_spent_invitations(pool, cutoff, batch).await {
+            Ok(removed) => {
+                report.spent_invitations += removed;
+                if removed < batch as u64 {
+                    break;
+                }
+            }
+            Err(_) => {
+                warn!("spent invitations purge failed");
+                failed = true;
+                break;
+            }
+        }
+    }
+    record_job(
+        "spent_invitations_purge",
+        started,
+        report.spent_invitations,
+        failed,
+    );
+
+    if report.ended_sessions + report.spent_invitations > 0 {
+        info!(
+            ended_sessions = report.ended_sessions,
+            spent_invitations = report.spent_invitations,
+            "retention purge completed"
+        );
+    }
+    report
+}
+
 /// Runs the worker jobs until the task is dropped or aborted.
 pub async fn run(
     pool: PgPool,
@@ -149,5 +235,20 @@ pub async fn run(
             run_maintenance_once(&pool).await;
         }
     };
-    tokio::join!(expiry, maintenance);
+    let retention = async {
+        // Checked every ten minutes: it runs once per UTC day, from `retention_hour_utc` on. A restart
+        // after that hour runs it again, which is harmless (the purge is idempotent).
+        let mut tick = tokio::time::interval(Duration::from_secs(600));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut last_run: Option<time::Date> = None;
+        loop {
+            tick.tick().await;
+            let now = OffsetDateTime::now_utc();
+            if now.hour() >= config.retention_hour_utc && last_run != Some(now.date()) {
+                last_run = Some(now.date());
+                run_retention_once(&pool, &config).await;
+            }
+        }
+    };
+    tokio::join!(expiry, maintenance, retention);
 }
