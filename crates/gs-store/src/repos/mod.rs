@@ -10,6 +10,7 @@ pub mod history_repo;
 pub mod idempotency_repo;
 pub mod invitation_repo;
 pub mod membership_repo;
+pub mod retention_repo;
 pub mod session_repo;
 pub mod subject_repo;
 pub mod tag_repo;
@@ -33,6 +34,7 @@ pub use membership_repo::{
     RevokeOutcome, SetSharingOutcome, SetSharingParams, TransferOwnershipOutcome,
     UpdateCapabilitiesOutcome, UpdateCapabilitiesParams,
 };
+pub use retention_repo::RetentionRepository;
 pub use session_repo::{SessionFilters, SessionPage, SessionRepository, SessionUpdate};
 pub use subject_repo::SubjectRepository;
 pub use tag_repo::{Tag, TagRepository};

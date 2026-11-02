@@ -105,6 +105,15 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-02 — Retención de sesiones cerradas e invitaciones
+- Autor/agente: Angel Nereira (con agente de código).
+- Resultado: completado el borrado de sesiones y de invitaciones de `11` §5. Auditoría y webhooks siguen sin retención (`TECH_DEBT.md` §3).
+- Qué: `RetentionRepository` en `gs-store`, `gs_worker::run_retention_once` y el job diario en `run`, configurado desde `GS_WORKER_RETENTION_HOUR_UTC`, `GS_WORKER_BATCH_SIZE`, `GS_RETENTION_CLOSED_SESSIONS_D` y `GS_RETENTION_INVITATIONS_D`.
+- Verificación: 4 pruebas del worker contra PostgreSQL; la nueva borra sesiones cerradas y expiradas viejas con sus invitaciones, conserva una cerrada hace 10 días y una activa antiquísima, borra invitaciones viejas caducadas y revocadas y conserva las vigentes y las caducadas hace 3 días, recorre varios lotes con `batch_size = 1` y una segunda ejecución no borra nada.
+- Defecto de mi fixture, no del código: una sesión `CLOSED` exige `closed_reason` (`sessions_check`); la prueba lo respetaba mal al principio.
+- Efecto en producción: el despliegue es de días de antigüedad, así que la primera ejecución no debería borrar nada. El job corre a las 03:00 UTC (o, si el servidor arranca más tarde ese día, en el siguiente arranque).
+- Sin verificar: no se ha ejecutado contra un volumen grande; los lotes están acotados por `GS_WORKER_BATCH_SIZE`.
+
 ### 2026-11-02 — Seguimiento de entregas: relevo del snapshot (DR-20261102-01, opción 1)
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: decisión cerrada y patrón entregado. No cambia el servidor ni `contracts/`.

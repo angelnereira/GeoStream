@@ -413,6 +413,13 @@ async fn run_serve(args: ServeArgs) -> Result<()> {
                 gs_worker::WorkerConfig {
                     expiry_interval: Duration::from_secs(cfg.worker_expiry_interval_s),
                     batch_size: cfg.worker_batch_size,
+                    retention_hour_utc: cfg.worker_retention_hour_utc as u8,
+                    retention_closed_sessions: Duration::from_secs(
+                        u64::from(cfg.retention_closed_sessions_d) * 86_400,
+                    ),
+                    retention_invitations: Duration::from_secs(
+                        u64::from(cfg.retention_invitations_d) * 86_400,
+                    ),
                 },
             )));
         }
