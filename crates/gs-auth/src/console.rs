@@ -163,6 +163,29 @@ impl ConsoleKeys {
         let candidate = self.code_hmac(email, submitted);
         candidate.as_slice().ct_eq(stored).into()
     }
+
+    /// Lookup key of the code issued after a correct password (the second step of a sign-in).
+    ///
+    /// It lives in the same table as the registration codes but under a different key, so the two
+    /// purposes never share a code, a cooldown or an attempt counter: asking for a registration code
+    /// cannot block (or stand in for) a sign-in code.
+    pub fn login_key(&self, email: &EmailAddress) -> [u8; 32] {
+        self.mac(b"gs-console:login-key:v1", &[email.as_str().as_bytes()])
+    }
+
+    /// HMAC of a sign-in code. A registration code never verifies as a sign-in code, or the reverse.
+    pub fn login_code_hmac(&self, email: &EmailAddress, code: &str) -> [u8; 32] {
+        self.mac(
+            b"gs-console:login-otp:v1",
+            &[email.as_str().as_bytes(), code.as_bytes()],
+        )
+    }
+
+    /// Whether `submitted` is the sign-in code that produced `stored`, in constant time.
+    pub fn verify_login_code(&self, email: &EmailAddress, submitted: &str, stored: &[u8]) -> bool {
+        let candidate = self.login_code_hmac(email, submitted);
+        candidate.as_slice().ct_eq(stored).into()
+    }
 }
 
 /// Generates a one-time code of `length` decimal digits from the system CSPRNG.
@@ -290,6 +313,19 @@ mod tests {
         assert!(!rendered.contains("secret"), "{rendered}");
         assert!(!rendered.contains("example"), "{rendered}");
         assert!(!format!("{:?}", keys()).contains('7'));
+    }
+
+    #[test]
+    fn test_a_registration_code_never_works_as_a_sign_in_code_or_the_reverse() {
+        // covers: FR-CON-013 (the two purposes share no key and no code)
+        let alice = email("alice@example.com");
+        assert_ne!(keys().email_hash(&alice), keys().login_key(&alice));
+        let registration = keys().code_hmac(&alice, "482913");
+        let sign_in = keys().login_code_hmac(&alice, "482913");
+        assert_ne!(registration, sign_in);
+        assert!(keys().verify_login_code(&alice, "482913", &sign_in));
+        assert!(!keys().verify_login_code(&alice, "482913", &registration));
+        assert!(!keys().verify_code(&alice, "482913", &sign_in));
     }
 
     #[test]

@@ -17,8 +17,9 @@ use time::OffsetDateTime;
 use tracing::{error, warn};
 
 use gs_auth::{
-    ConsoleConfig, ConsoleKeys, EmailAddress, EmailConfig, SecretString, generate_code,
-    generate_session_token, hash_session_token, is_code_shaped, is_session_token_shaped,
+    ConsoleConfig, ConsoleKeys, EmailAddress, EmailConfig, PASSWORD_MAX_LENGTH, PasswordHasher,
+    PasswordPolicyError, SecretString, generate_code, generate_session_token, hash_session_token,
+    is_code_shaped, is_session_token_shaped, validate_password_policy,
 };
 use gs_domain::error::{AsErrorCode, ErrorCode};
 use gs_domain::ids::AccountId;
@@ -45,6 +46,12 @@ pub enum ConsoleError {
     /// Wrong, expired, used or exhausted code; unknown, expired or revoked session. Never says which.
     #[error("unauthenticated")]
     Unauthenticated,
+    /// The password does not meet the policy (length, easy to guess). Never carries the password.
+    #[error("the password does not meet the policy")]
+    WeakPassword(PasswordPolicyError),
+    /// The current password given to change it is wrong. The caller already holds a valid session.
+    #[error("the current password is not correct")]
+    WrongPassword,
     /// The account cannot be deleted yet (it is the only owner of an organization with active projects).
     #[error("conflict")]
     Conflict,
@@ -56,9 +63,11 @@ pub enum ConsoleError {
 impl AsErrorCode for ConsoleError {
     fn error_code(&self) -> ErrorCode {
         match self {
-            Self::InvalidEmail | Self::InvalidCodeFormat | Self::TermsRequired => {
-                ErrorCode::ValidationFailed
-            }
+            Self::InvalidEmail
+            | Self::InvalidCodeFormat
+            | Self::TermsRequired
+            | Self::WeakPassword(_) => ErrorCode::ValidationFailed,
+            Self::WrongPassword => ErrorCode::PermissionDenied,
             Self::Unauthenticated => ErrorCode::Unauthenticated,
             Self::Conflict => ErrorCode::Conflict,
             Self::Internal => ErrorCode::Internal,
@@ -161,20 +170,42 @@ impl EmailBackend {
         }
     }
 
-    /// Sends the sign-in code. The code is the message: it never goes anywhere else.
+    /// Sends a registration code (see [`Self::send_code_for`]).
     pub async fn send_code(
         &self,
         to: &EmailAddress,
         code: &str,
         ttl: Duration,
     ) -> Result<(), MailError> {
-        let subject = "Tu código de acceso a GeoStream".to_string();
+        self.send_code_for(CodePurpose::Register, to, code, ttl)
+            .await
+    }
+
+    /// Sends a one-time code. The code is the message: it never goes anywhere else.
+    pub async fn send_code_for(
+        &self,
+        purpose: CodePurpose,
+        to: &EmailAddress,
+        code: &str,
+        ttl: Duration,
+    ) -> Result<(), MailError> {
+        let (subject, what) = match purpose {
+            CodePurpose::Register => (
+                "Tu código para crear tu cuenta de GeoStream",
+                "Tu código de acceso a GeoStream es",
+            ),
+            CodePurpose::Login => (
+                "Tu código para entrar a GeoStream",
+                "Tu código de acceso a GeoStream es",
+            ),
+        };
+        let subject = subject.to_string();
         let minutes = (ttl.as_secs() / 60).max(1);
         let body = format!(
-            "Tu código de acceso a GeoStream es: {code}\n\n\
+            "{what}: {code}\n\n\
              Caduca en {minutes} minutos y solo sirve una vez.\n\n\
-             Si no lo pediste tú, ignora este mensaje: nadie puede entrar sin el código. \
-             GeoStream nunca te pedirá este código por teléfono ni por chat.\n"
+             Si no lo pediste tú, ignora este mensaje: nadie puede entrar sin el código y sin tu \
+             contraseña. GeoStream nunca te pedirá este código por teléfono ni por chat.\n"
         );
         match self {
             Self::Memory(sent) => {
@@ -229,6 +260,15 @@ impl EmailBackend {
     }
 }
 
+/// What a one-time code is for. The two purposes never share a code, a cooldown or an attempt counter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodePurpose {
+    /// Creating an account or recovering access: proves control of the mailbox.
+    Register,
+    /// Second step of a sign-in, issued only after the password was correct.
+    Login,
+}
+
 /// Parameters of the sign-in flow, taken from the configuration (docs/17 §2.12).
 #[derive(Debug, Clone)]
 pub struct ConsoleSettings {
@@ -239,6 +279,8 @@ pub struct ConsoleSettings {
     pub session_ttl: Duration,
     pub email_daily_cap: i32,
     pub max_orgs_per_account: i64,
+    /// PBKDF2 rounds of new password hashes.
+    pub password_iterations: u32,
 }
 
 impl ConsoleSettings {
@@ -252,6 +294,8 @@ impl ConsoleSettings {
             session_ttl: Duration::from_secs(config.session_ttl_s),
             email_daily_cap: i32::try_from(config.email_daily_cap).unwrap_or(500),
             max_orgs_per_account: i64::try_from(config.max_orgs_per_account).unwrap_or(3),
+            password_iterations: u32::try_from(config.password_iterations)
+                .unwrap_or(gs_auth::PASSWORD_DEFAULT_ITERATIONS),
         }
     }
 }
@@ -282,6 +326,7 @@ pub struct ConsoleAuth {
     keys: ConsoleKeys,
     settings: ConsoleSettings,
     mailer: Arc<EmailBackend>,
+    hasher: PasswordHasher,
 }
 
 impl ConsoleAuth {
@@ -292,11 +337,13 @@ impl ConsoleAuth {
         settings: ConsoleSettings,
         mailer: Arc<EmailBackend>,
     ) -> Self {
+        let hasher = PasswordHasher::new(settings.password_iterations);
         Self {
             pool,
             keys,
             settings,
             mailer,
+            hasher,
         }
     }
 
@@ -305,20 +352,52 @@ impl ConsoleAuth {
         &self.settings
     }
 
-    /// Asks for a one-time code (`POST /v1/console/auth/code`).
-    ///
-    /// Returns `Ok(())` in every case where the address is well formed, whether or not it has an
-    /// account, a code was sent, the cooldown applies, the daily budget is spent or the provider
-    /// failed: the response must not reveal any of those (FR-CON-009, `10` T-42).
-    pub async fn request_code(&self, raw_email: &str) -> Result<(), ConsoleError> {
-        let email = EmailAddress::parse(raw_email).map_err(|_| ConsoleError::InvalidEmail)?;
-        let email_hash = self.keys.email_hash(&email);
-        let code = zeroize::Zeroizing::new(generate_code(self.settings.otp_length));
-        let code_hmac = self.keys.code_hmac(&email, &code);
+    /// Hashes a password off the async executor: it is expensive on purpose.
+    async fn hash_password(&self, password: &str) -> Result<String, ConsoleError> {
+        let hasher = self.hasher;
+        let password = zeroize::Zeroizing::new(password.to_string());
+        tokio::task::spawn_blocking(move || hasher.hash(&password))
+            .await
+            .map_err(|_| ConsoleError::Internal)
+    }
 
+    /// Checks a password against a stored hash off the async executor. With `None` it spends the same
+    /// work on a dummy and answers `false`, so an unknown account takes as long as a known one.
+    async fn check_password(&self, stored: Option<String>, password: &str) -> bool {
+        let hasher = self.hasher;
+        let password = zeroize::Zeroizing::new(password.to_string());
+        tokio::task::spawn_blocking(move || match stored {
+            Some(stored) => hasher.verify(&stored, &password),
+            None => {
+                hasher.verify_dummy(&password);
+                false
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// Stores a code under `key` and mails it, unless the cooldown or the daily budget says no. Always
+    /// `Ok`: the answer must not reveal which of those happened (FR-CON-009).
+    async fn issue_code(
+        &self,
+        purpose: CodePurpose,
+        email: &EmailAddress,
+    ) -> Result<(), ConsoleError> {
+        let code = zeroize::Zeroizing::new(generate_code(self.settings.otp_length));
+        let (key, code_hmac) = match purpose {
+            CodePurpose::Register => (
+                self.keys.email_hash(email),
+                self.keys.code_hmac(email, &code),
+            ),
+            CodePurpose::Login => (
+                self.keys.login_key(email),
+                self.keys.login_code_hmac(email, &code),
+            ),
+        };
         let issued = ConsoleRepository::issue_otp(
             &self.pool,
-            &email_hash,
+            &key,
             &code_hmac,
             self.settings.otp_ttl.as_secs_f64(),
             self.settings.otp_cooldown.as_secs_f64(),
@@ -336,14 +415,14 @@ impl ConsoleAuth {
         }
         if let Err(mail_error) = self
             .mailer
-            .send_code(&email, &code, self.settings.otp_ttl)
+            .send_code_for(purpose, email, &code, self.settings.otp_ttl)
             .await
         {
-            // Only the keyed hash prefix identifies the request; never the address.
             metrics::counter!("gs_console_mail_failed_total").increment(1);
+            // Only the keyed hash prefix identifies the request; never the address.
             warn!(
                 target: "gs_service::console",
-                email_hash = %short_hash(&email_hash),
+                email_hash = %short_hash(&key),
                 outcome = %mail_error,
                 "the sign-in code could not be delivered"
             );
@@ -351,20 +430,37 @@ impl ConsoleAuth {
         Ok(())
     }
 
-    /// Redeems a code and opens a session (`POST /v1/console/auth/verify`).
+    /// Asks for a registration code (`POST /v1/console/auth/code`): the first step of creating an
+    /// account or of recovering access to one.
     ///
-    /// Creates the account on first use, which requires `accept_terms`. Every failure of the
-    /// code itself is the same `Unauthenticated`.
+    /// Returns `Ok(())` in every case where the address is well formed, whether or not it has an
+    /// account, a code was sent, the cooldown applies, the daily budget is spent or the provider
+    /// failed: the response must not reveal any of those (FR-CON-009, `10` T-42).
+    pub async fn request_code(&self, raw_email: &str) -> Result<(), ConsoleError> {
+        let email = EmailAddress::parse(raw_email).map_err(|_| ConsoleError::InvalidEmail)?;
+        self.issue_code(CodePurpose::Register, &email).await
+    }
+
+    /// Redeems a registration code, sets the password and opens a session
+    /// (`POST /v1/console/auth/verify`).
+    ///
+    /// Creates the account on first use, which requires `accept_terms`. For an account that already
+    /// exists it replaces the password: control of the mailbox is the proof, as in any e-mail recovery
+    /// (ADR-0037). Every failure of the code itself is the same `Unauthenticated`.
     pub async fn verify_code(
         &self,
         raw_email: &str,
         code: &str,
+        password: &str,
         accept_terms: bool,
     ) -> Result<OpenedSession, ConsoleError> {
         let email = EmailAddress::parse(raw_email).map_err(|_| ConsoleError::InvalidEmail)?;
         if !is_code_shaped(code) {
             return Err(ConsoleError::InvalidCodeFormat);
         }
+        // The password is checked first and without touching the code: the person can fix it and retry
+        // with the same code, and the answer reveals nothing about the account.
+        validate_password_policy(password, email.as_str()).map_err(ConsoleError::WeakPassword)?;
         let email_hash = self.keys.email_hash(&email);
 
         // The attempt is counted before the comparison (one statement): parallel guesses cannot
@@ -386,6 +482,13 @@ impl ConsoleAuth {
         if existing.is_none() && !accept_terms {
             return Err(ConsoleError::TermsRequired);
         }
+        if existing
+            .as_ref()
+            .is_some_and(|a| a.status != gs_store::AccountStatus::Active)
+        {
+            return Err(ConsoleError::Unauthenticated);
+        }
+        let password_hash = self.hash_password(password).await?;
         if !ConsoleRepository::consume_otp(&self.pool, attempt.id).await? {
             return Err(ConsoleError::Unauthenticated);
         }
@@ -400,7 +503,119 @@ impl ConsoleAuth {
         if account.status != gs_store::AccountStatus::Active {
             return Err(ConsoleError::Unauthenticated);
         }
+        ConsoleRepository::set_password_hash(&self.pool, account.id, &password_hash).await?;
+        let mut account = account;
+        account.has_password = true;
+        self.open_session(account, created).await
+    }
 
+    /// First step of a sign-in (`POST /v1/console/auth/login`): checks the password and, only when it
+    /// is right, mails the second-step code.
+    ///
+    /// The answer is `Ok(())` whatever happened — wrong password, unknown account, account without a
+    /// password, disabled account — so it cannot be used to find out which e-mails are registered. An
+    /// unknown account costs the same work as a known one.
+    pub async fn login(&self, raw_email: &str, password: &str) -> Result<(), ConsoleError> {
+        let email = EmailAddress::parse(raw_email).map_err(|_| ConsoleError::InvalidEmail)?;
+        if password.chars().count() > PASSWORD_MAX_LENGTH {
+            // Bounds the work one request can force; nobody's password is this long.
+            return Ok(());
+        }
+        let record = ConsoleRepository::get_login_record(&self.pool, email.as_str()).await?;
+        let (usable, stored) = match record {
+            Some(record)
+                if record.status == gs_store::AccountStatus::Active
+                    && record.password_hash.is_some() =>
+            {
+                (Some(record.account_id), record.password_hash)
+            }
+            _ => (None, None),
+        };
+        let correct = self.check_password(stored.clone(), password).await;
+        let Some(account_id) = usable.filter(|_| correct) else {
+            return Ok(());
+        };
+        if stored.is_some_and(|hash| self.hasher.needs_rehash(&hash)) {
+            // The iteration count went up since this hash was made: upgrade it with the password at hand.
+            let upgraded = self.hash_password(password).await?;
+            ConsoleRepository::set_password_hash(&self.pool, account_id, &upgraded).await?;
+        }
+        self.issue_code(CodePurpose::Login, &email).await
+    }
+
+    /// Second step of a sign-in (`POST /v1/console/auth/login/verify`): redeems the code mailed after
+    /// a correct password and opens a session. Every failure is the same `Unauthenticated`.
+    pub async fn verify_login(
+        &self,
+        raw_email: &str,
+        code: &str,
+    ) -> Result<OpenedSession, ConsoleError> {
+        let email = EmailAddress::parse(raw_email).map_err(|_| ConsoleError::InvalidEmail)?;
+        if !is_code_shaped(code) {
+            return Err(ConsoleError::InvalidCodeFormat);
+        }
+        let key = self.keys.login_key(&email);
+        let attempt =
+            ConsoleRepository::take_otp_attempt(&self.pool, &key, self.settings.otp_max_attempts)
+                .await?
+                .ok_or(ConsoleError::Unauthenticated)?;
+        if !self
+            .keys
+            .verify_login_code(&email, code, &attempt.code_hmac)
+        {
+            return Err(ConsoleError::Unauthenticated);
+        }
+        let record = ConsoleRepository::get_login_record(&self.pool, email.as_str())
+            .await?
+            .filter(|r| r.status == gs_store::AccountStatus::Active && r.password_hash.is_some())
+            .ok_or(ConsoleError::Unauthenticated)?;
+        if !ConsoleRepository::consume_otp(&self.pool, attempt.id).await? {
+            return Err(ConsoleError::Unauthenticated);
+        }
+        let account = ConsoleRepository::get_account_by_email(&self.pool, email.as_str())
+            .await?
+            .ok_or(ConsoleError::Unauthenticated)?;
+        debug_assert_eq!(account.id, record.account_id);
+        self.open_session(account, false).await
+    }
+
+    /// Changes the password of the signed-in account (`PUT /v1/console/me/password`).
+    ///
+    /// Needs the current password (an account that never set one is exempt: its session is the proof),
+    /// applies the policy and ends every other session of the account.
+    pub async fn change_password(
+        &self,
+        account: &ConsoleAccount,
+        token: &str,
+        current: &str,
+        new: &str,
+    ) -> Result<(), ConsoleError> {
+        validate_password_policy(new, &account.email).map_err(ConsoleError::WeakPassword)?;
+        if current.chars().count() <= PASSWORD_MAX_LENGTH {
+            let stored = ConsoleRepository::get_password_hash(&self.pool, account.id).await?;
+            if stored.is_some() && !self.check_password(stored, current).await {
+                return Err(ConsoleError::WrongPassword);
+            }
+        } else {
+            return Err(ConsoleError::WrongPassword);
+        }
+        let hash = self.hash_password(new).await?;
+        ConsoleRepository::set_password_hash(&self.pool, account.id, &hash).await?;
+        ConsoleRepository::revoke_other_sessions(
+            &self.pool,
+            account.id,
+            &hash_session_token(token),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Opens a session for an account whose identity has already been proven.
+    async fn open_session(
+        &self,
+        account: ConsoleAccount,
+        created: bool,
+    ) -> Result<OpenedSession, ConsoleError> {
         let token = zeroize::Zeroizing::new(generate_session_token());
         let expires_at = ConsoleRepository::create_session(
             &self.pool,

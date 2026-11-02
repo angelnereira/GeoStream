@@ -80,6 +80,7 @@ pub const KNOWN_SERVER_ENV_KEYS: &[&str] = &[
     "GS_CONSOLE_PUBLIC_URL",
     "GS_CONSOLE_MAX_ORGS_PER_ACCOUNT",
     "GS_CONSOLE_SIGNUP_RPM_PER_IP",
+    "GS_CONSOLE_PASSWORD_ITERATIONS",
     "GS_CONSOLE_OTP_LENGTH",
     "GS_CONSOLE_OTP_TTL_S",
     "GS_CONSOLE_OTP_MAX_ATTEMPTS",
@@ -741,6 +742,12 @@ impl ServerConfig {
                     email_daily_cap: get_u64("GS_CONSOLE_EMAIL_DAILY_CAP", 500, 1, 100_000)?,
                     max_orgs_per_account: get_u64("GS_CONSOLE_MAX_ORGS_PER_ACCOUNT", 3, 1, 100)?,
                     signup_rpm_per_ip: get_u64("GS_CONSOLE_SIGNUP_RPM_PER_IP", 10, 1, 600)?,
+                    password_iterations: get_u64(
+                        "GS_CONSOLE_PASSWORD_ITERATIONS",
+                        600_000,
+                        100_000,
+                        5_000_000,
+                    )?,
                 })
             }
         };

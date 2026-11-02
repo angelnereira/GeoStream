@@ -257,6 +257,9 @@ Leyenda: ✗ = principal no permitido (403 `PERMISSION_DENIED`); — = sin requi
 | `healthLive`, `healthReady` | sin autenticación | sin autenticación | — |
 | `requestConsoleCode` | — | — | — |
 | `verifyConsoleCode` | — | — | — |
+| `requestConsoleLogin` | — | — | — |
+| `verifyConsoleLogin` | — | — | — |
+| `changeConsolePassword` | ✗ | ✗ | — |
 | `logoutConsole` | ✗ | ✗ | — |
 | `getConsoleAccount` | ✗ | ✗ | — |
 | `deleteConsoleAccount` | ✗ | ✗ | — |
@@ -294,8 +297,8 @@ Jerarquía de roles dentro de una organización: `OWNER` ⊃ `ADMIN` ⊃ `VIEWER
 
 | Operación | Requisito |
 |---|---|
-| `requestConsoleCode`, `verifyConsoleCode` | sin sesión |
-| `logoutConsole`, `getConsoleAccount`, `deleteConsoleAccount`, `listConsoleOrganizations`, `createConsoleOrganization` | cualquier sesión de consola |
+| `requestConsoleCode`, `verifyConsoleCode`, `requestConsoleLogin`, `verifyConsoleLogin` | sin sesión |
+| `logoutConsole`, `getConsoleAccount`, `changeConsolePassword`, `deleteConsoleAccount`, `listConsoleOrganizations`, `createConsoleOrganization` | cualquier sesión de consola |
 | `getConsoleOrganization`, `listConsoleProjects`, `getConsoleProject`, `listConsoleApiKeys` | `VIEWER` o superior en la organización |
 | `createConsoleProject`, `updateConsoleProject`, `createConsoleApiKey`, `revokeConsoleApiKey` | `ADMIN` o superior |
 

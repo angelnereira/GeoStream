@@ -17,7 +17,8 @@ Estas rutas son archivos reales generados en el build a partir de `docs-manifest
 
 | Ruta | Contenido |
 |---|---|
-| `/` | Landing, estado y consola (la consola es una pantalla de la app, sin ruta propia) |
+| `/` | Landing y estado |
+| `/#/console` | Consola de desarrolladores (ruta de la app: recargar o abrir el enlace retoma la sesión) |
 | `/docs/api.html` | Referencia de la API REST |
 | `/docs/<guía>.html` | `07_REST_API`, `08_STREAM_PROTOCOL`, `09_VALIDATION_ERRORS`, `12_FLUTTER_SDK`, `13_MAPS_PROVIDERS`, `15_INTEGRATION_GUIDE` |
 | `/contracts/geostream.v1.yaml` | OpenAPI (hoy `1.0.0-draft.2`, un borrador) |

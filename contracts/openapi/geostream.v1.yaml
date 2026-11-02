@@ -2181,8 +2181,8 @@ paths:
     post:
       operationId: verifyConsoleCode
       tags: [Console]
-      summary: Canjear el código y abrir sesión.
-      description: 'Si la cuenta no existe se crea (exige `accept_terms: true`). Todo fallo —código incorrecto, caducado, ya usado o con intentos agotados— responde igual: 401 `UNAUTHENTICATED`.'
+      summary: Canjear el código de registro, fijar la contraseña y abrir sesión.
+      description: 'Segundo paso de crear una cuenta o de recuperar el acceso a una existente. Si la cuenta no existe se crea (exige `accept_terms: true`); si ya existe, `password` **sustituye** a la contraseña (el control del correo es la prueba, ADR-0037). La contraseña se valida antes de gastar el código: si no cumple la política, responde 422 y el mismo código sigue valiendo. Todo fallo del código —incorrecto, caducado, ya usado o con intentos agotados— responde igual: 401 `UNAUTHENTICATED`.'
       x-gs-phase: F15
       x-gs-auth: { application: none, device: none }
       x-gs-console: none
@@ -2192,6 +2192,59 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/ConsoleVerifyRequest' }
+      responses:
+        '200':
+          description: Sesión abierta.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/auth/login:
+    post:
+      operationId: requestConsoleLogin
+      tags: [Console]
+      summary: Primer paso de iniciar sesión, con correo y contraseña.
+      description: 'Si la contraseña es correcta, envía por correo el código del segundo paso. Responde siempre 202 con el mismo cuerpo —contraseña incorrecta, cuenta inexistente, cuenta sin contraseña o deshabilitada—: no revela qué correos están registrados. Una cuenta inexistente cuesta el mismo trabajo que una existente.'
+      x-gs-phase: F15
+      x-gs-auth: { application: none, device: none }
+      x-gs-console: none
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsoleLoginRequest' }
+      responses:
+        '202':
+          description: Aceptado; si los datos son correctos recibirá un código.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsoleCodeAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/auth/login/verify:
+    post:
+      operationId: verifyConsoleLogin
+      tags: [Console]
+      summary: Segundo paso de iniciar sesión, con el código recibido.
+      description: 'Canjea el código enviado tras una contraseña correcta y abre la sesión. Un código de registro no sirve aquí, ni uno de acceso sirve para registrarse. Todo fallo responde igual: 401 `UNAUTHENTICATED`.'
+      x-gs-phase: F15
+      x-gs-auth: { application: none, device: none }
+      x-gs-console: none
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsoleLoginVerifyRequest' }
       responses:
         '200':
           description: Sesión abierta.
@@ -2255,6 +2308,32 @@ paths:
           description: Cuenta borrada.
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /v1/console/me/password:
+    put:
+      operationId: changeConsolePassword
+      tags: [Console]
+      summary: Cambiar la contraseña de la cuenta.
+      description: 'Exige la contraseña actual (una cuenta que nunca tuvo una queda exenta: su sesión es la prueba) y aplica la política. Cierra todas las demás sesiones de la cuenta; la que cambia la contraseña sigue abierta. Contraseña actual incorrecta: 403 `PERMISSION_DENIED`.'
+      x-gs-phase: F15
+      x-gs-auth: { application: forbidden, device: forbidden }
+      x-gs-console: session
+      security:
+        - consoleSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeConsolePasswordRequest' }
+      responses:
+        '204':
+          description: Contraseña cambiada.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -4428,20 +4507,51 @@ components:
     ConsoleVerifyRequest:
       type: object
       additionalProperties: false
+      required: [email, code, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        code: { type: string, pattern: '^[0-9]{6,10}$' }
+        password:
+          type: string
+          minLength: 10
+          maxLength: 128
+          writeOnly: true
+          description: 'Contraseña de la cuenta, de 10 a 128 caracteres. Se rechazan una sola letra repetida, el propio correo y las contraseñas más comunes. No hay reglas de clases de caracteres: cuenta la longitud.'
+        accept_terms:
+          type: boolean
+          description: Obligatorio como `true` cuando la cuenta aún no existe.
+    ConsoleLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 1, maxLength: 128, writeOnly: true }
+
+    ConsoleLoginVerifyRequest:
+      type: object
+      additionalProperties: false
       required: [email, code]
       properties:
         email: { type: string, format: email, maxLength: 254 }
         code: { type: string, pattern: '^[0-9]{6,10}$' }
-        accept_terms:
-          type: boolean
-          description: Obligatorio como `true` cuando la cuenta aún no existe.
+
+    ChangeConsolePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, minLength: 0, maxLength: 128, writeOnly: true }
+        new_password: { type: string, minLength: 10, maxLength: 128, writeOnly: true }
+
     ConsoleAccount:
       type: object
-      required: [id, email, status, created_at]
+      required: [id, email, status, has_password, created_at]
       properties:
         id: { $ref: '#/components/schemas/AccountId' }
         email: { type: string, format: email }
         status: { type: string, enum: [ACTIVE, DISABLED] }
+        has_password: { type: boolean, description: 'Falsa en una cuenta anterior a las contraseñas, hasta que recupere el acceso con el código del correo.' }
         created_at: { $ref: '#/components/schemas/Timestamp' }
     ConsoleSession:
       type: object

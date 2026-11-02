@@ -30,6 +30,7 @@ class ConsoleSessionInfo {
     required this.token,
     required this.email,
     required this.created,
+    this.hasPassword = true,
   });
 
   /// Token `gcs_…`: solo vive en memoria.
@@ -40,6 +41,9 @@ class ConsoleSessionInfo {
 
   /// Si esta verificación creó la cuenta.
   final bool created;
+
+  /// Si la cuenta ya tiene contraseña.
+  final bool hasPassword;
 }
 
 /// Organización de la cuenta.
@@ -74,14 +78,29 @@ class Organization {
 /// Proyecto (aplicación) de una organización.
 class Project {
   /// Crea el proyecto.
-  const Project({required this.id, required this.name, required this.status});
+  const Project({
+    required this.id,
+    required this.name,
+    required this.status,
+    this.allowedOrigins = const [],
+  });
 
   /// Lee la respuesta del contrato.
   factory Project.fromJson(Map<String, Object?> json) => Project(
     id: json['id']! as String,
     name: json['name']! as String,
     status: json['status']! as String,
+    allowedOrigins: [
+      for (final o in (json['allowed_origins'] as List<Object?>? ?? const []))
+        o! as String,
+    ],
   );
+
+  /// Orígenes web que el proyecto declara (`http(s)://host[:puerto]`).
+  final List<String> allowedOrigins;
+
+  /// Si el proyecto está activo.
+  bool get active => status == 'ACTIVE';
 
   /// Identificador `app_…`.
   final String id;
@@ -102,6 +121,8 @@ class ApiKeyInfo {
     required this.prefix,
     required this.scopes,
     required this.revoked,
+    this.createdAt,
+    this.expiresAt,
   });
 
   /// Lee la respuesta del contrato.
@@ -111,7 +132,15 @@ class ApiKeyInfo {
     prefix: json['prefix']! as String,
     scopes: [for (final s in json['scopes']! as List<Object?>) s! as String],
     revoked: json['revoked_at'] != null,
+    createdAt: json['created_at'] as String?,
+    expiresAt: json['expires_at'] as String?,
   );
+
+  /// Fecha de creación (ISO 8601), si la respuesta la trae.
+  final String? createdAt;
+
+  /// Fecha de caducidad (ISO 8601), o `null` si no caduca.
+  final String? expiresAt;
 
   /// Identificador `key_…`.
   final String id;
@@ -172,17 +201,105 @@ class ConsoleApi {
     await _send('POST', 'v1/console/auth/code', body: {'email': email});
   }
 
-  /// Canjea el código y abre la sesión.
+  /// Canjea el código de registro, fija la contraseña y abre la sesión. En una cuenta que ya existe sustituye
+  /// la contraseña: es la recuperación por correo (ADR-0037).
   Future<ConsoleSessionInfo> verify(
     String email,
     String code, {
+    required String password,
     required bool acceptTerms,
   }) async {
     final json = await _send(
       'POST',
       'v1/console/auth/verify',
-      body: {'email': email, 'code': code, 'accept_terms': acceptTerms},
+      body: {
+        'email': email,
+        'code': code,
+        'password': password,
+        'accept_terms': acceptTerms,
+      },
     );
+    return _open(json);
+  }
+
+  /// Primer paso de iniciar sesión: comprueba la contraseña. Responde igual sea cual sea el resultado; el
+  /// código solo llega al correo si la contraseña era correcta.
+  Future<void> login(String email, String password) async {
+    await _send(
+      'POST',
+      'v1/console/auth/login',
+      body: {'email': email, 'password': password},
+    );
+  }
+
+  /// Segundo paso de iniciar sesión: canjea el código enviado tras una contraseña correcta.
+  Future<ConsoleSessionInfo> verifyLogin(String email, String code) async {
+    final json = await _send(
+      'POST',
+      'v1/console/auth/login/verify',
+      body: {'email': email, 'code': code},
+    );
+    return _open(json);
+  }
+
+  /// Retoma una sesión guardada: usa el token y confirma con el servidor que sigue vigente.
+  Future<ConsoleSessionInfo> restore(String token) async {
+    _token = token;
+    try {
+      final json = await _send('GET', 'v1/console/me', auth: true);
+      return ConsoleSessionInfo(
+        token: token,
+        email: json['email']! as String,
+        created: false,
+        hasPassword: json['has_password'] != false,
+      );
+    } on ConsoleApiException {
+      _token = null;
+      rethrow;
+    }
+  }
+
+  /// Cambia la contraseña. Cierra las demás sesiones de la cuenta.
+  Future<void> changePassword(String current, String next) async {
+    await _send(
+      'PUT',
+      'v1/console/me/password',
+      auth: true,
+      body: {'current_password': current, 'new_password': next},
+    );
+  }
+
+  /// Borra la cuenta y sus datos personales.
+  Future<void> deleteAccount() async {
+    try {
+      await _send('DELETE', 'v1/console/me', auth: true);
+    } finally {
+      _token = null;
+    }
+  }
+
+  /// Cambia el nombre, el estado o los orígenes de un proyecto.
+  Future<Project> updateProject(
+    String organizationId,
+    String projectId, {
+    String? name,
+    bool? active,
+    List<String>? allowedOrigins,
+  }) async {
+    final json = await _send(
+      'PATCH',
+      'v1/console/organizations/$organizationId/projects/$projectId',
+      auth: true,
+      body: {
+        'name': ?name,
+        if (active != null) 'status': active ? 'ACTIVE' : 'DISABLED',
+        'allowed_origins': ?allowedOrigins,
+      },
+    );
+    return Project.fromJson(json);
+  }
+
+  ConsoleSessionInfo _open(Map<String, Object?> json) {
     final token = json['token'];
     final account = json['account'];
     if (token is! String || account is! Map<String, Object?>) {
@@ -193,6 +310,7 @@ class ConsoleApi {
       token: token,
       email: account['email']! as String,
       created: json['created'] == true,
+      hasPassword: account['has_password'] != false,
     );
   }
 
@@ -259,12 +377,17 @@ class ConsoleApi {
     String projectId, {
     required String label,
     required List<String> scopes,
+    int? expiresInDays,
   }) async {
     final json = await _send(
       'POST',
       'v1/console/organizations/$organizationId/projects/$projectId/keys',
       auth: true,
-      body: {'label': label, 'scopes': scopes},
+      body: {
+        'label': label,
+        'scopes': scopes,
+        'expires_in_days': ?expiresInDays,
+      },
     );
     final key = json['key'];
     final secret = json['secret'];

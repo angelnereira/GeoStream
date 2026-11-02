@@ -215,9 +215,11 @@ Ver `25_EDGE_DEVICES.md`. Todas exigen `edge_enabled` en la política del tenant
 
 ### 9.13 Consola de desarrolladores (F15)
 
-Contrato: `contracts/openapi/geostream.v1.yaml`, etiqueta `Console` (15 operaciones bajo `/v1/console`). Decisión: ADR-0033 §3–§4 y ADR-0036. Autorización: `06` §8.6.
+Contrato: `contracts/openapi/geostream.v1.yaml`, etiqueta `Console` (18 operaciones bajo `/v1/console`). Decisión: ADR-0033 §3–§4, ADR-0036 y ADR-0037. Autorización: `06` §8.6.
 
-- **Registro e inicio de sesión son una sola ceremonia.** `POST /v1/console/auth/code` responde siempre `202 {"accepted": true}` con el mismo cuerpo exista o no la cuenta; `POST /v1/console/auth/verify` canjea el código, crea la cuenta si hace falta (con `accept_terms: true`) y devuelve el token. Todo fallo de verificación es `401 UNAUTHENTICATED`, sin distinguir la causa.
+- **Registro.** `POST /v1/console/auth/code` responde siempre `202 {"accepted": true}` con el mismo cuerpo exista o no la cuenta; `POST /v1/console/auth/verify` canjea el código, **fija la contraseña**, crea la cuenta si hace falta (con `accept_terms: true`) y devuelve el token. En una cuenta que ya existe, el mismo paso sustituye la contraseña: es la recuperación por correo (ADR-0037). La contraseña se valida antes de gastar el código (`422` con `errors[].field = password`). Todo fallo del código es `401 UNAUTHENTICATED`, sin distinguir la causa.
+- **Inicio de sesión en dos pasos.** `POST /v1/console/auth/login` (correo y contraseña) responde `202` igual ante una contraseña incorrecta, una cuenta inexistente, una sin contraseña o una deshabilitada, y solo envía el código si la contraseña es correcta; `POST /v1/console/auth/login/verify` canjea ese código y devuelve el token. Un código de registro no sirve aquí ni al revés.
+- **Cambiar la contraseña**: `PUT /v1/console/me/password` exige la actual (`403 PERMISSION_DENIED` si no coincide), aplica la política y cierra las demás sesiones.
 - **Sesión**: token opaco `gcs_…` en `Authorization: Bearer`; sin cookies. Cierra con `POST /v1/console/auth/logout`.
 - **Organización = tenant; proyecto = aplicación.** Crear una organización (`201`) crea el tenant con la política por defecto y hace `OWNER` a la cuenta; el límite es `GS_CONSOLE_MAX_ORGS_PER_ACCOUNT` (429 al superarlo).
 - **API keys**: `createConsoleApiKey` devuelve `secret` una sola vez (`Cache-Control: no-store`); la lista y el resto de operaciones solo muestran el `prefix`. No hay valor por defecto de `scopes`.

@@ -226,6 +226,7 @@ Solo se leen cuando el proceso tiene el rol `console`. El rol exige `GS_CONSOLE_
 | `GS_CONSOLE_EMAIL_DIR` | string | — | solo con `file` | Directorio donde `file` escribe los mensajes |
 | `GS_CONSOLE_MAX_ORGS_PER_ACCOUNT` | int | 3 | 1..=100 | Organizaciones que una cuenta puede crear por autoservicio |
 | `GS_CONSOLE_SIGNUP_RPM_PER_IP` | int | 10 | 1..=600 | Altas de cuenta y de organización por minuto e IP |
+| `GS_CONSOLE_PASSWORD_ITERATIONS` | int | 600000 | 100000..=5000000 | Iteraciones de PBKDF2-HMAC-SHA256 de las contraseñas nuevas (ADR-0037). Los hashes ya guardados conservan las suyas y se actualizan al iniciar sesión. Cada comprobación cuesta CPU a propósito: subirla encarece también cada intento de inicio de sesión |
 
 ## 3. Restricciones por entorno
 

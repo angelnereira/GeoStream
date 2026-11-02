@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../platform/link_opener.dart';
 import '../console/console_api.dart';
+import '../platform/session_store.dart';
 import 'console_page.dart';
-import 'developer_console.dart';
 import '../status/status_client.dart';
 import 'status_card.dart';
 
@@ -68,9 +68,9 @@ const List<({String name, bool today, String note})> _capabilities = [
     note: 'Estado y distribución compartidos.',
   ),
   (
-    name: 'Consola con registro e inicio de sesión',
-    today: false,
-    note: 'La pantalla y el servidor están listos; se activa en cuanto se configura el envío de correos con el código.',
+    name: 'Consola con cuenta, contraseña y API keys',
+    today: true,
+    note: 'Entras con contraseña y un código por correo; creas organizaciones y proyectos y administras varias API keys.',
   ),
   (
     name: 'Mapa en vivo con datos reales',
@@ -122,13 +122,14 @@ class LandingPage extends StatelessWidget {
                     if (console != null) ...[
                       const SizedBox(height: 16),
                       FilledButton.icon(
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => DeveloperConsole(api: console!),
-                          ),
-                        ),
+                        onPressed: () =>
+                            Navigator.of(context).pushNamed('/console'),
                         icon: const Icon(Icons.vpn_key_outlined),
-                        label: const Text('Crear cuenta y obtener una API key'),
+                        label: Text(
+                          createSessionStore().read() == null
+                              ? 'Crear cuenta y obtener una API key'
+                              : 'Abrir mi consola',
+                        ),
                       ),
                     ],
                     if (createClient != null) ...[
@@ -317,7 +318,7 @@ class _Steps extends StatelessWidget {
       (
         '1',
         'Pide acceso',
-        'Crea tu cuenta con tu correo en la consola (sin contraseñas), crea una organización y un proyecto, y genera tu API key. Mientras la consola no esté activa, el alta la hace el operador.',
+        'Crea tu cuenta en la consola con tu correo y una contraseña, crea una organización y un proyecto, y genera las API keys que necesites. Entras con tu contraseña y un código que te enviamos al correo.',
       ),
       (
         '2',

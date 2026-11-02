@@ -6,6 +6,7 @@ import 'src/api/api_client.dart';
 import 'src/console/console_api.dart';
 import 'src/status/status_client.dart';
 import 'src/ui/console_page.dart';
+import 'src/ui/developer_console.dart';
 import 'src/ui/landing_page.dart';
 
 void main() {
@@ -58,6 +59,17 @@ class PortalApp extends StatelessWidget {
   /// Cliente de la API para el acceso con API key.
   final ApiClientFactory? createClient;
 
+  Route<void> _route(RouteSettings settings) {
+    final Widget page = settings.name == '/console' && console != null
+        ? DeveloperConsole(api: console!)
+        : LandingPage(
+            status: status,
+            createClient: createClient,
+            console: console,
+          );
+    return MaterialPageRoute<void>(settings: settings, builder: (_) => page);
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -72,11 +84,11 @@ class PortalApp extends StatelessWidget {
         brightness: Brightness.dark,
         colorSchemeSeed: const Color(0xFF0B6E4F),
       ),
-      home: LandingPage(
-        status: status,
-        createClient: createClient,
-        console: console,
-      ),
+      // La consola tiene su propia dirección (`/#/console`): recargar la página o volver a ella retoma la
+      // sesión en lugar de caer en la página de inicio. Solo se construye la ruta pedida: apilar la portada
+      // debajo (fuera de pantalla y sin layout) hace fallar a `SelectionArea` al medirla.
+      onGenerateInitialRoutes: (name) => [_route(RouteSettings(name: name))],
+      onGenerateRoute: _route,
     );
   }
 }

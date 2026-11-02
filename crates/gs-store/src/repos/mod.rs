@@ -19,7 +19,9 @@ pub mod tenant_repo;
 pub use api_key_repo::ApiKeyRepository;
 pub use app_repo::ApplicationRepository;
 pub use audit_repo::AuditRepository;
-pub use console_repo::{ConsoleRepository, OrganizationMembership, OtpAttempt, OtpIssue};
+pub use console_repo::{
+    ConsoleRepository, LoginRecord, OrganizationMembership, OtpAttempt, OtpIssue,
+};
 pub use device_repo::{DeviceRepository, UpsertDeviceParams};
 pub use history_repo::{CellRow, HistoryRepository, LocationPointRow, TracePoint};
 pub use idempotency_repo::{

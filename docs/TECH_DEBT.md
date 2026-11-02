@@ -27,6 +27,9 @@
 | R-5 | `FR-SES-005` figuraba «cumplido» sin que nada ejecutara la expiración | `TRACEABILITY.md` citaba solo pruebas del caso de uso | **Corregido** (este PR): la fila cita la prueba del worker |
 | R-6 | El límite por IP del registro depende de `X-Forwarded-For` | nginx del portal lo sustituye por la última entrada; **una llamada directa a la API** con la cabecera falsificada lo evade | Abierto: ADR sobre qué proxies son de confianza |
 | R-7 | `Idempotency-Key` se ignora en silencio si no hay clave de cifrado de datos | Mismo comportamiento que `/v1/sessions` | Abierto: rechazar con error en lugar de ignorar |
+| R-8 | Contraseñas de la consola con PBKDF2 en lugar de Argon2id | Sin crate aprobado (`19` §6.2); ADR-0037 | Abierto: aprobar `argon2` por ADR y migrar en el inicio de sesión (el hash lleva su esquema) |
+| R-9 | Sin bloqueo por cuenta tras contraseñas erróneas; solo límite por IP | ADR-0037 | Abierto: contador por cuenta con bloqueo temporal, o el segundo paso lo cubre |
+| R-10 | El coste de 600 000 iteraciones no se ha medido en Railway | Solo se probó con 1 000 en pruebas | Abierto: medir un inicio de sesión en producción y ajustar `GS_CONSOLE_PASSWORD_ITERATIONS` |
 
 ## 3. Retención y limpieza que `11` §5 promete
 
@@ -52,8 +55,6 @@ Sigue sin implementar:
 | 9 | Cuenta de consola separada de los usuarios finales (FR-CON-002) y reglas del usuario sobre su ubicación (FR-PRT-006) | | Sin tests ni implementación específica |
 
 ## 5. Verificaciones que no se han hecho
-- La imagen Docker completa del portal no se reconstruyó tras añadir la consola (sí se probó nginx real con la configuración renderizada).
-- La navegación landing → consola en un navegador real: solo cubierta por pruebas de widgets.
 - Un envío real de correo de punta a punta con una persona distinta del propietario.
 - Latencia de ingesta y snapshot frente al objetivo de p95 < 300 ms (NFR); no se ha medido.
 

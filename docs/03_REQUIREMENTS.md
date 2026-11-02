@@ -90,10 +90,15 @@ Cada requisito tiene el formato:
 - Descripción: endpoints de administración para una consola SaaS.
 - Aceptación: requiere ADR y modelo de amenazas propio. **Activado el 2026-10-31** por DR-20261031-05: ADR-0033 y las amenazas T-32 a T-37 de `10`; el detalle verificable está en FR-CON-001 a FR-CON-008.
 
-#### FR-CON-001 · MUST · F15 — Registro e inicio de sesión con correo y código
-- Descripción: una persona se registra e inicia sesión con su correo y un código de un solo uso (ADR-0036); la sesión es un token opaco con caducidad. «Entrar con Gravital» (OIDC, T-F15-20) es un segundo método posterior.
+#### FR-CON-001 · MUST · F15 — Registro e inicio de sesión con correo, contraseña y código
+- Descripción: una persona se registra con su correo, una contraseña y un código de un solo uso, e inicia sesión con correo y contraseña más un código por correo (ADR-0036, ADR-0037); la sesión es un token opaco con caducidad. «Entrar con Gravital» (OIDC, T-F15-20) es un segundo método posterior.
 - Aceptación: un código correcto crea la sesión; uno incorrecto, caducado, ya usado o tras agotar los intentos la rechaza con 401; el código nunca se guarda en claro; la respuesta de pedir un código es idéntica exista o no la cuenta.
 - Ref: ADR-0036 §2–§3; `17` §2.12.
+
+#### FR-CON-013 · MUST · F15 — Contraseña y acceso en dos pasos
+- Descripción: la cuenta tiene una contraseña (de 10 a 128 caracteres, sin una letra repetida, sin ser el correo ni una de las más comunes) guardada solo como hash PBKDF2-HMAC-SHA256 con sal; iniciar sesión exige la contraseña y después el código enviado a ese correo; cambiar la contraseña exige la actual y cierra las demás sesiones.
+- Aceptación: una contraseña incorrecta, una cuenta inexistente y una cuenta sin contraseña responden idéntico y no envían correo; el código de registro no abre una sesión de acceso ni al revés; una contraseña débil se rechaza sin gastar el código; tras cambiarla la anterior deja de valer y las demás sesiones se cierran; ni la contraseña ni el hash aparecen en logs; el hash de un vector conocido coincide con una implementación independiente.
+- Ref: ADR-0037; `10` T-44, T-45; `17` §2.12.
 
 #### FR-CON-002 · MUST · F15 — Cuenta de consola separada de los usuarios finales
 - Descripción: la identidad de consola es el par `(iss, sub)` del token; una cuenta de consola nunca es un subject ni un dispositivo y no puede publicar, suscribirse ni leer ubicaciones.

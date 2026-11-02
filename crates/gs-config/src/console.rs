@@ -68,4 +68,6 @@ pub struct ConsoleConfig {
     pub email_daily_cap: u64,
     pub max_orgs_per_account: u64,
     pub signup_rpm_per_ip: u64,
+    /// Rounds of PBKDF2-HMAC-SHA256 for new password hashes (`GS_CONSOLE_PASSWORD_ITERATIONS`).
+    pub password_iterations: u64,
 }
