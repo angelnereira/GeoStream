@@ -340,6 +340,7 @@ impl ConsoleAuth {
             .await
         {
             // Only the keyed hash prefix identifies the request; never the address.
+            metrics::counter!("gs_console_mail_failed_total").increment(1);
             warn!(
                 target: "gs_service::console",
                 email_hash = %short_hash(&email_hash),

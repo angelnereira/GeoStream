@@ -91,7 +91,9 @@ Labels permitidos: los listados. Prohibidos: cualquier ID de sesión, miembro, d
 | `gs_db_pool_connections` | gauge | `state` | `idle`, `in_use` |
 | `gs_sessions_active` | gauge | — | Actualizado por el worker cada minuto |
 | `gs_worker_job_duration_seconds` | histogram | `job` | |
-| `gs_worker_job_rows_total` | counter | `job` | |
+| `gs_worker_job_rows_total` | counter | `job` | Filas tratadas. `job` ∈ `session_expiry`, `idempotency_purge`, `console_purge` |
+| `gs_worker_job_failures_total` | counter | `job` | Ejecuciones fallidas del job; alertar si crece de forma sostenida |
+| `gs_console_mail_failed_total` | counter | — | Códigos de inicio de sesión que el proveedor de correo no aceptó (sin dirección ni código); alertar si crece |
 | `gs_webhook_deliveries_total` | counter | `result` | `delivered`, `retry`, `failed`, `disabled` |
 | `gs_webhook_backlog` | gauge | — | Entregas pendientes vencidas |
 | `gs_geofence_evaluations_total` | counter | — | F11 |

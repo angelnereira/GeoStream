@@ -15,6 +15,7 @@
 | D-7 | Registros DNS de Squarespace | El TXT `_railway-verify.console.geostream` llegó con un punto de más | Dejar un solo TXT sin el punto final |
 | D-8 | `--save` de Redis en Railway | Persistencia del almacén efímero; nunca se confirmó | Decidir si se activa |
 | D-9 | GitHub Actions detenido por facturación | **No hay CI** desde 2026-10-20: ningún PR se verifica automáticamente | Resolver la facturación |
+| D-10 | Cómo ve el cliente final la entrega en tiempo real | El snapshot REST solo lo lee una aplicación; el stream en producción es solo Protobuf (`DR-20261102-01`) | Elegir entre las 4 opciones; recomendada: relevo del snapshot por el backend de Plenty-Pay ya, y WebSocket con Protobuf (T-F8-05) después |
 
 ## 2. Riesgo de corrección en producción (hacer primero)
 
@@ -23,7 +24,7 @@
 | R-1 | El rol `worker` no hacía nada: las sesiones nunca pasaban a `EXPIRED` por tiempo y no se purgaba nada | `gs-worker/src/lib.rs` tenía 2 líneas; `expiry_loop` no tenía ningún llamador | **Corregido** (este PR): barrido de expiración y purga horaria de idempotencia y datos vencidos de la consola |
 | R-2 | `POST /v1/ingest/locations` no funcionaba con el contrato (enums y antigüedad 0) | Reproducido con `curl`; ninguna prueba HTTP lo cubría | **Corregido** (PR #30) |
 | R-3 | No hay una comprobación automática de que cada operación del OpenAPI tenga una prueba HTTP validada contra el contrato. R-2 pasó inadvertido por eso | `grep` de las pruebas: no existe ese chequeo; hay operaciones de `pools`, `analytics`, `history`, `edge` y `tools` sin prueba HTTP propia | Abierto: añadir un chequeo a `geostream-tools` que falle si una operación `x-gs-phase` ya implementada no tiene prueba |
-| R-4 | Sin métricas ni alerta de los jobs del worker ni de fallos de envío de correo | Hoy solo hay avisos en el log (así se encontró el 403 de Resend) | Abierto: contadores `gs_worker_*` y `gs_console_mail_failed_total` y una alerta |
+| R-4 | Métricas de los jobs del worker y de fallos de envío de correo | Se descubrió el 403 de Resend solo por el log | **Parcial** (este PR): `gs_worker_job_duration_seconds`, `gs_worker_job_rows_total`, `gs_worker_job_failures_total` (probadas) y `gs_console_mail_failed_total` (instrumentada, sin prueba propia). Falta definir y desplegar la alerta |
 | R-5 | `FR-SES-005` figuraba «cumplido» sin que nada ejecutara la expiración | `TRACEABILITY.md` citaba solo pruebas del caso de uso | **Corregido** (este PR): la fila cita la prueba del worker |
 | R-6 | El límite por IP del registro depende de `X-Forwarded-For` | nginx del portal lo sustituye por la última entrada; **una llamada directa a la API** con la cabecera falsificada lo evade | Abierto: ADR sobre qué proxies son de confianza |
 | R-7 | `Idempotency-Key` se ignora en silencio si no hay clave de cifrado de datos | Mismo comportamiento que `/v1/sessions` | Abierto: rechazar con error en lugar de ignorar |
@@ -40,7 +41,7 @@ El worker ya hace expiración e idempotencia. Siguen sin implementar:
 
 | Prioridad | Qué | Tarea | Nota |
 |---|---|---|---|
-| 1 | Mapa en vivo por WebSocket y enlace de seguimiento para el cliente final (sin exponer la API key) | T-F15-12 (parte), `15` §3.2 | Necesita Dart generado desde Protobuf. Es el caso «como Uber/inDrive» |
+| 1 | Mapa en vivo por WebSocket y enlace de seguimiento para el cliente final (sin exponer la API key) | T-F15-12 (parte), `15` §3.2, `DR-20261102-01` | Necesita Dart generado desde Protobuf (T-F8-05). Es el caso «como Uber/inDrive». Mientras tanto, el relevo del snapshot por el backend del integrador funciona hoy |
 | 2 | Webhooks | T-F8-01 | Outbox transaccional, firma, SSRF. Habilita «llegó» por webhook |
 | 3 | Geocercas en el servidor | T-F11-* | Hoy se evalúan en el cliente |
 | 4 | Panel de uso y cuotas | FR-CON-006, FR-CON-007 | |

@@ -10,8 +10,21 @@ use std::time::Duration;
 use gs_service::gs_store::repos::IdempotencyRepository;
 use gs_service::gs_store::{ConsoleRepository, PgPool};
 use gs_service::{BusBackend, EphemeralBackend, expire_due_sessions_with_bus};
+use std::time::Instant;
+
 use time::OffsetDateTime;
 use tracing::{info, warn};
+
+/// Records one run of a job: its duration, the rows it handled and whether it failed. The label is
+/// the job name only (`docs/16` §4.2): never an identifier.
+fn record_job(job: &'static str, started: Instant, rows: u64, failed: bool) {
+    metrics::histogram!("gs_worker_job_duration_seconds", "job" => job)
+        .record(started.elapsed().as_secs_f64());
+    metrics::counter!("gs_worker_job_rows_total", "job" => job).increment(rows);
+    if failed {
+        metrics::counter!("gs_worker_job_failures_total", "job" => job).increment(1);
+    }
+}
 
 /// How often the maintenance purges run (`docs/11` §5: idempotency cleanup is hourly).
 pub const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(3600);
@@ -54,15 +67,18 @@ pub async fn expire_sessions_once(
     key_prefix: &str,
     batch_size: u32,
 ) -> usize {
+    let started = Instant::now();
     match expire_due_sessions_with_bus(pool, ephemeral, bus, key_prefix, batch_size).await {
         Ok(expired) => {
             if !expired.is_empty() {
                 info!(count = expired.len(), "sessions expired");
             }
+            record_job("session_expiry", started, expired.len() as u64, false);
             expired.len()
         }
         Err(error) => {
             warn!(error = %error, "session expiry sweep failed");
+            record_job("session_expiry", started, 0, true);
             0
         }
     }
@@ -72,13 +88,27 @@ pub async fn expire_sessions_once(
 /// codes, sessions and counters. Each purge is independent, so one failing does not stop the other.
 pub async fn run_maintenance_once(pool: &PgPool) -> MaintenanceReport {
     let mut report = MaintenanceReport::default();
+    let started = Instant::now();
     match IdempotencyRepository::purge_expired(pool, OffsetDateTime::now_utc()).await {
-        Ok(removed) => report.idempotency_records = removed,
-        Err(_) => warn!("idempotency purge failed"),
+        Ok(removed) => {
+            report.idempotency_records = removed;
+            record_job("idempotency_purge", started, removed, false);
+        }
+        Err(_) => {
+            warn!("idempotency purge failed");
+            record_job("idempotency_purge", started, 0, true);
+        }
     }
+    let started = Instant::now();
     match ConsoleRepository::purge_expired(pool).await {
-        Ok(removed) => report.console_rows = removed,
-        Err(_) => warn!("console purge failed"),
+        Ok(removed) => {
+            report.console_rows = removed;
+            record_job("console_purge", started, removed, false);
+        }
+        Err(_) => {
+            warn!("console purge failed");
+            record_job("console_purge", started, 0, true);
+        }
     }
     if report.idempotency_records + report.console_rows > 0 {
         info!(
