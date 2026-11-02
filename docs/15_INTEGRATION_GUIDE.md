@@ -52,6 +52,7 @@ Reglas: usar `Idempotency-Key` derivada del ID del viaje; cerrar siempre la sesi
 - El cliente puede ser:
   - usuario de la app del integrador → alta directa con capacidades `{read}`;
   - visitante web sin cuenta → el backend crea un subject invitado (`external_subject_id = "guest:<id aleatorio del pedido>"`), lo agrega con `{read}` y le emite un token `platform=WEB` con scopes mínimos (`stream:connect`). Nunca exponer el `session_id` como único secreto de un enlace público: el enlace debe llevar a una página del integrador que obtenga el token.
+- **Seguimiento en vivo para el cliente (decisión DR-20261102-01, opción 1).** El snapshot REST solo lo lee una aplicación con `locations:read`: el navegador del cliente no puede. La página de seguimiento consulta **el backend del integrador** (cada 2–5 s) y este lee el snapshot con su API key y devuelve solo lo necesario (posición, rumbo y antigüedad del repartidor; nunca `member_id`, otros miembros ni la API key). Ejemplo ejecutable: `examples/tracking-relay-node` (§6.3). El tiempo real por WebSocket llega con T-F8-05.
 - El backend puede leer la ubicación con `locations:read` (snapshot) para calcular ETA con su proveedor de rutas.
 - Geocerca de destino (F11) para notificar "llegó" por webhook.
 
@@ -115,6 +116,15 @@ app.post("/geostream/token", requireUserSession, async (req, res) => {
   res.json({ access_token: t.access_token, expires_at: t.expires_at });
 });
 ```
+
+### 6.3 Relevo de seguimiento para el cliente final (Node.js, ejecutable)
+
+`examples/tracking-relay-node/relay.mjs` (sin dependencias, Node ≥ 20). Reglas que implementa y que debes mantener:
+
+- El enlace del cliente lleva un **token opaco propio del pedido**, nunca el `session_id` de GeoStream; un token desconocido o caducado da 404.
+- **Una lectura a GeoStream por sesión cada `CACHE_MS` (2 s)**, aunque miren cien clientes: el límite de la API key (`GS_REST_RATE_LIMIT_APP_RPM`, 6000 por minuto) es de todo el proyecto. La posición que ve el cliente puede ir hasta `CACHE_MS` por detrás.
+- Estados: `waiting` (el repartidor aún no comparte), `live` (`lat`, `lon`, `heading`, `age_s`), `finished` (sesión cerrada, expirada o inexistente: `404`/`409` de GeoStream). Cualquier otro fallo es `502 tracking_unavailable`, nunca un dato inventado.
+- La API key necesita `locations:read` y no sale del servidor.
 
 ### 6.2 Verificación de webhooks (Node.js)
 

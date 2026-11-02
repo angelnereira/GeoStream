@@ -15,7 +15,6 @@
 | D-7 | Registros DNS de Squarespace | El TXT `_railway-verify.console.geostream` llegó con un punto de más | Dejar un solo TXT sin el punto final |
 | D-8 | `--save` de Redis en Railway | Persistencia del almacén efímero; nunca se confirmó | Decidir si se activa |
 | D-9 | GitHub Actions detenido por facturación | **No hay CI** desde 2026-10-20: ningún PR se verifica automáticamente | Resolver la facturación |
-| D-10 | Cómo ve el cliente final la entrega en tiempo real | El snapshot REST solo lo lee una aplicación; el stream en producción es solo Protobuf (`DR-20261102-01`) | Elegir entre las 4 opciones; recomendada: relevo del snapshot por el backend de Plenty-Pay ya, y WebSocket con Protobuf (T-F8-05) después |
 
 ## 2. Riesgo de corrección en producción (hacer primero)
 
@@ -41,7 +40,7 @@ El worker ya hace expiración e idempotencia. Siguen sin implementar:
 
 | Prioridad | Qué | Tarea | Nota |
 |---|---|---|---|
-| 1 | Mapa en vivo por WebSocket y enlace de seguimiento para el cliente final (sin exponer la API key) | T-F15-12 (parte), `15` §3.2, `DR-20261102-01` | Necesita Dart generado desde Protobuf (T-F8-05). Es el caso «como Uber/inDrive». Mientras tanto, el relevo del snapshot por el backend del integrador funciona hoy |
+| 1 | Seguimiento en tiempo real por WebSocket para el cliente final | T-F8-05, `DR-20261102-01` | La opción 1 (relevo del snapshot, `examples/tracking-relay-node`) ya está **decidida y disponible**; esto es el paso a tiempo real, con Dart generado desde Protobuf |
 | 2 | Webhooks | T-F8-01 | Outbox transaccional, firma, SSRF. Habilita «llegó» por webhook |
 | 3 | Geocercas en el servidor | T-F11-* | Hoy se evalúan en el cliente |
 | 4 | Panel de uso y cuotas | FR-CON-006, FR-CON-007 | |
