@@ -12,9 +12,11 @@ hmac.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+metrics.workspace = true
 time.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 sqlx.workspace = true
+metrics-exporter-prometheus.workspace = true
 uuid.workspace = true

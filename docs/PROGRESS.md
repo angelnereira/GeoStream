@@ -105,6 +105,14 @@ Formato de cada entrada (más reciente arriba):
 - Defectos encontrados y corregidos: (1) el cuerpo de `/health/ready` divergía del contrato OpenAPI (`ReadinessStatus`); se alinea el código y se elimina `detail`. (2) `RedisBus::is_connected` era pasivo: tras reiniciar Redis, una instancia sin tráfico se quedaba «no lista» indefinidamente; la comprobación de readiness ahora hace `PING` activo en el bus y en el almacén.
 - Verificación: `cargo clippy --workspace --all-targets --all-features -- -D warnings` OK; `cargo test --workspace --all-features` 678 pruebas, 0 fallos; `geostream-tools all` OK. Con `geostream serve` real contra Valkey: arriba → 200 con `bus/ephemeral/postgresql: ok`; Valkey parado → 503 con `bus` y `ephemeral` en `failing`; Valkey de vuelta → 200 en ~1 s; con `memory` → 200 con `not_configured`. El log no contiene la URL de Redis.
 - Efecto en producción al fusionar: si Redis cae, la instancia deja de estar lista (503). Con una sola réplica en Railway, el healthcheck de despliegue falla si Redis no responde, que es lo deseado.
+### 2026-11-02 — Métricas del worker y decisión sobre el seguimiento del cliente final
+- Autor/agente: Angel Nereira (con agente de código).
+- Verificado en producción antes de empezar: el despliegue del PR #31 arrancó el worker (`worker started`, `batch_size=500`, `expiry_interval_s=15`) y los logs no muestran fallos de expiración ni de purga.
+- Qué: métricas de los jobs y del fallo de envío de correo (R-4 de `TECH_DEBT.md`, parcial: falta la alerta) y `DR-20261102-01`.
+- Hallazgo que condiciona el diseño: `getSnapshot` es solo de aplicación (`device: none`); un navegador de cliente no puede leerlo. El seguimiento en tiempo real para el cliente final necesita el stream con Protobuf (T-F8-05) o un relevo del backend del integrador. No se construyó un enlace público porque es una decisión de seguridad.
+- Verificación: clippy limpio; `cargo test --workspace` sin fallos; 3 pruebas del worker (una nueva para las métricas); `geostream-tools all` OK.
+- Sin verificar: `gs_console_mail_failed_total` no tiene prueba propia (está instrumentada en el mismo punto que el aviso del log).
+
 ### 2026-11-01 — Worker real y hoja de ruta de deuda técnica
 - Autor/agente: Angel Nereira (con agente de código).
 - Resultado: completado. Sin tarea nueva del roadmap: corrige un defecto de producción y deja escrita la deuda (`docs/TECH_DEBT.md`).

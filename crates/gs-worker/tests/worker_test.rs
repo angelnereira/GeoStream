@@ -24,6 +24,17 @@ async fn pool() -> sqlx::PgPool {
     pool
 }
 
+/// One recorder per test process: `metrics` allows a single global recorder.
+fn metrics_handle() -> &'static metrics_exporter_prometheus::PrometheusHandle {
+    static HANDLE: std::sync::OnceLock<metrics_exporter_prometheus::PrometheusHandle> =
+        std::sync::OnceLock::new();
+    HANDLE.get_or_init(|| {
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .install_recorder()
+            .expect("install recorder")
+    })
+}
+
 fn policy() -> SessionPolicy {
     SessionPolicy {
         default_max_members_one_to_many: 100,
@@ -197,4 +208,41 @@ async fn test_the_maintenance_purge_removes_only_what_can_no_longer_be_used() {
     };
     assert_eq!(count(old_key).await, 0);
     assert_eq!(count(fresh_key).await, 1);
+}
+
+#[tokio::test]
+async fn test_the_jobs_report_duration_rows_and_never_an_identifier() {
+    // covers: docs/16 §4.2 (gs_worker_job_*), NFR-OBS-002 (no identifiers in labels)
+    let handle = metrics_handle();
+    let pool = pool().await;
+    let (due, _) = new_session(&pool).await;
+    sqlx::query("UPDATE sessions SET expires_at = $1 WHERE id = $2")
+        .bind(OffsetDateTime::now_utc() - time::Duration::seconds(60))
+        .bind(due)
+        .execute(&pool)
+        .await
+        .expect("backdate");
+    expire_sessions_once(
+        &pool,
+        &EphemeralBackend::memory(),
+        &BusBackend::memory(),
+        "gs",
+        500,
+    )
+    .await;
+    run_maintenance_once(&pool).await;
+
+    let text = handle.render();
+    for expected in [
+        "gs_worker_job_duration_seconds_count{job=\"session_expiry\"}",
+        "gs_worker_job_rows_total{job=\"session_expiry\"}",
+        "gs_worker_job_rows_total{job=\"idempotency_purge\"}",
+        "gs_worker_job_rows_total{job=\"console_purge\"}",
+    ] {
+        assert!(text.contains(expected), "missing {expected} in:\n{text}");
+    }
+    assert!(
+        !text.contains(&due.to_string()) && !text.contains("ses_"),
+        "a session id reached the metrics"
+    );
 }
